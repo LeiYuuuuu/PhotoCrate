@@ -263,9 +263,13 @@ class XmpDialog(_Base):
         cards = QGridLayout()
         cards.setSpacing(8)
         c1 = StatCard("将新建 .xmp", "CREATE")
-        c1.set(str(len(plan.tasks)), unit="个")
-        c2 = StatCard("已有 .xmp（跳过）", "EXISTS", accent=p.warn)
-        c2.set(str(plan.skipped_exists), unit="张")
+        c1.set(str(plan.created), unit="个")
+        if plan.edited or not plan.skipped_exists:
+            c2 = StatCard("更新已有 .xmp", "UPDATE", accent=p.warn)
+            c2.set(str(plan.edited), unit="个")
+        else:
+            c2 = StatCard("已有 .xmp（跳过）", "EXISTS", accent=p.warn)
+            c2.set(str(plan.skipped_exists), unit="张")
         c3 = StatCard("非 RAW（跳过）", "NOT RAW", accent=p.ink3)
         c3.set(str(plan.skipped_no_raw), unit="张")
         c4 = StatCard("没有可写内容", "NOTHING", accent=p.ink3)
@@ -274,13 +278,15 @@ class XmpDialog(_Base):
             cards.addWidget(c, 0, i)
         self.body.addLayout(cards)
         self.body.addWidget(QLabel(f"<b>范围：</b>{scope_text}　　<b>内容：</b>{plan.spec_text.replace('写入 XMP：', '')}"))
-        self.body.addWidget(caption("只为 RAW 新建“文件名.xmp”，Lightroom / Capture One 等导入时会读取；照片原文件不会被改动。"
-                                    "旁边已有 .xmp（可能是修图记录）的照片会跳过，绝不改写。JPG / HEIC 不生成附属文件。"
-                                    "写入后可在「操作记录」页撤销（新建的 .xmp 会放入回收站）。", "faint", 8.5))
-        data = [(os.path.basename(t.raw), os.path.basename(t.xmp), "、".join(t.what), os.path.dirname(t.raw))
-                for t in plan.tasks]
+        self.body.addWidget(caption("只为 RAW 写“文件名.xmp”，Lightroom / Bridge / Capture One 会读取；照片原文件不会被改动。"
+                                    "已有 .xmp（可能是修图记录）时，勾选了“更新”才会改写其中这几项，其余内容原样保留，"
+                                    "改之前完整备份。JPG / HEIC 不生成附属文件。写入后可在「操作记录」页撤销"
+                                    "（新建的 .xmp 放入回收站，更新过的换回备份）。", "faint", 8.5))
+        data = [(os.path.basename(t.raw), os.path.basename(t.xmp), "更新" if t.mode == "edit" else "新建",
+                 "、".join(t.what), os.path.dirname(t.raw)) for t in plan.tasks]
+        colors = [p.warn if t.mode == "edit" else None for t in plan.tasks]
         panel = Panel("写入清单", "XMP MANIFEST", f"{len(data)} FILES", pad=6)
-        panel.body.addWidget(_table(_RowsModel(["RAW", "新建", "内容", "文件夹"], data, mono=(0, 1, 3))))
+        panel.body.addWidget(_table(_RowsModel(["RAW", ".xmp", "方式", "内容", "文件夹"], data, colors, mono=(0, 1, 4))))
         self.body.addWidget(panel, 1)
         bc = TacButton("取消", "secondary")
         bo = TacButton("确认写入", "primary", en="WRITE")

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ..analyzers.base import ANALYZERS, AnalysisContext, meta_analyzers, pixel_analyzers
-from ..analyzers.builtin import infer_missing_locations
+from ..analyzers.builtin import group_similar, infer_missing_locations, rating_feat
 from ..config import Settings, plugin_dirs, thumbs_dir, user_cache_dir, worker_count
 from .cache import FeatureCache
 from .dates import compile_patterns
@@ -23,8 +23,9 @@ from .geo import GeoService
 from .geotime import (TrackIndex, TrackPoint, describe_span, fill_locations, library_points, load_track_file,
                       parse_offset, reference_point_from_meta)
 from .places import AnnotationStore
-from .metadata import MetadataBackend, create_backend, exiftool_version, find_exiftool, merge_meta
-from .models import MemberFile, PhotoGroup
+from .metadata import (MetadataBackend, create_backend, exiftool_version, find_exiftool, merge_group_meta,
+                       merge_meta)
+from .models import MemberFile, PhotoGroup, file_signature
 from .pairing import pair_across_folders, renumber
 from .pixelwork import init_worker, process_task, thumb_path_for
 from .scanner import scan
@@ -224,9 +225,10 @@ class Library:
                 self.cache.put_meta_many(new)
             rep.meta_read = len(results)
         for g in groups:
-            # 主图优先，其次其他图片，最后 .xmp 附属文件
-            items = [d for f in meta_files(g) if (d := results.get(f.path) or cached.get(f.sig))]
-            g.meta = merge_meta(items)
+            # 主图优先，其次其他图片，最后 .xmp 附属文件（星级 / 色标以 .xmp 为准）
+            imgs = [d for f in meta_files(g) if not _is_xmp(f) and (d := results.get(f.path) or cached.get(f.sig))]
+            xmps = [d for f in meta_files(g) if _is_xmp(f) and (d := results.get(f.path) or cached.get(f.sig))]
+            g.meta = merge_group_meta(imgs, xmps)
         if cancel.is_set():
             self._stop_pool(pool, futures)
             return groups
@@ -344,7 +346,8 @@ class Library:
             geo=geo,
             date_patterns=compile_patterns(s.get("filename_patterns")),
             extras={"manual_places": self.annotations.get_many(sigs, "places"),
-                    "time_shifts": self.annotations.get_many(sigs, "timeshift")},
+                    "time_shifts": self.annotations.get_many(sigs, "timeshift"),
+                    "ratings": self.annotations.get_many(sigs, "rating")},
         )
         for a in meta_analyzers():
             for g in groups:
@@ -368,6 +371,13 @@ class Library:
                                                  int(s.get("gps_fill_minutes", 30)), default_tz)
         if s.get("geo_infer"):
             infer_missing_locations(groups, int(s.get("geo_infer_minutes", 30)))
+        self.regroup_similar(groups)
+
+    def regroup_similar(self, groups: list[PhotoGroup] | None = None) -> int:
+        """按当前设置重新做连拍 / 相似分组（只用缓存的指纹，几毫秒）。"""
+        s = self.settings
+        groups = self.groups if groups is None else groups
+        return group_similar(groups, float(s.get("similar_gap_seconds", 10)), int(s.get("similar_threshold", 12)))
 
     # ---- GPS 补全的参考数据 ------------------------------------------------
     def load_references(self, progress: Callable[[str], None] | None = None,
@@ -437,16 +447,22 @@ class Library:
 
     # ---- 文件移动后同步路径 ----------------------------------------------
     def apply_moves(self, mapping: dict[str, str]) -> None:
-        """mapping: 旧路径(normcase) → 新路径。"""
+        """mapping: 旧路径(normcase) → 新路径。文件名变了（批量重命名）时，把标注和缓存迁移到新指纹。"""
         if not mapping:
             return
+        rekey: dict[str, str] = {}
         for g in self.groups:
             for f in g.files:
                 new = mapping.get(os.path.normcase(os.path.abspath(f.path)))
                 if new:
+                    if os.path.basename(new).lower() != f.name.lower():
+                        rekey[f.sig] = file_signature(new, f.size, f.mtime_ns)
                     if f.path == g.primary:
                         g.primary = new
                     f.path = new
+        if rekey:
+            self.annotations.copy_keys(rekey)
+            self.cache.copy_keys(rekey)
 
     def remove_groups(self, gids: set[int]) -> None:
         """撤销"复制"等操作后，从库中去掉已不存在的文件（保留 gid 编号稳定）。"""
@@ -486,7 +502,56 @@ class Library:
     def _remerge_meta(self, g: PhotoGroup) -> None:
         files = meta_files(g)
         metas = self.cache.get_meta_many([f.sig for f in files])
-        g.meta = merge_meta([metas[f.sig] for f in files if f.sig in metas])
+        g.meta = merge_group_meta([metas[f.sig] for f in files if f.sig in metas and not _is_xmp(f)],
+                                  [metas[f.sig] for f in files if f.sig in metas and _is_xmp(f)])
+
+    # ---- 星级 / 色标 / 留弃 -------------------------------------------------
+    def set_rating(self, gids: list[int], change: dict[str, Any] | None) -> int:
+        """change 可含 rating（0–5）、label（Red/Yellow/Green/Blue/Purple 或 None）、flag（pick/reject/None）；
+        change=None 表示清除本软件里打的标记（恢复为照片 / .xmp 里原有的评级）。立即更新，不需要重新分析。"""
+        to_set: dict[str, dict[str, Any]] = {}
+        to_clear: list[str] = []
+        n = 0
+        for gid in gids:
+            g = self.by_gid(gid)
+            if g is None or not g.files:
+                continue
+            if change is None:
+                to_clear += g.member_sigs
+                g.feats["rating"] = rating_feat(g.meta, None)
+            else:
+                cur = g.feats.get("rating") or rating_feat(g.meta, None)
+                new = {"rating": int(cur.get("rating") or 0), "label": cur.get("label"), "flag": cur.get("flag")}
+                new.update(change)
+                for sig in g.member_sigs:
+                    to_set[sig] = new
+                g.feats["rating"] = rating_feat(g.meta, new)
+            n += 1
+        if to_set:
+            self.annotations.set_many(to_set, "rating")
+        if to_clear:
+            self.annotations.clear_many(to_clear, "rating")
+        return n
+
+    def remove_files(self, paths: list[str]) -> int:
+        """文件被删除（进回收站）后从照片组里去掉；组里不剩图片的照片整组隐藏。"""
+        gone = {os.path.normcase(os.path.abspath(p)) for p in paths}
+        n = 0
+        for g in self.groups:
+            keep = [f for f in g.files if os.path.normcase(os.path.abspath(f.path)) not in gone]
+            if len(keep) == len(g.files):
+                continue
+            n += len(g.files) - len(keep)
+            if not any(f.role in ("raw", "jpeg", "heif", "png", "image") for f in keep):
+                g.files = []
+                continue
+            if all(os.path.normcase(os.path.abspath(f.path)) != os.path.normcase(os.path.abspath(g.primary))
+                   for f in keep):
+                from .scanner import _pick_primary
+                g.primary = _pick_primary(keep)
+            g.files = keep
+            self._remerge_meta(g)
+        return n
 
     # ---- 手动指定地点 ----------------------------------------------------
     def set_manual_place(self, gids: list[int], place: dict[str, Any] | None, override_gps: bool = False,

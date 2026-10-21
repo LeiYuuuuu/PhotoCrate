@@ -1,4 +1,4 @@
-"""07 设置：外观、ExifTool、日期识别规则、地区、色调阈值、文件安全、性能、插件、缓存、关于。"""
+"""08 设置：外观、ExifTool、日期识别规则、地区、色调阈值、文件安全、性能、插件、缓存、关于。"""
 from __future__ import annotations
 
 import os
@@ -25,7 +25,7 @@ from .base import Page
 
 class SettingsPage(Page):
     page_id = "settings"
-    index = "07"
+    index = "08"
     title = "系统设置"
     en = "System config"
     sub = "修改日期 / 地区相关设置后会自动重新整理（无需重新扫描）。"

@@ -16,6 +16,7 @@ from . import theme
 from .context import AppContext
 from .dialogs import choose, info, run_with_progress
 from .pages.blur_page import BlurPage
+from .pages.culling_page import CullingPage
 from .pages.base import Page
 from .pages.history_page import HistoryPage
 from .pages.overview_page import OverviewPage
@@ -243,16 +244,22 @@ class MainWindow(QMainWindow):
 
         self.pages: list[Page | QWidget] = []
         self.page_ids: list[str] = []
-        for cls in (SourcePage, TimePlacePage, PartitionPage, OverviewPage, BlurPage, HistoryPage, SettingsPage):
+        for cls in (SourcePage, TimePlacePage, PartitionPage, OverviewPage, CullingPage, BlurPage, HistoryPage,
+                    SettingsPage):
             self._add_page(cls(ctx), cls.page_id, cls.index, cls.title, cls.en.split("//")[0].strip())
         # 插件页面
         for i, spec in enumerate(PAGES):
             try:
                 w = spec.factory(ctx)
-                self._add_page(w, f"plugin_{i}", f"{8 + i:02d}", spec.title, spec.en)
+                self._add_page(w, f"plugin_{i}", f"{9 + i:02d}", spec.title, spec.en)
             except Exception as e:
                 ctx.status.emit(f"插件页面加载失败：{spec.title}：{e}")
         self.nav.changed.connect(self.go)
+        # 缩略图上打分 / 双击看大图（所有页面的缩略图网格共用）
+        from .widgets.thumbgrid import HOOKS
+        HOOKS.rate = ctx.rate
+        HOOKS.open = lambda groups, i, w: ctx.open_viewer(groups, i, self)
+        ctx.ratings_changed.connect(HOOKS.repaint.emit)
         ctx.status.connect(self.status.set_message)
         ctx.library_changed.connect(self._update_readouts)
         ctx.selection_changed.connect(self._update_readouts)

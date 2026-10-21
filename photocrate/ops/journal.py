@@ -127,7 +127,7 @@ class Journal:
             for _ in range(50):
                 r = self._db.execute(
                     "SELECT o.dst, o.batch_id FROM ops o JOIN batches b ON b.id = o.batch_id "
-                    "WHERE b.operation = 'move' AND o.batch_id > ? AND o.status = 'done' AND lower(o.src) = lower(?) "
+                    "WHERE b.operation IN ('move', 'rename') AND o.batch_id > ? AND o.status = 'done' AND lower(o.src) = lower(?) "
                     "ORDER BY o.batch_id LIMIT 1", (bid, cur)).fetchone()
                 if not r:
                     break
@@ -144,7 +144,7 @@ class Journal:
                         "AND o.status = 'undone' AND lower(o.dst) = lower(?) LIMIT 1", (cur,)).fetchone():
                     return True
                 r = self._db.execute(
-                    "SELECT o.src FROM ops o JOIN batches b ON b.id = o.batch_id WHERE b.operation = 'move' "
+                    "SELECT o.src FROM ops o JOIN batches b ON b.id = o.batch_id WHERE b.operation IN ('move', 'rename') "
                     "AND o.status IN ('done', 'undone') AND lower(o.dst) = lower(?) ORDER BY o.batch_id DESC LIMIT 1",
                     (cur,)).fetchone()
                 if not r or r[0] == cur:
@@ -174,7 +174,7 @@ class Journal:
                 pass
 
 
-OPERATION_LABELS = {"move": "移动", "copy": "复制", "xmp": "写入 XMP"}
+OPERATION_LABELS = {"move": "移动", "copy": "复制", "xmp": "写入 XMP", "delete": "删除到回收站", "rename": "重命名"}
 
 STATUS_LABELS = {
     "running": "进行中（未完成）", "done": "已完成", "cancelled": "已取消", "failed": "有失败",

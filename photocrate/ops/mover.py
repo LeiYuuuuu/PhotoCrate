@@ -148,7 +148,7 @@ class Mover:
 
     def _run_batch(self, bid: int, operation: str, progress: ProgressFn | None,
                    cancel: threading.Event | None) -> ExecResult:
-        if operation not in ("move", "copy"):
+        if operation not in ("move", "copy", "rename"):
             raise ValueError(f"不能按移动方式执行“{operation}”批次")
         res = ExecResult(bid)
         ops = [o for o in self.journal.ops(bid) if o["status"] == "pending"]
@@ -215,6 +215,66 @@ class Mover:
         self.journal.finish_batch(bid, status)
         return res
 
+    # ---- 删除（放入回收站） ------------------------------------------------
+    def delete(self, plan, progress: ProgressFn | None = None, cancel: threading.Event | None = None):
+        """按计划把文件逐组放入回收站。一组里任何一个失败，已删除的同组文件从回收站放回。"""
+        import json
+        import time
+        from .cleanup import DeleteResult
+        from .trashbin import restore_from_trash, send_to_trash
+
+        t0 = time.time()
+        bid = self.journal.create_batch(plan, {"kind": "delete", "t0": t0})
+        res = DeleteResult(bid)
+        ops = self.journal.ops(bid)
+        items: dict[int, list[dict]] = {}
+        for o in ops:
+            items.setdefault(o["item"], []).append(o)
+        total, n = len(ops), 0
+        for item_ops in items.values():
+            if cancel is not None and cancel.is_set():
+                res.cancelled = True
+                break
+            done_here: list[dict] = []
+            try:
+                for o in item_ops:
+                    if not os.path.exists(long_path(o["src"])):
+                        raise FileNotFoundError("文件已不在原位置，请重新扫描")
+                    if os.path.getsize(long_path(o["src"])) != o["size"]:
+                        raise IOError("文件在预览后发生了变化，请重新扫描")
+                    send_to_trash(o["src"])
+                    self.journal.set_op(o["id"], "done")
+                    done_here.append(o)
+                    n += 1
+                    if progress:
+                        progress(n, total, os.path.basename(o["src"]))
+                self.journal.commit()
+                res.done_groups += 1
+                for o in done_here:
+                    res.deleted.append(o["src"])
+                    res.freed += o["size"] or 0
+            except Exception as e:
+                res.failed_groups += 1
+                res.errors.append(f"{os.path.basename(item_ops[0]['src'])}：{e}")
+                for o in reversed(done_here):
+                    try:
+                        restore_from_trash(o["src"], t0)
+                        self.journal.set_op(o["id"], "failed", "已从回收站放回（同组文件失败）")
+                    except Exception as e2:
+                        self.journal.set_op(o["id"], "done", f"放回失败：{e2}")
+                        res.deleted.append(o["src"])
+                        res.errors.append(f"放回失败 {o['src']}：{e2}")
+                for o in item_ops:
+                    if o not in done_here:
+                        self.journal.set_op(o["id"], "failed", str(e))
+                self.journal.commit()
+        for o in self.journal.ops(bid):
+            if o["status"] == "pending":
+                self.journal.set_op(o["id"], "skipped")
+        self.journal.commit()
+        self.journal.finish_batch(bid, "cancelled" if res.cancelled else ("failed" if res.failed_groups else "done"))
+        return res
+
     def _makedirs(self, bid: int, d: str, created: set[str]) -> None:
         if _norm(d) in created or os.path.isdir(long_path(d)):
             return
@@ -242,6 +302,14 @@ class Mover:
             return res
         # “复制”与“写入 XMP”的撤销都是：把本批次新建的文件放入回收站
         copy_only = batch["operation"] in ("copy", "xmp")
+        is_delete = batch["operation"] == "delete"
+        t0 = None
+        if is_delete:
+            import json
+            try:
+                t0 = float(json.loads(batch["note"] or "{}").get("t0"))
+            except (TypeError, ValueError):
+                t0 = None
         self.journal.set_batch_status(bid, "undoing")
         ops = [o for o in self.journal.ops(bid) if o["status"] == "done"]
         total = len(ops)
@@ -251,7 +319,27 @@ class Mover:
                 res.cancelled = True
                 break
             try:
-                if copy_only:
+                if is_delete:
+                    from .trashbin import restore_from_trash
+                    if os.path.exists(long_path(o["src"])) and os.path.getsize(long_path(o["src"])) == o["size"]:
+                        self.journal.set_op(o["id"], "undone")       # 已经还原过（手动或上次撤销）
+                    else:
+                        restore_from_trash(o["src"], t0)
+                        self.journal.set_op(o["id"], "undone")
+                    res.mapping[_norm(o["src"])] = o["src"]
+                elif o["role"] == "xmp_edit":
+                    # 写入 XMP 时修改过的已有 .xmp：用备份换回原样
+                    target = o["dst"]
+                    if not os.path.exists(long_path(target)):
+                        target = self.journal.find_moved(o["dst"], bid) or target
+                    if not os.path.exists(long_path(o["src"])):
+                        raise FileNotFoundError("找不到当时的备份，无法恢复")
+                    if os.path.exists(long_path(target)):
+                        trash(target)
+                    os.makedirs(long_path(os.path.dirname(target)), exist_ok=True)
+                    shutil.copy2(long_path(o["src"]), long_path(target))
+                    self.journal.set_op(o["id"], "undone")
+                elif copy_only:
                     target = o["dst"]
                     if not os.path.exists(long_path(target)):
                         # 新建的文件之后又被本软件移动过（例如 .xmp 跟着照片进了分区文件夹）：顺着日志找到现在的位置
@@ -283,7 +371,7 @@ class Mover:
                 res.done_files += 1
             except Exception as e:
                 failed += 1
-                res.errors.append(f"{os.path.basename(o['dst'])}：{e}")
+                res.errors.append(f"{os.path.basename(o['src'] if is_delete else o['dst'])}：{e}")
                 self.journal.set_op(o["id"], "undo_failed", str(e))
             if i % 20 == 0:
                 self.journal.commit()
@@ -311,11 +399,29 @@ class Mover:
         batch = self.journal.batch(bid)
         copy_only = bool(batch and batch["operation"] == "copy")
         fixed = {"moved": 0, "tmp_removed": 0, "src_removed": 0, "pending": 0}
+        if batch and batch["operation"] == "delete":
+            # 删除：原位置已经没有的文件记为完成（在回收站里，撤销时放回）
+            for o in self.journal.ops(bid):
+                if o["status"] == "pending":
+                    if not os.path.exists(long_path(o["src"])):
+                        self.journal.set_op(o["id"], "done")
+                        fixed["moved"] += 1
+                    else:
+                        fixed["pending"] += 1
+            self.journal.commit()
+            return fixed
         if batch and batch["operation"] == "xmp":
             # 写入 XMP：已生成的文件记为完成（撤销时会放入回收站），没生成的保持未完成
             for o in self.journal.ops(bid):
                 if o["status"] == "pending":
-                    if os.path.exists(long_path(o["dst"])):
+                    if o["role"] == "xmp_edit":
+                        # 已经做了备份 = 可能已经改过；记为完成，撤销时会换回备份（备份就是原样）
+                        if os.path.exists(long_path(o["src"])):
+                            self.journal.set_op(o["id"], "done")
+                            fixed["moved"] += 1
+                        else:
+                            fixed["pending"] += 1
+                    elif os.path.exists(long_path(o["dst"])):
                         self.journal.set_op(o["id"], "done")
                         fixed["moved"] += 1
                     else:
@@ -354,8 +460,8 @@ class Mover:
                cancel: threading.Event | None = None) -> ExecResult:
         self.reconcile(bid)
         batch = self.journal.batch(bid)
-        if batch and batch["operation"] == "xmp":
-            # 写入内容不在日志里，无法“继续”：保留已生成的文件，其余标为跳过（可重新生成）
+        if batch and batch["operation"] in ("xmp", "delete"):
+            # 写入 XMP / 删除：不自动“继续”，保留已完成的部分，其余标为跳过（可重新生成计划）
             res = ExecResult(bid)
             for o in self.journal.ops(bid):
                 if o["status"] == "pending":

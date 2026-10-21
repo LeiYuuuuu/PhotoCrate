@@ -34,7 +34,7 @@ EXIFTOOL_TAGS = [
     "Make", "Model", "LensModel", "LensID", "Lens",
     "FocalLength#", "FocalLengthIn35mmFormat#", "ISO#", "FNumber#", "ExposureTime#",
     "ImageWidth#", "ImageHeight#", "ImageSize#", "Orientation#",
-    "Software", "UserComment", "MIMEType",
+    "Software", "UserComment", "MIMEType", "Rating#", "Label",
 ]
 
 
@@ -184,7 +184,18 @@ def normalize_exiftool(d: dict[str, Any]) -> dict[str, Any]:
         "software": _text(g("Software")),
         "user_comment": _text(g("UserComment")),
         "mime": _text(g("MIMEType")),
+        "rating": _rating(g("Rating")),
+        "label": _text(g("Label")),
     }
+
+
+def _rating(v: Any) -> int | None:
+    """XMP / EXIF 星级：-1 = 拒绝（Bridge），0 = 未评级，1–5 星。"""
+    n = _num(v)
+    if n is None:
+        return None
+    n = int(round(n))
+    return n if -1 <= n <= 5 else None
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +346,7 @@ class FallbackBackend(MetadataBackend):
             "exposure": _num(sub.get(33434)),
             "width": w, "height": h, "orientation": int(_num(ex.get(274)) or 1),
             "software": _text(ex.get(305)), "user_comment": None, "mime": None,
+            "rating": _rating(ex.get(18246)), "label": None,
         }
 
     def _exifread(self, path: str) -> dict[str, Any] | None:
@@ -399,6 +411,18 @@ def create_backend(exiftool_path: str | None) -> MetadataBackend:
         except Exception as e:
             log.warning("ExifTool 初始化失败，改用内置读取：%s", e)
     return FallbackBackend()
+
+
+def merge_group_meta(images: list[dict[str, Any]], sidecars: list[dict[str, Any]]) -> dict[str, Any]:
+    """图片在前、.xmp 在后合并；但星级 / 色标以 .xmp 为准（Lightroom、Bridge 把评级写在附属文件里，
+    相机写在 JPG/RAW 里的 Rating 通常只是 0）。"""
+    out = merge_meta(list(images) + list(sidecars))
+    for key in ("rating", "label"):
+        for d in sidecars:
+            if d.get(key) not in (None, ""):
+                out[key] = d[key]
+                break
+    return out
 
 
 def merge_meta(items: Iterable[dict[str, Any]]) -> dict[str, Any]:

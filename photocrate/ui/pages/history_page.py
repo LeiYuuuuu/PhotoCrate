@@ -1,9 +1,9 @@
-"""06 操作记录：每次移动/复制的完整清单，可撤销、导出。"""
+"""07 操作记录：每次移动/复制的完整清单，可撤销、导出。"""
 from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QTimer, QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QHeaderView, QSplitter,
                                QTableView, QTableWidget, QTableWidgetItem)
@@ -61,7 +61,7 @@ class OpsModel(QAbstractTableModel):
 
 class HistoryPage(Page):
     page_id = "history"
-    index = "06"
+    index = "07"
     title = "操作记录"
     en = "Operation log // undo"
     sub = "每次执行前都会先写日志。选中一个批次即可查看清单、撤销（把文件移回原处）或导出。"
@@ -202,7 +202,10 @@ class HistoryPage(Page):
         if not b:
             return
         op = {"copy": "删除复制出来的文件（放入回收站）",
-              "xmp": "把这一批新建的 .xmp 附属文件放入回收站（之后若在 Lightroom 等软件里改过它们，改动也会一起进回收站）"
+              "xmp": "把这一批新建的 .xmp 附属文件放入回收站、更新过的 .xmp 换回修改前的备份"
+                     "（之后若在 Lightroom 等软件里又改过它们，那些改动也会被撤掉）",
+              "delete": "从系统回收站把这些文件放回原来的位置（如果回收站已清空或文件已被手动还原，会跳过并标注）",
+              "rename": "把文件名改回原来的名字",
               }.get(b["operation"], "把文件移回原来的位置")
         if not ask(self, f"撤销批次 #{b['id']}", f"将{op}，共 {b['done'] or b['total']} 个文件。<br>"
                    "如果之后手动改动过这些文件，相关文件会被跳过并在清单里标注。", ok="撤销", danger=True, en="UNDO"):
@@ -217,11 +220,18 @@ class HistoryPage(Page):
             self.refresh()
             info(self, "撤销出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
             return
-        self._undone(res)
+        self._undone(res, b)
 
-    def _undone(self, res):
+    def _undone(self, res, b=None):
         lib = self.ctx.library
         lib.apply_moves(res.mapping)
+        op = (b or {}).get("operation")
+        edited_xmp = op == "xmp" and any(o["role"] == "xmp_edit" for o in self.ctx.journal.ops(b["id"]))
+        if op == "delete" or edited_xmp:
+            # 还原回来的文件 / 换回的 .xmp 需要重新扫描才能显示（有缓存，很快）
+            src = self.window().page("source") if hasattr(self.window(), "page") else None
+            if src is not None and lib.groups:
+                QTimer.singleShot(0, src.start_scan)
         if lib.prune_missing():
             # 撤销“写入 XMP”后：去掉已不存在的 .xmp，并按剩下的文件重新整理日期与地点
             self.ctx.run(lambda prog, cancel: lib.run_meta_analyzers(), None,

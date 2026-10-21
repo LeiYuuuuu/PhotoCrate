@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any, Iterable
 
-META_VERSION = 4     # v4：增加 GPS 时间（gps_utc）
+META_VERSION = 5     # v5：增加星级 / 色标（rating, label）
 
 
 class FeatureCache:
@@ -90,6 +90,20 @@ class FeatureCache:
                     "INSERT OR REPLACE INTO preview(sig, thumb, w, h, src) VALUES(?,?,?,?,?)",
                     (sig, res.get("thumb"), pv.get("w"), pv.get("h"), pv.get("src")),
                 )
+
+    def copy_keys(self, mapping: dict[str, str]) -> None:
+        """文件改名后（大小、修改时间不变）把旧指纹的缓存复制到新指纹，避免重新分析。"""
+        if not mapping:
+            return
+        with self._lock:
+            for old, new in mapping.items():
+                self._db.execute("INSERT OR REPLACE INTO meta(sig, ver, data) SELECT ?, ver, data FROM meta WHERE sig=?",
+                                 (new, old))
+                self._db.execute("INSERT OR REPLACE INTO pix(sig, analyzer, ver, data) "
+                                 "SELECT ?, analyzer, ver, data FROM pix WHERE sig=?", (new, old))
+                self._db.execute("INSERT OR REPLACE INTO preview(sig, thumb, w, h, src) "
+                                 "SELECT ?, thumb, w, h, src FROM preview WHERE sig=?", (new, old))
+            self._db.commit()
 
     def commit(self) -> None:
         with self._lock:

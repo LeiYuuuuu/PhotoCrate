@@ -145,6 +145,113 @@ def infer_missing_locations(groups, minutes: int) -> int:
 
 
 # ---------------------------------------------------------------------------
+# 星级 / 色标 / 留弃标记
+# ---------------------------------------------------------------------------
+
+LABEL_NAMES = {"Red": "红", "Yellow": "黄", "Green": "绿", "Blue": "蓝", "Purple": "紫"}
+LABEL_COLORS = {"Red": "#E2453A", "Yellow": "#F2C230", "Green": "#3FAE5A", "Blue": "#3C7BD9", "Purple": "#8E5AC9"}
+FLAG_NAMES = {"pick": "留用", "reject": "弃用"}
+
+
+def normalize_label(v: str | None) -> str | None:
+    """Lightroom / Bridge 的色标写成英文（Red…）；也接受中文。"""
+    if not v:
+        return None
+    t = str(v).strip()
+    for en, zh in LABEL_NAMES.items():
+        if t.lower() == en.lower() or t == zh or t == zh + "色":
+            return en
+    return t
+
+
+class RatingAnalyzer(Analyzer):
+    """在本软件里打的星 / 色标 / 留弃（保存在 annotations.db）优先；否则读取照片或 .xmp 里已有的评级。"""
+    id = "rating"
+    label = "星级与标记"
+    order = 16
+
+    def analyze(self, group, ctx: AnalysisContext):
+        ann = group.annotation(ctx.extras.get("ratings"))
+        return rating_feat(group.meta, ann)
+
+
+def rating_feat(meta: dict, ann: dict | None) -> dict:
+    mr = meta.get("rating")
+    file_rating = mr if isinstance(mr, int) and mr > 0 else 0
+    file_flag = "reject" if mr == -1 else None
+    file_label = normalize_label(meta.get("label"))
+    if ann:
+        return {"rating": int(ann.get("rating") or 0), "label": normalize_label(ann.get("label")),
+                "flag": ann.get("flag") or None, "manual": True}
+    return {"rating": file_rating, "label": file_label, "flag": file_flag, "manual": False}
+
+
+# ---------------------------------------------------------------------------
+# 相似 / 连拍（像素：感知哈希；全库后处理：按时间 + 哈希距离分组）
+# ---------------------------------------------------------------------------
+
+class HashAnalyzer(Analyzer):
+    """pHash：32×32 灰度图做 DCT，取左上 8×8 低频系数与中位数比较，得到 64 位指纹。
+    同一场景连拍的几张照片指纹只差几位；构图明显不同的照片相差 20 位以上。"""
+    id = "phash"
+    label = "感知哈希"
+    stage = "pixel"
+    version = 1
+
+    def analyze_pixels(self, px: PixelInput, settings):
+        import cv2
+        import numpy as np
+
+        g = cv2.resize(px.gray(256), (32, 32), interpolation=cv2.INTER_AREA).astype(np.float32)
+        d = cv2.dct(g)[:8, :8].flatten()
+        med = float(np.median(d[1:]))
+        bits = 0
+        for v in d:
+            bits = (bits << 1) | (1 if v > med else 0)
+        return {"phash": f"{bits:016x}"}
+
+
+def hamming(a: str | None, b: str | None) -> int:
+    if not a or not b:
+        return 64
+    return (int(a, 16) ^ int(b, 16)).bit_count()
+
+
+def group_similar(groups, gap_s: float = 10, threshold: int = 12, min_size: int = 2) -> int:
+    """连拍 / 相似分组：按拍摄时间排序，相邻两张相差不超过 gap_s 秒、且指纹距离不超过 threshold
+    （与上一张或与本组第一张比）就归入同一组。每组里清晰度分数最高的标为“最佳”。返回分组数。"""
+    for g in groups:
+        g.feats.pop("similar", None)
+    items = [g for g in groups if g.files and g.date is not None and g.feat("phash", "phash")]
+    items.sort(key=lambda g: (g.date, g.name))
+    clusters: list[list] = []
+    cur: list = []
+    for g in items:
+        if cur:
+            prev = cur[-1]
+            close = (g.date - prev.date).total_seconds() <= gap_s
+            alike = (hamming(g.feat("phash", "phash"), prev.feat("phash", "phash")) <= threshold
+                     or hamming(g.feat("phash", "phash"), cur[0].feat("phash", "phash")) <= threshold)
+            if close and alike:
+                cur.append(g)
+                continue
+            clusters.append(cur)
+        cur = [g]
+    if cur:
+        clusters.append(cur)
+    n = 0
+    for c in clusters:
+        if len(c) < max(2, min_size):
+            continue
+        n += 1
+        ranked = sorted(c, key=lambda g: (-(g.feat("blur", "score") or 0), -g.total_size, g.name))
+        for r, g in enumerate(ranked):
+            g.feats["similar"] = {"cid": n, "size": len(c), "rank": r + 1, "best": r == 0,
+                                  "first": c[0].date.isoformat(), "span_s": (c[-1].date - c[0].date).total_seconds()}
+    return n
+
+
+# ---------------------------------------------------------------------------
 # 相机 / 镜头 / 来源（相机、手机、截图、其他）
 # ---------------------------------------------------------------------------
 
@@ -449,5 +556,6 @@ BLUR_LABELS = {"sharp": "清晰", "blurry": "模糊", "unknown": "无法判断"}
 
 
 def register_builtin() -> None:
-    for a in (DateAnalyzer(), GeoAnalyzer(), CameraAnalyzer(), ShapeAnalyzer(), ColorAnalyzer(), BlurAnalyzer()):
+    for a in (DateAnalyzer(), GeoAnalyzer(), RatingAnalyzer(), CameraAnalyzer(), ShapeAnalyzer(), ColorAnalyzer(),
+              BlurAnalyzer(), HashAnalyzer()):
         register_analyzer(a)

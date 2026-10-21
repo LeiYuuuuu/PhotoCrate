@@ -17,7 +17,8 @@
 ```
 ┌──────────────────────────────── UI 层（PySide6）────────────────────────────────┐
 │  main_window.py  顶栏 / 导航 / 状态条        context.py  AppContext：共享对象 + 信号 │
-│  pages/ 01资源接入 02时间与地点 03分区编排 04统计 05清晰度 06记录 07设置 (+插件页面) │
+│  pages/ 01资源 02时间与地点 03分区 04统计 05挑片 06清晰度 07记录 08设置 (+插件页面) │
+│  viewer.py 大图查看 / 并排对比   culling_dialogs.py 清理 RAW、批量重命名   xmpflow.py │
 │  widgets/ deco.py 自绘控件（面板/切角按钮/数据卡/图表）  thumbgrid.py 虚拟化缩略图网格 │
 │  theme.py 两套配色 + QSS      dialogs.py 确认/进度/执行计划                         │
 └───────────────────────────────────────┬─────────────────────────────────────────┘
@@ -34,18 +35,20 @@
 │   ├ core/geotime.py    时区换算、GPX/KML 解析、按时间匹配轨迹 / 参考照片补 GPS          │
 │   ├ core/places.py     用户标注库（手动地点 / 时间校正）+ 地名解析与候选               │
 │   └ core/daybook.py    按天汇总 + 行程文本解析（「时间与地点」页的数据）                │
-│ analyzers/  分析器插件：date geo camera shape（元数据） color blur（像素）            │
+│ analyzers/  分析器插件：date geo camera shape rating（元数据） color blur phash（像素）│
 │ partition/  维度插件：date region color camera lens source filetype orientation …     │
 │   └ engine.py  条件链 / 模板 → 每组的目标文件夹；预览树；预设                          │
 │ ops/planner.py  模拟运行：目标路径、重名编号、跨盘、空间检查                           │
 │ ops/mover.py    执行 / 撤销 / 崩溃恢复          ops/journal.py  操作日志（SQLite）       │
-│ ops/xmpwrite.py 写回 XMP 附属文件（只新建、只给 RAW、记日志、可撤销）                   │
+│ ops/xmpwrite.py 写回 XMP 附属文件（只给 RAW；新建或更新已有并备份；记日志、可撤销）     │
+│ ops/cleanup.py  清理 RAW 计划   ops/trashbin.py 回收站放入 / 找回   ops/renamer.py 改名 │
 │ ops/pathsafe.py Windows 文件名清洗、长路径                                            │
 │ plugins.py      插件加载与注册接口                                                     │
 └───────────────────────────────────────┬─────────────────────────────────────────┘
 ┌──────────────────────────────── 数据层 ──────────────────────────────────────────┐
 │ %LOCALAPPDATA%\PhotoCrate\cache.db（元数据/特征/预览，WAL）  thumbs\（360px 缩略图）  │
-│ %APPDATA%\PhotoCrate\journal.db（操作日志） annotations.db（手动地点/时间校正）       │
+│ %APPDATA%\PhotoCrate\journal.db（操作日志） annotations.db（地点/时间校正/星级）     │
+│                     xmp_backups\（改写 .xmp 前的备份）                               │
 │                     settings.json  logs\  plugins\  screenshots\                     │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -138,7 +141,20 @@ class Dimension:
 
 日本等地的 GeoNames 地名会去掉 `-shi / -cho` 后缀、政令市的区（Kamigyo-ku）归到所属城市，并补充了约 280 个日本城市的中文名，保证“手动指定的京都”和“GPS 识别出的京都”落在同一个文件夹（`日本/京都府/京都`）。
 
-## 7. 安全搬运（ops/）
+## 7. 挑片与清理（第二梯队功能）
+
+| 功能 | 实现 |
+|---|---|
+| 星级 / 色标 / 留弃 | `AnnotationStore` 新表 `rating`（`{rating 0–5, label, flag pick/reject}`，同样按组内每个图片文件的指纹存）；`RatingAnalyzer` 合并照片 / .xmp 里原有的 `Rating`（-1 = 拒绝）与 `Label`，本软件打的优先，输出 `feats["rating"] = {rating, label, flag, manual}`。`Library.set_rating` 立即更新，不需要重新分析；分区维度「星级 / 标记」（模板 `{星级}` `{标记}` `{色标}`） |
+| 键盘打分 | `rating_change_for_key`（viewer.py）统一翻译按键：0–5 星、6–9 红黄绿蓝（再按一次取消）、P / X / U；缩略图网格通过 `thumbgrid.HOOKS`（主窗口安装：`rate` → `AppContext.rate`，`open` → 大图查看器）在所有页面生效，`ratings_changed` 信号只触发重绘 |
+| 大图查看 | `ViewerWindow`：后台线程解码（JPG 全尺寸 + EXIF 方向；只有 RAW 时取相机内嵌大预览），LRU 留 8 张并预读前后几张；`ImagePane` 记录 `zoom`（None = 适合窗口）与视图中心 `cx, cy`（图像比例坐标），缩放时保持鼠标下那一点不动、平移时不让图像边缘离开窗口；对比模式两个 Pane 互相转发 `view_changed`，缩放与位置同步 |
+| 相似 / 连拍分组 | `HashAnalyzer`（像素阶段，32×32 DCT 取低频 8×8 → 64 位 pHash，带缓存）；`group_similar`：按拍摄时间排序，与上一张相差 ≤ N 秒、且与上一张或本组第一张汉明距离 ≤ 阈值就并入，组内按清晰度分数排名，最高的标 `best`。只用缓存的指纹，调参数时几毫秒重算 |
+| 星级写入 XMP | `xmpwrite.tags_for` 写 `XMP-xmp:Rating`（弃用 = -1）与 `XMP-xmp:Label`，只写本软件改过的。**已有 .xmp 时可更新**：先完整备份到 `xmp_backups\时间戳\`，ExifTool `-overwrite_original` 只改这几个标签，日志里记 `xmp_edit`（src = 备份），撤销 = 当前文件进回收站、备份拷回；失败时立即换回备份 |
+| 清理 RAW | `cleanup.build_cleanup_plan`：`keep_jpg` / `unrated_raw` / `rejected` → operation = `delete` 的计划（RAW 连同它的 .xmp / .pp3 / .dop）；`Mover.delete` 逐组放入回收站（一组里失败就把已删的放回），批次记下开始时间 `t0` |
+| 从回收站找回 | `trashbin.find_in_trash(path, t0)`：Windows 解析 `$Recycle.Bin\<SID>\$I*`（v1/v2 格式：原路径 + 删除时间 + 大小），freedesktop 读 `.trashinfo`；按“原路径相同、删除时间 ≥ t0 − 2 秒”取最新一个，`os.rename` 放回并删掉索引文件。撤销清理后自动重新扫描 |
+| 批量重命名 | `renamer.build_rename_plan`：模板与分区模板相同，另有 `{序号}` `{序号:4}` `{当日序号}` `{原名}`；同组成员同一主文件名、保留双扩展名（`.ARW.xmp`）、与已有文件重名加“ (n)”。执行走 `Mover` 的 `rename` 批次（复用移动的日志 / 撤销 / 崩溃恢复）；`Library.apply_moves` 发现文件名变化时把标注和缓存**移到**新指纹 |
+
+## 8. 安全搬运（ops/）
 
 | 机制 | 实现位置 |
 |---|---|
@@ -150,20 +166,20 @@ class Dimension:
 | 撤销：按日志逆序移回；原位置被占用就改名恢复，不覆盖；清理本批新建的空文件夹 | `mover.undo` |
 | 崩溃恢复：启动时发现 running 状态的批次 → 按磁盘实际状态修正日志 → 继续或回滚 | `mover.reconcile/resume/rollback` + `main_window._check_recovery` |
 | 取消：只在两组之间响应，绝不留下复制一半的文件 | `mover._run_batch` |
-| 删除一律进回收站 | `mover.trash`（send2trash） |
+| 删除一律进回收站；清理的撤销从回收站放回 | `mover.trash`（send2trash）、`mover.delete`、`trashbin.restore_from_trash` |
 
 这些行为都有对应的单元测试（`tests/test_core.py`），包括模拟跨盘、模拟中途失败、模拟崩溃后恢复。
 
-## 8. 界面设计
+## 9. 界面设计
 
-- **视觉语言**（`ui/theme.py` + `ui/widgets/deco.py`）：直角与切角、细线框 + 四角角标、编号章节（01–07）、中文标题 + 英文等宽小标签、黄色强调块、斜纹警示带（只用在“会改动文件”的确认窗口）、分段进度条。全部自绘，不用图片素材。
+- **视觉语言**（`ui/theme.py` + `ui/widgets/deco.py`）：直角与切角、细线框 + 四角角标、编号章节（01–08）、中文标题 + 英文等宽小标签、黄色强调块、斜纹警示带（只用在“会改动文件”的确认窗口）、分段进度条。全部自绘，不用图片素材。
 - **字体**：中文“微软雅黑”，数字与英文用 Windows 自带的 Bahnschrift（DIN 风格窄体），等宽用 Cascadia/Consolas。
 - **两套主题**：浅色「终末地」（浅灰工业底 + 高可见度黄）/ 深色「方舟」（深色终端 + 金黄 + 青色信息色）。颜色只在 `Palette` 里定义一次，所有自绘控件在绘制时读取当前配色。
 - **性能**：缩略图网格是虚拟化的 `QListView`（只绘制可见项），缩略图 LRU 缓存；预览树和统计都是内存计算，几千张即时刷新；所有耗时任务在 `QThread` 中运行，界面不卡。
 
-## 9. 扩展：插件接口（保留给未来的新功能）
+## 10. 扩展：插件接口（保留给未来的新功能）
 
-### 9.1 插件文件
+### 10.1 插件文件
 
 放到 `plugins\`（程序目录）或 `%APPDATA%\PhotoCrate\plugins\`，重启生效：
 
@@ -179,7 +195,7 @@ def register(api):
 
 后台分析进程也会加载插件（此时 `api.headless=True`，页面注册被忽略），所以像素分析器写在插件里也能并行运行。
 
-### 9.2 新增一个像素分析器（例如 AI）
+### 10.2 新增一个像素分析器（例如 AI）
 
 ```python
 class SceneAnalyzer(Analyzer):
@@ -192,20 +208,19 @@ class SceneAnalyzer(Analyzer):
 
 结果自动按文件指纹缓存；改了算法把 `version` 加 1，旧缓存自动失效。分区维度里用 `group.feats["scene"]` 读取。完整骨架见 `plugins_examples/example_ai_scene_stub.py`。
 
-### 9.3 未来功能路线（接口都已就位）
+### 10.3 未来功能路线（接口都已就位）
 
 | 功能 | 做法 |
 |---|---|
 | AI 场景分类 / 以文搜图 | Chinese-CLIP 导出 ONNX → 像素分析器存向量与标签 → “场景”维度；搜索页作为插件页面 |
 | 人脸 / 人物分组 | OpenCV YuNet + SFace（Apache 2.0）→ 像素分析器存人脸向量 → 全库聚类（可在 `run_meta_analyzers` 之后加一个“全库后处理”步骤，参照 `infer_missing_locations`）→ “人物”维度 |
-| 重复 / 相似照片 | 像素分析器算 pHash → 全库比较 → “重复组”维度，移入「待确认重复」 |
 | 地图视图 | 插件页面：`QWebEngineView` + Leaflet，坐标来自 `feats["geo"]`（高德底图需 WGS-84→GCJ-02，GeoToolCN 自带转换） |
-| 星级 / 标签写入 XMP | 在 `ops/xmpwrite.tags_for` 里加 `XMP-xmp:Rating` 等标签即可复用整套“预览 → 日志 → 撤销”流程 |
+| 关键词 / 标签写入 XMP | 在 `ops/xmpwrite.tags_for` 里加 `XMP-dc:Subject` 等标签即可复用整套“预览 → 日志 → 撤销（含更新已有 .xmp 的备份）”流程 |
 | 照片内嵌写入（JPG/HEIC） | 目前只写 RAW 的附属文件；写进原图需要 ExifTool `-overwrite_original` 并先备份，风险较高，暂未开放 |
 
 > 注意：打包好的 exe 只包含已有的依赖。需要新第三方库（如 onnxruntime）的插件，用 `run.bat` 源码模式运行（`.venv\Scripts\pip install onnxruntime`），或安装后重新打包。
 
-## 10. 文件地图
+## 11. 文件地图
 
 ```
 PhotoCrate/
@@ -218,23 +233,25 @@ PhotoCrate/
 │  │               pairing geotime places daybook
 │  ├─ analyzers/   base builtin
 │  ├─ partition/   base dimensions engine
-│  ├─ ops/         planner mover journal pathsafe xmpwrite
-│  └─ ui/          theme context dialogs timeplace_dialogs main_window  pages/  widgets/
+│  ├─ ops/         planner mover journal pathsafe xmpwrite cleanup trashbin renamer
+│  └─ ui/          theme context dialogs timeplace_dialogs culling_dialogs xmpflow viewer
+│                  main_window  pages/  widgets/
 ├─ data/           geonames_cities1000.csv.gz  place_names_zh.json
 ├─ assets/         app.ico app.png
 ├─ plugins/        用户插件放这里        plugins_examples/  示例插件
 ├─ tools/          get_exiftool.ps1  make_icon.py  （exiftool/ 运行后自动下载到这里）
-└─ tests/          test_core.py  test_timeplace.py  make_samples.py  ui_smoke.py  ui_timeplace.py
+└─ tests/          test_core.py  test_timeplace.py  test_culling.py  make_samples.py
+                   ui_smoke.py  ui_timeplace.py  ui_culling.py
 ```
 
-## 11. 界面细节与调试辅助
+## 12. 界面细节与调试辅助
 
 - **F12 截图**：`MainWindow.eventFilter` 在应用级拦截 F12，用 `QScreen.grabWindow` 截取窗口区域（包括弹出的对话框），存到 `screenshots_dir()`。
 - **窗口位置记忆**：关闭时保存 `window_state`（几何 + 是否最大化）；设置项 `window_screen` 可指定下次在哪台显示器打开（`primary` / `secondary` / `#2` / 显示器名称片段），只生效一次。
 - **结果对话框等进度窗口关闭后再弹**：`dialogs.run_with_progress` 统一处理“后台任务 + 进度窗口 + 结果”。任务很快完成时，如果在进度窗口还开着时就弹结果框，Windows 会把焦点交给别的程序，结果框落到后面、看不见却挡住整个界面（端到端测试时实际遇到过）。
 - **大列表一律用 Model/View**：操作记录的文件清单可能上千行，用 `QAbstractTableModel` 按需绘制；不要对大表使用 `ResizeToContents`（每次数据变化都会扫描全部行，904 行时曾导致约 20 秒卡顿）。
 
-## 12. 已知局限
+## 13. 已知局限
 
 - 海外地点用“最近的城市点”判断，边境/海边可能归到邻近城市；国内用真实行政边界，准确度高。
 - 色调与清晰度阈值没有放之四海皆准的值，默认值偏保守，建议用自己的照片在界面里调。
@@ -242,5 +259,8 @@ PhotoCrate/
 - 视频文件（除实况照片外）不在处理范围内。
 - 跨文件夹配对需要两边都有 EXIF 拍摄时间；没有拍摄时间的 RAW/JPG 分开存放后会各算一张。
 - GPS 补全的精度取决于参考数据：手机照片之间间隔很久时只能取最近的一张（时间窗口内）；GPX 轨迹没有时区问题，最准确。
-- 写回 XMP 只针对 RAW；JPG/HEIC 的地点与校正时间只保存在软件里。
+- 写回 XMP 只针对 RAW；JPG/HEIC 的地点、校正时间与星级只保存在软件里。
+- “留用”在 XMP 里没有标准字段（Lightroom 的旗标存在目录里），只保存在软件里。
+- 相似分组只比较时间上相邻的照片（默认 10 秒内），不同时间拍的同一场景不会归为一组；pHash 对大幅裁切 / 旋转不敏感。
+- 从回收站找回只支持 Windows 与 Linux（freedesktop）；macOS 的废纸篓没有可读的原路径记录。回收站被清空后就无法撤销清理。
 - 没有代码签名的 exe 可能被杀毒软件误报。

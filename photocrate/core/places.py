@@ -3,7 +3,7 @@
 - 标注是用户自己输入的数据，存在用户数据目录的 annotations.db（不是缓存，清空缓存不会丢）。
 - 键是照片组里每个图片文件的“文件指纹”（文件名+大小+修改时间），与路径无关：
   照片被移动后标注依然有效；RAW 与 JPG 分开放、配对关系变化后也不会丢。
-- 两类标注各一张表：places（手动地点）、timeshift（时间校正 {seconds, tz}）。
+- 每类标注一张表：places（手动地点）、timeshift（时间校正 {seconds, tz}）、rating（星级 / 色标 / 留弃 {rating, label, flag}）。
 - 地名解析：用户输入“日本/东京”“京都”“湖南/邵阳”等，尽量补全成 国家/省/市/区县 的标准写法；
   补全候选来自 GeoToolCN（国内行政区划）与 data/place_names_zh.json + GeoNames（海外）。
 """
@@ -29,7 +29,7 @@ LEVELS = ("country", "province", "city", "district")
 # ---------------------------------------------------------------------------
 
 class AnnotationStore:
-    KINDS = ("places", "timeshift")
+    KINDS = ("places", "timeshift", "rating")
 
     def __init__(self, path: Path | None = None):
         self.path = path or (user_data_dir() / "annotations.db")
@@ -73,6 +73,24 @@ class AnnotationStore:
         t = self._table(kind)
         with self._lock, self._db:
             self._db.executemany(f"DELETE FROM {t} WHERE sig=?", [(s,) for s in sigs])
+
+    def copy_keys(self, mapping: dict[str, str]) -> int:
+        """文件改名后指纹会变：把旧指纹下的所有标注移到新指纹（撤销改名时同样会移回来）。"""
+        n = 0
+        olds = list(mapping)
+        with self._lock, self._db:
+            for t in self.KINDS:
+                for i in range(0, len(olds), 500):
+                    ch = olds[i:i + 500]
+                    rows = self._db.execute(
+                        f"SELECT sig, data, updated FROM {t} WHERE sig IN ({','.join('?' * len(ch))})", ch).fetchall()
+                    for sig, data, upd in rows:
+                        self._db.execute(f"INSERT OR REPLACE INTO {t}(sig, data, updated) VALUES(?,?,?)",
+                                         (mapping[sig], data, upd))
+                        if mapping[sig] != sig:
+                            self._db.execute(f"DELETE FROM {t} WHERE sig=?", (sig,))
+                        n += 1
+        return n
 
     def clear_all(self, kind: str) -> int:
         t = self._table(kind)

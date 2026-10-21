@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import os
 
-from ..analyzers.builtin import (BLUR_LABELS, ORIENTATION_LABELS, SOURCE_LABELS, blur_state,
-                                 classify_color)
+from ..analyzers.builtin import (BLUR_LABELS, FLAG_NAMES, LABEL_NAMES, ORIENTATION_LABELS, SOURCE_LABELS,
+                                 blur_state, classify_color)
 from .base import FORMAT_TOKEN, Dimension, Option, PartitionContext, register_dimension
 
 
@@ -54,6 +54,7 @@ class DateDimension(Dimension):
         return {
             "年": d("%Y"), "月": d("%m"), "日": d("%d"),
             "年月": d("%Y-%m"), "年月日": d("%Y-%m-%d"),
+            "日期": d("%Y%m%d"), "时间": d("%H%M%S"),          # 紧凑写法，适合文件名
             "季度": lambda g, ctx: f"Q{(g.date.month - 1) // 3 + 1}" if g.date else None,
             "日期来源": lambda g, ctx: {"exif": "EXIF", "exif_create": "EXIF", "xmp": "XMP",
                                     "filename": "文件名推测", "mtime": "修改时间推测"}.get(g.date_source),
@@ -355,6 +356,48 @@ class BlurDimension(Dimension):
         return {"清晰度": lambda g, c: BLUR_LABELS[blur_state(g, float(c.settings.get("blur_threshold", 60)))]}
 
 
+class RatingDimension(Dimension):
+    id = "rating"
+    label = "星级 / 标记"
+    en = "RATING"
+    description = "按在本软件或 Lightroom / Bridge 里打的星级、留弃标记或色标分组。"
+    unknown = "未评星"
+    order_by = "name"
+    options = [Option("mode", "分类方式", default="rating", choices=[
+        ("rating", "星级（5星 … 1星 / 未评星，弃用单独一组）"),
+        ("flag", "留用 / 弃用 / 未标记"),
+        ("label", "色标"),
+    ])]
+
+    @staticmethod
+    def _rating(g):
+        if g.feat("rating", "flag") == "reject":
+            return "弃用"
+        r = int(g.feat("rating", "rating") or 0)
+        return f"{r}星" if r > 0 else None
+
+    @staticmethod
+    def _flag(g):
+        return FLAG_NAMES.get(g.feat("rating", "flag"))
+
+    @staticmethod
+    def _label(g):
+        lab = g.feat("rating", "label")
+        return (LABEL_NAMES.get(lab, lab) + "色标") if lab else None
+
+    def segments(self, g, opts, ctx):
+        mode = opts.get("mode", "rating")
+        if mode == "flag":
+            return [self._flag(g) or "未标记"]
+        if mode == "label":
+            return [self._label(g) or "无色标"]
+        return [self._rating(g) or self.unknown]
+
+    def tokens(self):
+        return {"星级": lambda g, c: self._rating(g), "标记": lambda g, c: self._flag(g),
+                "色标": lambda g, c: self._label(g)}
+
+
 class FolderDimension(Dimension):
     id = "folder"
     label = "原文件夹名"
@@ -384,7 +427,7 @@ class FixedDimension(Dimension):
 
 def register_builtin() -> None:
     for d in (DateDimension(), RegionDimension(), ColorDimension(), CameraDimension(), LensDimension(),
-              SourceDimension(), FileTypeDimension(), OrientationDimension(), BlurDimension(),
+              SourceDimension(), FileTypeDimension(), OrientationDimension(), BlurDimension(), RatingDimension(),
               FocalDimension(), IsoDimension(), ResolutionDimension(), FolderDimension(), FixedDimension()):
         register_dimension(d)
 

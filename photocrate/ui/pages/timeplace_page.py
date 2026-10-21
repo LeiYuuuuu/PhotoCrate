@@ -340,15 +340,19 @@ class TimePlacePage(Page):
         self.x_gps = QCheckBox("GPS 坐标（轨迹 / 参考照片匹配到的）")
         self.x_place = QCheckBox("地点名称（手动指定 / 匹配）")
         self.x_time = QCheckBox("校正后的拍摄时间")
+        self.x_rating = QCheckBox("星级 / 色标 / 弃用（在「挑片」页打的）")
+        self.x_update = QCheckBox("更新已有的 .xmp（先备份，只改这几项）")
         for cb, key in ((self.x_gps, "xmp_write_gps"), (self.x_place, "xmp_write_place"),
-                        (self.x_time, "xmp_write_time")):
+                        (self.x_time, "xmp_write_time"), (self.x_rating, "xmp_write_rating"),
+                        (self.x_update, "xmp_update_existing")):
             cb.setChecked(bool(ctx.settings.get(key, True)))
             cb.toggled.connect(lambda v, k=key: ctx.settings.set(k, bool(v)))
             xp.body.addWidget(cb)
         self.b_xmp = TacButton("生成 XMP…", "secondary", en="SIDECAR", height=32)
         xp.body.addWidget(self.b_xmp)
-        xp.body.addWidget(caption("只为 RAW 新建“文件名.xmp”供 Lightroom 等软件读取；已有 .xmp 的跳过，不改原片。"
-                                  "没有选择对象时处理全部照片。可在「操作记录」页撤销。", "faint", 8))
+        xp.body.addWidget(caption("只为 RAW 写“文件名.xmp”供 Lightroom / Bridge 读取，不改原片；已有 .xmp 时"
+                                  "可选择更新（其余修图记录原样保留）或跳过。没有选择对象时处理全部照片。可在「操作记录」页撤销。",
+                                  "faint", 8))
         right.addWidget(xp)
         right.addStretch(1)
 
@@ -733,11 +737,8 @@ class TimePlacePage(Page):
 
     # ---- 写回 XMP --------------------------------------------------------
     def _write_xmp(self):
-        from ...ops.xmpwrite import build_xmp_plan, write_xmp
+        from ..xmpflow import run_xmp_flow
         lib = self.ctx.library
-        if not lib.exiftool_path:
-            info(self, "需要 ExifTool", "写入 XMP 需要 ExifTool。请在「系统设置」中检测或指定 exiftool.exe。")
-            return
         gids, text = self.target()
         if gids:
             groups = [g for gid in gids if (g := lib.by_gid(gid)) is not None]
@@ -745,30 +746,6 @@ class TimePlacePage(Page):
         else:
             groups = [g for g in lib.groups if g.files]
             scope_text = f"全部 {len(groups)} 张照片"
-        plan = build_xmp_plan(groups, self.x_gps.isChecked(), self.x_place.isChecked(), self.x_time.isChecked())
-        if not plan.tasks:
-            info(self, "没有需要写入的照片",
-                 f"范围：{scope_text}<br>没有可写内容 {plan.skipped_nothing} 张 · 已有 .xmp {plan.skipped_exists} 张 · "
-                 f"非 RAW {plan.skipped_no_raw} 张。<br><br>只有补全了地点（轨迹匹配 / 手动指定）或校正了时间的 RAW 才会生成 .xmp。")
-            return
-        if XmpDialog(self, plan, scope_text).exec() != XmpDialog.DialogCode.Accepted:
-            return
-        self.ctx.busy = True
-
-        def job(prog, cancel):
-            return write_xmp(plan, lib.exiftool_path, self.ctx.journal, lambda d, t, c: prog((d, t, c)), cancel)
-
-        res, tb = run_with_progress(self.ctx, self, "正在写入 XMP", "WRITING", job)
-        self.ctx.busy = False
-        if tb or res is None:
-            info(self, "写入出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
-            return
-        n = lib.attach_files(res.written)
-        self.ctx.files_changed.emit()
-        msg = f"已新建 <b>{n}</b> 个 .xmp 附属文件（批次 #{res.batch_id}，可在「操作记录」页撤销）。"
-        if res.failed:
-            msg += f"<br><br>{res.failed} 个失败：<br>" + "<br>".join(res.errors[:8])
-        if res.cancelled:
-            msg += "<br><br>已取消，剩余照片未写入。"
-        self.ctx.status.emit(f"{OPERATION_LABELS['xmp']}：{n} 个文件")
-        info(self, "写入完成", msg, "COMPLETE")
+        run_xmp_flow(self.ctx, self, groups, scope_text, gps=self.x_gps.isChecked(), place=self.x_place.isChecked(),
+                     time=self.x_time.isChecked(), rating=self.x_rating.isChecked(),
+                     update_existing=self.x_update.isChecked())

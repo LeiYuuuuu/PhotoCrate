@@ -6,14 +6,14 @@ import subprocess
 import sys
 from collections import OrderedDict
 
-from PySide6.QtCore import (QAbstractListModel, QModelIndex, QPoint, QRect, QRectF, QSize, Qt, QUrl,
+from PySide6.QtCore import (QAbstractListModel, QModelIndex, QObject, QPoint, QRect, QRectF, QSize, Qt, QUrl,
                             Signal)
 from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFontMetrics, QGuiApplication, QPainter,
                            QPen, QPixmap, QPolygonF)
 from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import QAbstractItemView, QListView, QMenu, QStyle, QStyledItemDelegate
 
-from ...analyzers.builtin import blur_state, classify_color, place_label
+from ...analyzers.builtin import FLAG_NAMES, LABEL_COLORS, LABEL_NAMES, blur_state, classify_color, place_label
 from ...core.dates import DATE_SOURCE_LABELS
 from .. import theme
 from ..theme import font
@@ -44,6 +44,19 @@ class PixmapCache:
 
 
 PIXMAPS = PixmapCache()
+
+
+class _Hooks(QObject):
+    """主窗口安装的全局钩子：缩略图上打分 / 打开大图查看器。没装时退回“用系统程序打开”。"""
+    repaint = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.rate = None        # fn(gids, change)
+        self.open = None        # fn(groups, index, widget)
+
+
+HOOKS = _Hooks()
 
 
 class ThumbModel(QAbstractListModel):
@@ -125,6 +138,20 @@ def tooltip_for(g, settings: dict | None = None) -> str:
     sc = g.feat("blur", "score")
     if sc is not None:
         lines.append(f"清晰度分数：{sc:.0f}")
+    rt = g.feats.get("rating") or {}
+    marks = []
+    if rt.get("rating"):
+        marks.append("★" * int(rt["rating"]))
+    if rt.get("label"):
+        marks.append(f"色标 {LABEL_NAMES.get(rt['label'], rt['label'])}")
+    if rt.get("flag"):
+        marks.append(FLAG_NAMES.get(rt["flag"], ""))
+    if marks:
+        lines.append("标记：" + " · ".join(marks) + ("" if rt.get("manual") else "（照片 / .xmp 里原有）"))
+    sim = g.feats.get("similar")
+    if sim:
+        lines.append(f"相似照片：第 {sim['rank']}/{sim['size']} 张" + ("，这一组里最清晰" if sim.get("best") else ""))
+    lines.append("<span style='color:gray'>双击 / 空格看大图 · 1–5 打星 · P 留用 · X 弃用</span>")
     return "<br>".join(lines)
 
 
@@ -135,9 +162,34 @@ class ThumbDelegate(QStyledItemDelegate):
         self.blur_threshold = 60.0
         self.show_score = False
         self.highlight_blurry = False
+        self.show_similar = True
 
     def sizeHint(self, option, index):
         return self.cell
+
+    def _paint_marks(self, qp: QPainter, img: QRect, rt: dict) -> None:
+        """星级（左下）、留用 / 弃用（右上）、色标（左侧竖条）。"""
+        p = theme.current()
+        lab = rt.get("label")
+        if lab:
+            qp.fillRect(QRect(img.left(), img.top(), 4, img.height()), QColor(LABEL_COLORS.get(lab, "#888888")))
+        stars = int(rt.get("rating") or 0)
+        if stars > 0:
+            qp.setFont(font("cn", 9, 700))
+            txt = "★" * stars
+            tw = QFontMetrics(qp.font()).horizontalAdvance(txt) + 10
+            tr = QRect(img.left() + 6, img.bottom() - 20, tw, 17)
+            qp.fillRect(tr, QColor(0, 0, 0, 170))
+            qp.setPen(QColor(p.accent))
+            qp.drawText(tr, Qt.AlignmentFlag.AlignCenter, txt)
+        flag = rt.get("flag")
+        if flag:
+            txt = "留" if flag == "pick" else "弃"
+            tr = QRect(img.right() - 22, img.top() + 4, 18, 18)
+            qp.fillRect(tr, QColor(p.ok if flag == "pick" else p.danger))
+            qp.setPen(QColor("#FFFFFF"))
+            qp.setFont(font("cn", 8.5, 700))
+            qp.drawText(tr, Qt.AlignmentFlag.AlignCenter, txt)
 
     def paint(self, qp: QPainter, option, index):
         p = theme.current()
@@ -185,6 +237,16 @@ class ThumbDelegate(QStyledItemDelegate):
             tags.append(("手动地点", p.ink2, p.surface))
         if g.feat("date", "corrected"):
             tags.append(("时间校正", p.accent, p.accent_ink))
+        sim = g.feats.get("similar")
+        if sim and self.show_similar:
+            tags.append((f"相似 {sim['rank']}/{sim['size']}", p.ink2, p.surface))
+            if sim.get("best"):
+                tags.append(("最佳", p.ok, "#FFFFFF"))
+        rt = g.feats.get("rating") or {}
+        if rt.get("flag") == "reject":
+            veil = QColor(p.bg)
+            veil.setAlpha(150)
+            qp.fillRect(img, veil)
         ty = img.top() + 4
         qp.setFont(font("mono", 7.5, 600))
         fm = QFontMetrics(qp.font())
@@ -205,6 +267,7 @@ class ThumbDelegate(QStyledItemDelegate):
             qp.fillRect(tr, QColor(p.danger if st == "blurry" else (p.slab if st == "sharp" else p.ink3)))
             qp.setPen(QColor("#FFFFFF"))
             qp.drawText(tr, Qt.AlignmentFlag.AlignCenter, txt)
+        self._paint_marks(qp, img, rt)
         # 文件名与日期
         ty = img.bottom() + 6
         qp.setFont(font("cn", 8.5, 500))
@@ -266,6 +329,7 @@ class ThumbGrid(QListView):
         self.doubleClicked.connect(self._open)
         self.selectionModel().selectionChanged.connect(self._sel_changed)
         self.settings_snapshot: dict | None = None
+        HOOKS.repaint.connect(self.viewport().update)
 
     def set_groups(self, groups: list, labels: dict | None = None) -> None:
         self.model_.set_groups(groups, labels)
@@ -295,8 +359,30 @@ class ThumbGrid(QListView):
 
     def _open(self, index):
         g = index.data(GroupRole)
-        if g:
+        if not g:
+            return
+        if HOOKS.open is not None:
+            HOOKS.open(self.model_.groups, index.row(), self)
+        else:
             QDesktopServices.openUrl(QUrl.fromLocalFile(g.primary))
+
+    def keyPressEvent(self, e):
+        k = e.key()
+        cur = self.currentIndex()
+        if k in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter) and cur.isValid():
+            self._open(cur)
+            return
+        if HOOKS.rate is not None and not (e.modifiers() & (Qt.KeyboardModifier.ControlModifier
+                                                             | Qt.KeyboardModifier.AltModifier)):
+            from ..viewer import rating_change_for_key
+            gids = self.selected_gids() or ([cur.data(GroupRole).gid] if cur.isValid() else [])
+            if gids:
+                first = next((g for g in self.model_.groups if g.gid == gids[0]), None)
+                change = rating_change_for_key(k, first.feats.get("rating") if first else None)
+                if change is not None:
+                    HOOKS.rate(gids, change)
+                    return
+        super().keyPressEvent(e)
 
     def _menu(self, pos: QPoint):
         g = self._group_at(pos)
@@ -309,8 +395,30 @@ class ThumbGrid(QListView):
         a2.triggered.connect(lambda: reveal_in_explorer(g.primary))
         a3 = QAction("复制文件路径", m)
         a3.triggered.connect(lambda: QGuiApplication.clipboard().setText(g.primary))
-        for a in (a1, a2, a3):
+        acts = [a1, a2, a3]
+        if HOOKS.open is not None:
+            a0 = QAction("大图查看（空格）", m)
+            idx = self.indexAt(pos)
+            a0.triggered.connect(lambda: self._open(idx))
+            a1.setText("用系统程序打开")
+            acts.insert(0, a0)
+        for a in acts:
             m.addAction(a)
+        if HOOKS.rate is not None:
+            gids = self.selected_gids() or [g.gid]
+            m.addSeparator()
+            sub = m.addMenu(f"标记（{len(gids)} 张）")
+            for text, change in ([(f"{'★' * n}  {n} 星", {"rating": n}) for n in range(1, 6)]
+                                 + [("清除星级  0", {"rating": 0}), (None, None),
+                                    ("留用  P", {"flag": "pick"}), ("弃用  X", {"flag": "reject"}),
+                                    ("取消留用 / 弃用  U", {"flag": None}), (None, None)]
+                                 + [(f"色标：{LABEL_NAMES[k]}", {"label": k}) for k in ("Red", "Yellow", "Green", "Blue", "Purple")]
+                                 + [("清除色标", {"label": None}), (None, None), ("清除本软件打的全部标记", "clear")]):
+                if text is None:
+                    sub.addSeparator()
+                    continue
+                act = sub.addAction(text)
+                act.triggered.connect(lambda _=False, c=change: HOOKS.rate(gids, None if c == "clear" else c))
         m.exec(self.viewport().mapToGlobal(pos))
 
     def viewportEvent(self, e):

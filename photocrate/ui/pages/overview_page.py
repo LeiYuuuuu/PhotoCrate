@@ -1,4 +1,4 @@
-"""03 统计概览：时间、地区、色调、相机、类型、来源、画幅、清晰度的分布；点击条目查看对应照片。"""
+"""04 统计概览：时间、地区、色调、相机、类型、来源、画幅、清晰度的分布；点击条目查看对应照片。"""
 from __future__ import annotations
 
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QScrollArea, QVBoxLayout, QWidget
@@ -21,7 +21,7 @@ def _region_key(g):
 
 class OverviewPage(Page):
     page_id = "overview"
-    index = "03"
+    index = "04"
     title = "统计概览"
     en = "Data overview // distribution"
     sub = "一眼看清照片库的构成。点击任意条目，下方会列出对应的照片。"

@@ -45,6 +45,7 @@ class AppContext(QObject):
     theme_changed = Signal()
     status = Signal(str)                # 状态栏消息
     navigate = Signal(str)              # 请求跳转页面（页面 id）
+    ratings_changed = Signal()          # 星级 / 色标 / 留弃标记变化（只需重绘）
 
     def __init__(self, settings: Settings, library: Library, journal: Journal):
         super().__init__()
@@ -69,6 +70,33 @@ class AppContext(QObject):
         self._workers.add(w)
         w.start()
         return w
+
+    # ---- 打分 / 大图 ------------------------------------------------------
+    def rate(self, gids: list[int], change: dict[str, Any] | None) -> int:
+        n = self.library.set_rating(gids, change)
+        if n:
+            self.ratings_changed.emit()
+            parts = []
+            if change is None:
+                parts.append("已清除标记")
+            else:
+                from ..analyzers.builtin import FLAG_NAMES, LABEL_NAMES
+                if "rating" in change:
+                    parts.append(f"{change['rating']} 星" if change["rating"] else "清除星级")
+                if "label" in change:
+                    parts.append(f"色标 {LABEL_NAMES.get(change['label'], change['label'])}" if change["label"] else "清除色标")
+                if "flag" in change:
+                    parts.append(FLAG_NAMES.get(change["flag"], "取消留用 / 弃用") if change["flag"] else "取消留用 / 弃用")
+            self.status.emit(f"{n} 张照片：" + "、".join(parts) + "（写入 .xmp 后 Lightroom / Bridge 才能看到）")
+        return n
+
+    def open_viewer(self, groups: list, index: int, parent=None):
+        from .viewer import ViewerWindow
+        v = ViewerWindow(self, groups, index, parent)
+        v.showMaximized()
+        v.raise_()
+        v.activateWindow()
+        return v
 
     def set_setting(self, key: str, value: Any) -> None:
         self.settings.set(key, value)

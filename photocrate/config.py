@@ -152,6 +152,14 @@ DEFAULTS: dict[str, Any] = {
     "color_bright_l": 65.0,
     # 清晰度
     "blur_threshold": 60.0,
+    # 连拍 / 相似分组
+    "similar_gap_seconds": 10,        # 相邻两张最多相差几秒
+    "similar_threshold": 12,          # 感知哈希最多相差几位（0–64，越小越严格）
+    "similar_folder": "待确认_相似",
+    "xmp_write_rating": True,
+    "xmp_update_existing": True,      # 已有 .xmp 时更新其中对应字段（先备份，可撤销）
+    # 批量重命名
+    "rename_template": "{日期}_{市|省|国家|未知地点}_{序号}",
     # 文件
     "pair_live_photo": True,
     "pair_across_folders": True,      # RAW 与 JPG 分处不同文件夹时，按文件名 + 拍摄时间重新配对

@@ -76,6 +76,7 @@ def main(samples: str, out: str, theme_name: str = "light") -> None:
         (select_some, 200), (shot("01_source"), 300),
         (go("partition"), 300), (tree_pick, 300), (shot("02_partition"), 300),
         (go("overview"), 300), (drill, 300), (shot("03_overview"), 300),
+        (go("culling"), 300), (shot("04_culling"), 300),
         (go("blur"), 300), (shot("04_blur"), 300),
         (go("history"), 300), (shot("05_history"), 300),
         (go("settings"), 300), (shot("06_settings"), 300),
