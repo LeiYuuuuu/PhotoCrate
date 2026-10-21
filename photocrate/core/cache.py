@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any, Iterable
 
-META_VERSION = 3
+META_VERSION = 4     # v4：增加 GPS 时间（gps_utc）
 
 
 class FeatureCache:

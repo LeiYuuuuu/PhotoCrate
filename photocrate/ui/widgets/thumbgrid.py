@@ -80,15 +80,30 @@ def tooltip_for(g, settings: dict | None = None) -> str:
     lines = [f"<b>{g.name}</b>", f"<span style='color:gray'>{g.folder}</span>"]
     if len(g.files) > 1:
         lines.append("同组文件：" + "、".join(f.name for f in g.files if f.path != g.primary))
+    if g.cross_folder:
+        lines.append("<span style='color:gray'>RAW 与 JPG 在不同文件夹（按文件名 + 拍摄时间配对）</span>")
     d = g.date
-    lines.append(f"日期：{d.strftime('%Y-%m-%d %H:%M') if d else '未知'}（{DATE_SOURCE_LABELS.get(g.date_source, '')}）")
+    dd = g.feats.get("date") or {}
+    tz = f" {dd['tz']}" if dd.get("tz") else ""
+    lines.append(f"日期：{d.strftime('%Y-%m-%d %H:%M') if d else '未知'}{tz}（{DATE_SOURCE_LABELS.get(g.date_source, '')}）")
+    if dd.get("corrected"):
+        from ...core.geotime import shift_label
+        orig = dd.get("orig_dt", "").replace("T", " ")[:16]
+        lines.append(f"时间已校正 {shift_label(int(dd.get('shift') or 0)) or '（仅时区）'}，文件里记录的是 {orig}"
+                     + (f" {dd['orig_tz']}" if dd.get("orig_tz") else ""))
     geo = g.feats.get("geo") or {}
     if geo.get("country") or geo.get("has_gps"):
         place = place_label(geo) or "未识别"
-        how = {"manual": "（手动指定）", "inferred": "（按时间推测）"}.get(geo.get("source"), "")
+        if geo.get("source") == "track":
+            from ...core.geotime import MATCH_KIND_LABELS
+            gap = int(geo.get("match_gap_s") or 0)
+            how = (f"（{MATCH_KIND_LABELS.get(geo.get('match_kind'), '轨迹')}匹配：{geo.get('match_from', '')}，"
+                   f"相差 {gap // 60} 分 {gap % 60} 秒）")
+        else:
+            how = {"manual": "（手动指定）", "inferred": "（按时间推测）"}.get(geo.get("source"), "")
         lines.append(f"地点：{place}{how}")
-    if geo.get("has_gps") and geo.get("lat") is not None:
-        lines.append(f"GPS：{geo['lat']:.5f}, {geo['lon']:.5f}")
+    if geo.get("lat") is not None and geo.get("source") in ("gps", "track"):
+        lines.append(f"GPS：{geo['lat']:.5f}, {geo['lon']:.5f}" + ("（匹配）" if geo.get("source") == "track" else ""))
     cam = g.feat("camera", "model")
     if cam:
         lines.append(f"相机：{cam}")
@@ -161,8 +176,15 @@ class ThumbDelegate(QStyledItemDelegate):
             tags.append(("无日期", p.warn, "#FFFFFF"))
         if self.highlight_blurry and blur_state(g, self.blur_threshold) == "blurry":
             tags.append(("模糊", p.danger, "#FFFFFF"))
-        if g.feat("geo", "inferred"):
+        src = g.feat("geo", "source")
+        if src == "inferred":
             tags.append(("地点推测", p.accent2, "#FFFFFF"))
+        elif src == "track":
+            tags.append(("轨迹匹配", p.ok, "#FFFFFF"))
+        elif src == "manual":
+            tags.append(("手动地点", p.ink2, p.surface))
+        if g.feat("date", "corrected"):
+            tags.append(("时间校正", p.accent, p.accent_ink))
         ty = img.top() + 4
         qp.setFont(font("mono", 7.5, 600))
         fm = QFontMetrics(qp.font())

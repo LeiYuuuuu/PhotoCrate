@@ -22,13 +22,24 @@ from ..config import find_resource
 log = logging.getLogger(__name__)
 
 CHINA_CODES = {"CN", "HK", "MO", "TW"}
+_JP_SUFFIXES = ("-shi", " Shi", "-cho", " Cho", " Town")
+
+
+def normalize_city_name(cc: str, name: str | None) -> str | None:
+    """GeoNames 的日本地名常带“-shi / -cho”后缀（Osaka-shi、Nara-shi），去掉后才能和中文对照表对上。"""
+    if not name or cc != "JP":
+        return name
+    for suf in _JP_SUFFIXES:
+        if name.endswith(suf) and len(name) > len(suf) + 1:
+            return name[: -len(suf)]
+    return name
 
 
 class _WorldIndex:
     def __init__(self, path: Path):
         import numpy as np
 
-        lats, lons, self.names, self.admin1, self.cc = [], [], [], [], []
+        lats, lons, self.names, self.admin1, self.admin2, self.cc = [], [], [], [], [], []
         with gzip.open(path, "rt", encoding="utf-8", newline="") as f:
             r = csv.reader(f)
             next(r, None)
@@ -40,6 +51,7 @@ class _WorldIndex:
                     continue
                 self.names.append(row[2])
                 self.admin1.append(row[3])
+                self.admin2.append(row[4])
                 self.cc.append(row[5])
         la = np.radians(np.asarray(lats, dtype=np.float64))
         lo = np.radians(np.asarray(lons, dtype=np.float64))
@@ -117,6 +129,13 @@ class GeoService:
             self._cache[key] = res
             return res
 
+    def _city_zh(self, cc: str, name: str | None) -> str | None:
+        if not name:
+            return None
+        cities = self._zh["cities"]
+        norm = normalize_city_name(cc, name)
+        return cities.get(f"{cc}/{name}") or cities.get(f"{cc}/{norm}") or norm
+
     def _lookup(self, lat: float, lon: float) -> dict[str, Any]:
         cn = self._china()
         if cn is not None:
@@ -149,12 +168,17 @@ class GeoService:
         countries = self._zh["countries"]
         admin1 = w.admin1[i] or None
         name = w.names[i] or None
+        district = None
+        admin2 = w.admin2[i] or ""
+        if cc == "JP" and name and name.endswith("-ku") and admin2.endswith(("-shi", " Shi")):
+            # 政令指定都市的区（Kamigyo-ku，所属 Kyoto-shi）：市取所属城市，区作为区县
+            district, name = name, admin2
         res = {
             "cc": cc,
             "country": countries.get(cc, cc),
             "province": self._zh["admin1"].get(f"{cc}/{admin1}", admin1) if admin1 else None,
-            "city": self._zh["cities"].get(f"{cc}/{name}", name) if name else None,
-            "district": None,
+            "city": self._city_zh(cc, name),
+            "district": self._city_zh(cc, district),
             "in_china": False,
             "far_km": round(dist_km, 1),
         }

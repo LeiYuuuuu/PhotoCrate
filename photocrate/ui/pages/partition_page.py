@@ -1,4 +1,4 @@
-"""02 分区编排：选择条件（可多级嵌套）→ 实时预览目标文件夹结构 → 生成计划 → 确认执行。"""
+"""03 分区编排：选择条件（可多级嵌套）→ 实时预览目标文件夹结构 → 生成计划 → 确认执行。"""
 from __future__ import annotations
 
 import os
@@ -17,7 +17,7 @@ from ...partition.base import DIMENSIONS, PartitionContext, all_tokens, member_f
 from ...partition.engine import BUILTIN_PRESETS, PartitionSpec, Rule, build_tree, unknown_tokens
 from ...plugins import PRESETS
 from .. import theme
-from ..dialogs import PlanDialog, ProgressDialog, ask, info
+from ..dialogs import PlanDialog, ask, info, run_with_progress
 from ..theme import font
 from ..widgets.deco import IconButton, Panel, TacButton, caption, micro_label
 from ..widgets.thumbgrid import ThumbGrid, open_folder
@@ -180,7 +180,7 @@ class CountDelegate(QStyledItemDelegate):
 
 class PartitionPage(Page):
     page_id = "partition"
-    index = "02"
+    index = "03"
     title = "分区编排"
     en = "Partition matrix // preview & execute"
     sub = "按顺序叠加分区条件，右侧实时预览文件夹结构；确认计划后才会真正移动文件。"
@@ -646,7 +646,6 @@ class PartitionPage(Page):
         self.execute(plan)
 
     def execute(self, plan):
-        pd = ProgressDialog(self, "正在" + ("复制" if plan.operation == "copy" else "移动") + "照片", "EXECUTING")
         mover = self.ctx.mover
         extra = {"spec": plan.spec_text}
         self.ctx.busy = True
@@ -654,10 +653,14 @@ class PartitionPage(Page):
         def job(prog, cancel):
             return mover.execute(plan, lambda d, t, c: prog((d, t, c)), cancel, extra)
 
-        w = self.ctx.run(job, lambda v: pd.update_progress(*v), lambda res: self._done(res, plan),
-                         lambda tb: info(self, "执行出错", f"<pre style='font-size:8pt'>{tb[-1500:]}</pre>", "ERROR"))
-        pd.attach(w)
-        pd.exec()
+        res, tb = run_with_progress(self.ctx, self, "正在" + ("复制" if plan.operation == "copy" else "移动") + "照片",
+                                    "EXECUTING", job)
+        if tb or res is None:
+            self.ctx.busy = False
+            self.ctx.files_changed.emit()
+            info(self, "执行出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
+            return
+        self._done(res, plan)
 
     def _done(self, res, plan):
         self.ctx.busy = False

@@ -133,6 +133,17 @@ DEFAULTS: dict[str, Any] = {
     "gps_assume_gcj02": False,
     "geo_infer": False,
     "geo_infer_minutes": 30,
+    # GPS 补全（按拍摄时间匹配轨迹 / 参考照片）
+    "gps_fill": True,
+    "gps_fill_library": True,         # 同批里自带 GPS 的照片（通常是手机）也作为参考
+    "gps_ref_dirs": [],               # 参考照片文件夹（只读取，不会移动）
+    "gps_track_files": [],            # GPX / KML 轨迹文件
+    "gps_fill_minutes": 30,           # 时间相差多少分钟以内算匹配
+    "camera_tz_default": "",          # 照片没有时区信息时按哪个时区（如 +09:00），留空 = 未知
+    # 写回 XMP 附属文件
+    "xmp_write_gps": True,
+    "xmp_write_place": True,
+    "xmp_write_time": True,
     # 色调阈值
     "color_mono_chroma": 7.0,
     "color_warm_margin": 0.12,
@@ -143,6 +154,7 @@ DEFAULTS: dict[str, Any] = {
     "blur_threshold": 60.0,
     # 文件
     "pair_live_photo": True,
+    "pair_across_folders": True,      # RAW 与 JPG 分处不同文件夹时，按文件名 + 拍摄时间重新配对
     "verify_hash": False,
     "operation": "move",              # move / copy
     "conflict": "rename",             # rename / skip

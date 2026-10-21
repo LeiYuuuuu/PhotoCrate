@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 # 只读取需要的标签可显著提速；"#" 表示该标签输出数值而非可读文本
 EXIFTOOL_TAGS = [
     "DateTimeOriginal", "SubSecTimeOriginal", "OffsetTimeOriginal", "CreateDate", "DateCreated",
-    "GPSLatitude#", "GPSLongitude#", "GPSAltitude#",
+    "GPSLatitude#", "GPSLongitude#", "GPSAltitude#", "GPSDateTime",
     "Make", "Model", "LensModel", "LensID", "Lens",
     "FocalLength#", "FocalLengthIn35mmFormat#", "ISO#", "FNumber#", "ExposureTime#",
     "ImageWidth#", "ImageHeight#", "ImageSize#", "Orientation#",
@@ -169,6 +169,7 @@ def normalize_exiftool(d: dict[str, Any]) -> dict[str, Any]:
         "dt_create": _text(g("CreateDate")),
         "dt_xmp": _text(g("DateCreated")),
         "lat": lat, "lon": lon, "alt": _num(g("GPSAltitude")),
+        "gps_utc": _text(g("GPSDateTime")) if lat is not None else None,
         "make": _text(g("Make")),
         "model": _text(g("Model")),
         "lens": lens,
@@ -316,8 +317,15 @@ class FallbackBackend(MetadataBackend):
             if lon is not None and str(gps.get(3, "E")).upper().startswith("W"):
                 lon = -lon
         lat, lon = _clean_gps(lat, lon)
+        gps_utc = None
+        try:
+            if lat is not None and gps.get(29) and gps.get(7):
+                h, mi, se = (float(x) for x in gps[7])
+                gps_utc = f"{str(gps[29]).strip()} {int(h):02d}:{int(mi):02d}:{int(se):02d}Z"
+        except Exception:
+            gps_utc = None
         return {
-            "dt_original": _text(sub.get(36867)), "subsec": _text(sub.get(37521)),
+            "dt_original": _text(sub.get(36867)), "subsec": _text(sub.get(37521)), "gps_utc": gps_utc,
             "offset": _text(sub.get(36881)), "dt_create": _text(sub.get(36868) or ex.get(306)),
             "dt_xmp": None, "lat": lat, "lon": lon, "alt": None,
             "make": _text(ex.get(271)), "model": _text(ex.get(272)),

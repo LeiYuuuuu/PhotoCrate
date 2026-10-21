@@ -120,6 +120,38 @@ class Journal:
         with self._lock:
             return [r[0] for r in self._db.execute("SELECT path FROM dirs WHERE batch_id=?", (batch_id,))]
 
+    def find_moved(self, path: str, after_batch: int) -> str | None:
+        """path 在 after_batch 之后的“移动”批次里被移到了哪里（逐批跟踪，返回最新位置；没被移动过返回 None）。"""
+        cur, bid, moved = path, after_batch, False
+        with self._lock:
+            for _ in range(50):
+                r = self._db.execute(
+                    "SELECT o.dst, o.batch_id FROM ops o JOIN batches b ON b.id = o.batch_id "
+                    "WHERE b.operation = 'move' AND o.batch_id > ? AND o.status = 'done' AND lower(o.src) = lower(?) "
+                    "ORDER BY o.batch_id LIMIT 1", (bid, cur)).fetchone()
+                if not r:
+                    break
+                cur, bid, moved = r[0], r[1], True
+        return cur if moved else None
+
+    def removed_by_xmp_undo(self, path: str) -> bool:
+        """path 是否是某个“写入 XMP”批次新建、之后又被撤销（放入回收站）的文件——沿移动记录往前追溯到它最初的位置。"""
+        cur = path
+        with self._lock:
+            for _ in range(50):
+                if self._db.execute(
+                        "SELECT 1 FROM ops o JOIN batches b ON b.id = o.batch_id WHERE b.operation = 'xmp' "
+                        "AND o.status = 'undone' AND lower(o.dst) = lower(?) LIMIT 1", (cur,)).fetchone():
+                    return True
+                r = self._db.execute(
+                    "SELECT o.src FROM ops o JOIN batches b ON b.id = o.batch_id WHERE b.operation = 'move' "
+                    "AND o.status IN ('done', 'undone') AND lower(o.dst) = lower(?) ORDER BY o.batch_id DESC LIMIT 1",
+                    (cur,)).fetchone()
+                if not r or r[0] == cur:
+                    return False
+                cur = r[0]
+        return False
+
     def incomplete(self) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(r) for r in self._db.execute(
@@ -141,6 +173,8 @@ class Journal:
             except Exception:
                 pass
 
+
+OPERATION_LABELS = {"move": "移动", "copy": "复制", "xmp": "写入 XMP"}
 
 STATUS_LABELS = {
     "running": "进行中（未完成）", "done": "已完成", "cancelled": "已取消", "failed": "有失败",

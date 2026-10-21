@@ -14,7 +14,7 @@ from ..config import find_resource, screenshots_dir
 from ..plugins import PAGES
 from . import theme
 from .context import AppContext
-from .dialogs import ProgressDialog, choose, info
+from .dialogs import choose, info, run_with_progress
 from .pages.blur_page import BlurPage
 from .pages.base import Page
 from .pages.history_page import HistoryPage
@@ -22,6 +22,7 @@ from .pages.overview_page import OverviewPage
 from .pages.partition_page import PartitionPage
 from .pages.settings_page import SettingsPage
 from .pages.source_page import SourcePage
+from .pages.timeplace_page import TimePlacePage
 from .theme import font
 from .widgets.deco import Barcode, LogoMark
 
@@ -242,13 +243,13 @@ class MainWindow(QMainWindow):
 
         self.pages: list[Page | QWidget] = []
         self.page_ids: list[str] = []
-        for cls in (SourcePage, PartitionPage, OverviewPage, BlurPage, HistoryPage, SettingsPage):
+        for cls in (SourcePage, TimePlacePage, PartitionPage, OverviewPage, BlurPage, HistoryPage, SettingsPage):
             self._add_page(cls(ctx), cls.page_id, cls.index, cls.title, cls.en.split("//")[0].strip())
         # 插件页面
         for i, spec in enumerate(PAGES):
             try:
                 w = spec.factory(ctx)
-                self._add_page(w, f"plugin_{i}", f"{7 + i:02d}", spec.title, spec.en)
+                self._add_page(w, f"plugin_{i}", f"{8 + i:02d}", spec.title, spec.en)
             except Exception as e:
                 ctx.status.emit(f"插件页面加载失败：{spec.title}：{e}")
         self.nav.changed.connect(self.go)
@@ -394,7 +395,6 @@ class MainWindow(QMainWindow):
                             [("later", "稍后", "secondary"), ("rollback", "全部回滚", "danger"),
                              ("resume", "继续完成", "primary")], en="RECOVERY")
             if choice in ("resume", "rollback"):
-                pd = ProgressDialog(self, "正在恢复", "RECOVERY")
                 mover = self.ctx.mover
                 bid = b["id"]
                 fn = mover.resume if choice == "resume" else mover.rollback
@@ -402,12 +402,13 @@ class MainWindow(QMainWindow):
                 def job(prog, cancel, fn=fn, bid=bid):
                     return fn(bid, lambda d, t, c: prog((d, t, c)), cancel)
 
-                w = self.ctx.run(job, lambda v: pd.update_progress(*v),
-                                 lambda res: (self.ctx.files_changed.emit(),
-                                              info(self, "恢复完成", f"已处理 {res.done_files} 个文件。"
-                                                   + ("<br>" + "<br>".join(res.errors[:8]) if res.errors else ""))))
-                pd.attach(w)
-                pd.exec()
+                res, tb = run_with_progress(self.ctx, self, "正在恢复", "RECOVERY", job)
+                self.ctx.files_changed.emit()
+                if tb or res is None:
+                    info(self, "恢复出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
+                else:
+                    info(self, "恢复完成", f"已处理 {res.done_files} 个文件。"
+                         + ("<br>" + "<br>".join(res.errors[:8]) if res.errors else ""))
 
     def closeEvent(self, e):
         if self.ctx.busy:

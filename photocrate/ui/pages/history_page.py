@@ -1,4 +1,4 @@
-"""05 操作记录：每次移动/复制的完整清单，可撤销、导出。"""
+"""06 操作记录：每次移动/复制的完整清单，可撤销、导出。"""
 from __future__ import annotations
 
 import os
@@ -8,10 +8,10 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QHeaderView, QSplitter,
                                QTableView, QTableWidget, QTableWidgetItem)
 
-from ...ops.journal import STATUS_LABELS
+from ...ops.journal import OPERATION_LABELS, STATUS_LABELS
 from ...ops.pathsafe import human_size
 from .. import theme
-from ..dialogs import ProgressDialog, ask, info
+from ..dialogs import ask, info, run_with_progress
 from ..theme import font
 from ..widgets.deco import Panel, TacButton, caption
 from ..widgets.thumbgrid import open_folder
@@ -61,7 +61,7 @@ class OpsModel(QAbstractTableModel):
 
 class HistoryPage(Page):
     page_id = "history"
-    index = "05"
+    index = "06"
     title = "操作记录"
     en = "Operation log // undo"
     sub = "每次执行前都会先写日志。选中一个批次即可查看清单、撤销（把文件移回原处）或导出。"
@@ -128,11 +128,14 @@ class HistoryPage(Page):
         self.refresh()
 
     def refresh(self):
+        cur = self._current() if self._batches else None
+        keep_id = cur["id"] if cur else None
+        old_top = self._batches[0]["id"] if self._batches else None
         self._batches = self.ctx.journal.batches()
         p = theme.current()
         self.table.setRowCount(len(self._batches))
         for r, b in enumerate(self._batches):
-            vals = [f"{b['id']}", (b["created"] or "").replace("T", " "), "复制" if b["operation"] == "copy" else "移动",
+            vals = [f"{b['id']}", (b["created"] or "").replace("T", " "), OPERATION_LABELS.get(b["operation"], b["operation"]),
                     b["spec"] or "", f"{b['groups']} / {b['total']}", human_size(b["bytes"] or 0),
                     STATUS_LABELS.get(b["status"], b["status"])]
             for c, v in enumerate(vals):
@@ -147,8 +150,12 @@ class HistoryPage(Page):
                     it.setFont(font("cn", 9, 700))
                 self.table.setItem(r, c, it)
         self.bpanel.set_meta(f"{len(self._batches)} BATCHES")
-        if self._batches and not self.table.selectedItems():
-            self.table.selectRow(0)
+        if self._batches:
+            # 有新批次时选中最新的；否则保持原来选中的批次（按编号，而不是按行号）
+            new_top = self._batches[0]["id"] != old_top
+            ids = [b["id"] for b in self._batches]
+            row = 0 if (new_top or keep_id not in ids) else ids.index(keep_id)
+            self.table.selectRow(row)
         # 撤销等操作后选中行没变，itemSelectionChanged 不会触发 → 手动刷新下方文件清单
         self._load_ops()
 
@@ -194,22 +201,31 @@ class HistoryPage(Page):
         b = self._current()
         if not b:
             return
-        op = "删除复制出来的文件（放入回收站）" if b["operation"] == "copy" else "把文件移回原来的位置"
+        op = {"copy": "删除复制出来的文件（放入回收站）",
+              "xmp": "把这一批新建的 .xmp 附属文件放入回收站（之后若在 Lightroom 等软件里改过它们，改动也会一起进回收站）"
+              }.get(b["operation"], "把文件移回原来的位置")
         if not ask(self, f"撤销批次 #{b['id']}", f"将{op}，共 {b['done'] or b['total']} 个文件。<br>"
                    "如果之后手动改动过这些文件，相关文件会被跳过并在清单里标注。", ok="撤销", danger=True, en="UNDO"):
             return
-        pd = ProgressDialog(self, "正在撤销", "ROLLBACK")
         mover = self.ctx.mover
 
         def job(prog, cancel):
             return mover.undo(b["id"], lambda d, t, c: prog((d, t, c)), cancel)
 
-        w = self.ctx.run(job, lambda v: pd.update_progress(*v), self._undone)
-        pd.attach(w)
-        pd.exec()
+        res, tb = run_with_progress(self.ctx, self, "正在撤销", "ROLLBACK", job)
+        if tb or res is None:
+            self.refresh()
+            info(self, "撤销出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
+            return
+        self._undone(res)
 
     def _undone(self, res):
-        self.ctx.library.apply_moves(res.mapping)
+        lib = self.ctx.library
+        lib.apply_moves(res.mapping)
+        if lib.prune_missing():
+            # 撤销“写入 XMP”后：去掉已不存在的 .xmp，并按剩下的文件重新整理日期与地点
+            self.ctx.run(lambda prog, cancel: lib.run_meta_analyzers(), None,
+                         lambda _: self.ctx.library_changed.emit())
         self.ctx.files_changed.emit()
         msg = f"已恢复 {res.done_files} 个文件。"
         if res.errors:

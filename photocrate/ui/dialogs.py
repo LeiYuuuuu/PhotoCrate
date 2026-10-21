@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
-from PySide6.QtWidgets import (QDialog, QFileDialog, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
+from PySide6.QtWidgets import (QApplication, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
                                QTableView, QVBoxLayout, QWidget)
 
 from ..ops.pathsafe import human_size
@@ -150,6 +150,27 @@ class ProgressDialog(_Base):
 
     def reject(self):   # 禁止 Esc 直接关掉
         self._cancel()
+
+
+def run_with_progress(ctx, parent, title: str, en: str, job):
+    """在后台运行 job(prog, cancel)，期间显示进度窗口；返回 (结果, 错误信息)。
+
+    结果对话框一定要等进度窗口关闭之后再弹出：任务很快完成时，进度窗口在结果对话框弹出的同时关闭，
+    Windows 会把焦点交给别的程序，结果对话框可能落到其他窗口后面、看不见却挡住整个界面。
+    """
+    pd = ProgressDialog(parent, title, en)
+    box: dict = {}
+    w = ctx.run(job, lambda v: pd.update_progress(*v), lambda r: box.__setitem__("result", r),
+                lambda tb: box.__setitem__("error", tb))
+    pd.attach(w)
+    pd.exec()
+    w.wait(10_000)
+    QApplication.processEvents()        # 确保 done / error 信号已经处理
+    win = parent.window() if parent is not None else None
+    if win is not None:
+        win.raise_()
+        win.activateWindow()
+    return box.get("result"), box.get("error")
 
 
 class _OpsModel(QAbstractTableModel):

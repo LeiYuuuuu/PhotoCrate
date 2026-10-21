@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta
 from typing import Any
 
 from ..core.dates import resolve_date
@@ -17,6 +18,9 @@ class DateAnalyzer(Analyzer):
     label = "拍摄日期"
     order = 10
 
+    """结果字段：dt（已应用时间校正的本地拍摄时间）、source、detail、tz（时区，如 +09:00）。
+    有时间校正时另有：corrected=True、shift（秒）、orig_dt（文件里记录的原始时间）、orig_tz。"""
+
     def analyze(self, group, ctx: AnalysisContext):
         s = ctx.settings
         # 用组内最早的文件修改时间作为兜底（RAW 通常保留相机写入时间）
@@ -31,7 +35,26 @@ class DateAnalyzer(Analyzer):
                 best = r
             if best["source"] in ("exif", "exif_create", "xmp", "filename"):
                 break
+        shift = group.annotation(ctx.extras.get("time_shifts"))
+        if shift and best and best.get("dt"):
+            best = apply_time_shift(best, int(shift.get("seconds") or 0), shift.get("tz") or None)
         return best
+
+
+def apply_time_shift(d: dict[str, Any], seconds: int, tz: str | None) -> dict[str, Any]:
+    """把时间校正应用到日期结果上（不改文件，只改软件里使用的时间）。"""
+    if not seconds and not tz:
+        return d
+    base = datetime.fromisoformat(d["dt"])
+    out = dict(d)
+    out["dt"] = (base + timedelta(seconds=seconds)).isoformat()
+    out["orig_dt"] = d["dt"]
+    out["orig_tz"] = d.get("tz")
+    out["shift"] = int(seconds)
+    if tz:
+        out["tz"] = tz
+    out["corrected"] = True
+    return out
 
 
 def _date_rank(src):
@@ -49,15 +72,15 @@ class GeoAnalyzer(Analyzer):
 
     """结果字段：
     has_gps  文件里是否有真实 GPS
-    located  是否知道地点（GPS / 手动指定 / 按时间推测 任一来源）
-    source   "gps" / "manual" / "inferred" / None
+    located  是否知道地点（GPS / 手动指定 / 轨迹匹配 / 按时间推测 任一来源）
+    source   "gps" / "manual" / "track"（GPS 轨迹或参考照片按时间匹配）/ "inferred" / None
     country province city district cc in_china   地点
     """
 
     def analyze(self, group, ctx: AnalysisContext):
         lat, lon = group.meta.get("lat"), group.meta.get("lon")
         real = lat is not None and lon is not None
-        manual = (ctx.extras.get("manual_places") or {}).get(group.primary_file.sig)
+        manual = group.annotation(ctx.extras.get("manual_places"))
         if manual and manual.get("country") and (not real or manual.get("override")):
             place = {k: manual.get(k) for k in ("country", "province", "city", "district", "cc")}
             return {
@@ -94,7 +117,7 @@ def infer_missing_locations(groups, minutes: int) -> int:
     known = []
     for g in groups:
         geo = g.feats.get("geo") or {}
-        if geo.get("country") and geo.get("source") in ("gps", "manual") and g.date \
+        if geo.get("country") and geo.get("source") in ("gps", "manual", "track") and g.date \
                 and g.date_source in ("exif", "exif_create", "xmp"):
             known.append((g.date.timestamp(), g))
     known.sort(key=lambda t: t[0])

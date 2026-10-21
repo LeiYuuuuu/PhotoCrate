@@ -1,4 +1,4 @@
-"""06 设置：外观、ExifTool、日期识别规则、地区、色调阈值、文件安全、性能、插件、缓存、关于。"""
+"""07 设置：外观、ExifTool、日期识别规则、地区、色调阈值、文件安全、性能、插件、缓存、关于。"""
 from __future__ import annotations
 
 import os
@@ -25,7 +25,7 @@ from .base import Page
 
 class SettingsPage(Page):
     page_id = "settings"
-    index = "06"
+    index = "07"
     title = "系统设置"
     en = "System config"
     sub = "修改日期 / 地区相关设置后会自动重新整理（无需重新扫描）。"
@@ -166,7 +166,8 @@ class SettingsPage(Page):
         r.addWidget(self.sp_inf)
         r.addStretch(1)
         gp.body.addLayout(r)
-        gp.body.addWidget(caption("适合“手机有 GPS、相机没有”的旅行照片；推测的地点在缩略图上有青色标记。", "faint", 8.5))
+        gp.body.addWidget(caption("更准确的做法：在「时间与地点」页添加手机照片文件夹或 GPX 轨迹，按拍摄时间（考虑时区）补全 GPS；"
+                                  "也可以按天手动指定地点。推测的地点在缩略图上有青色标记。", "faint", 8.5))
         left.addWidget(gp)
         left.addStretch(1)
 
@@ -187,10 +188,14 @@ class SettingsPage(Page):
         self.cb_live = QCheckBox("把同名 .MOV（实况照片视频）与照片一起移动（下次扫描生效）")
         self.cb_live.setChecked(bool(self.s.get("pair_live_photo", True)))
         self.cb_live.toggled.connect(lambda v: self._set("pair_live_photo", v))
+        self.cb_pair = QCheckBox("RAW 与 JPG 在不同文件夹时，按文件名 + 拍摄时间重新配对（下次扫描生效）")
+        self.cb_pair.setChecked(bool(self.s.get("pair_across_folders", True)))
+        self.cb_pair.toggled.connect(lambda v: self._set("pair_across_folders", v))
         self.cb_hash = QCheckBox("跨磁盘移动时额外校验 SHA-256（更安全，更慢）")
         self.cb_hash.setChecked(bool(self.s.get("verify_hash")))
         self.cb_hash.toggled.connect(lambda v: self._set("verify_hash", v))
         fp.body.addWidget(self.cb_live)
+        fp.body.addWidget(self.cb_pair)
         fp.body.addWidget(self.cb_hash)
         fp.body.addWidget(caption("始终生效的保护：先写日志再移动；RAW+JPG 与 .xmp/.aae 成组移动、失败整组退回；"
                                   "重名只加编号不覆盖；跨盘先复制校验再删源；删除一律进回收站。", "faint", 8.5))

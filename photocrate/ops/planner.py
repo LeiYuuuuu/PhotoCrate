@@ -50,6 +50,9 @@ class Plan:
     errors: list[str] = field(default_factory=list)
     guess_dates: int = 0
     inferred_places: int = 0
+    matched_places: int = 0
+    manual_places: int = 0
+    corrected_times: int = 0
 
     @property
     def file_count(self) -> int:
@@ -187,6 +190,13 @@ def build_plan(groups, spec: PartitionSpec, ctx: PartitionContext, target_root: 
             plan.guess_dates += 1
         if g.feat("geo", "inferred"):
             plan.inferred_places += 1
+        src = g.feat("geo", "source")
+        if src == "track":
+            plan.matched_places += 1
+        elif src == "manual":
+            plan.manual_places += 1
+        if g.feat("date", "corrected"):
+            plan.corrected_times += 1
         plan.items.append(PlanItem(g.gid, ops, os.path.relpath(folder, target_root), n > 0, cross))
 
     plan.new_dirs = len(new_dirs)
@@ -204,6 +214,12 @@ def build_plan(groups, spec: PartitionSpec, ctx: PartitionContext, target_root: 
         plan.warnings.append(f"{plan.guess_dates} 张照片的日期来自文件名或修改时间推测，请在预览中确认。")
     if plan.inferred_places:
         plan.warnings.append(f"{plan.inferred_places} 张照片的地点由相邻时间的照片推测。")
+    if plan.matched_places:
+        plan.warnings.append(f"{plan.matched_places} 张照片的地点来自 GPS 轨迹 / 参考照片的时间匹配。")
+    if plan.manual_places:
+        plan.warnings.append(f"{plan.manual_places} 张照片使用手动指定的地点。")
+    if plan.corrected_times:
+        plan.warnings.append(f"{plan.corrected_times} 张照片使用校正后的拍摄时间（照片文件本身未修改）。")
     if plan.skipped_conflict:
         plan.warnings.append(f"{len(plan.skipped_conflict)} 组因目标位置已有同名文件而跳过。")
     if plan.renamed:

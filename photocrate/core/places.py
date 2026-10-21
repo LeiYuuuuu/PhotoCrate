@@ -1,7 +1,9 @@
-"""手动指定地点：标注存储 + 地名解析。
+"""用户标注（手动地点、时间校正）的存储 + 地名解析。
 
 - 标注是用户自己输入的数据，存在用户数据目录的 annotations.db（不是缓存，清空缓存不会丢）。
-- 键是照片组主图的“文件指纹”（文件名+大小+修改时间），与路径无关：照片被移动后标注依然有效。
+- 键是照片组里每个图片文件的“文件指纹”（文件名+大小+修改时间），与路径无关：
+  照片被移动后标注依然有效；RAW 与 JPG 分开放、配对关系变化后也不会丢。
+- 两类标注各一张表：places（手动地点）、timeshift（时间校正 {seconds, tz}）。
 - 地名解析：用户输入“日本/东京”“京都”“湖南/邵阳”等，尽量补全成 国家/省/市/区县 的标准写法；
   补全候选来自 GeoToolCN（国内行政区划）与 data/place_names_zh.json + GeoNames（海外）。
 """
@@ -27,22 +29,31 @@ LEVELS = ("country", "province", "city", "district")
 # ---------------------------------------------------------------------------
 
 class AnnotationStore:
+    KINDS = ("places", "timeshift")
+
     def __init__(self, path: Path | None = None):
         self.path = path or (user_data_dir() / "annotations.db")
         self._lock = threading.RLock()
         self._db = sqlite3.connect(str(self.path), check_same_thread=False, timeout=30)
         self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute(
-            "CREATE TABLE IF NOT EXISTS places(sig TEXT PRIMARY KEY, data TEXT, updated TEXT)")
+        for t in self.KINDS:
+            self._db.execute(f"CREATE TABLE IF NOT EXISTS {t}(sig TEXT PRIMARY KEY, data TEXT, updated TEXT)")
         self._db.commit()
 
-    def get_many(self, sigs: list[str]) -> dict[str, dict[str, Any]]:
+    @classmethod
+    def _table(cls, kind: str) -> str:
+        if kind not in cls.KINDS:
+            raise ValueError(f"未知的标注类型：{kind}")
+        return kind
+
+    def get_many(self, sigs: list[str], kind: str = "places") -> dict[str, dict[str, Any]]:
+        t = self._table(kind)
         out: dict[str, dict[str, Any]] = {}
         sigs = list(set(sigs))
         with self._lock:
             for i in range(0, len(sigs), 500):
                 ch = sigs[i:i + 500]
-                q = f"SELECT sig, data FROM places WHERE sig IN ({','.join('?' * len(ch))})"
+                q = f"SELECT sig, data FROM {t} WHERE sig IN ({','.join('?' * len(ch))})"
                 for sig, data in self._db.execute(q, ch):
                     try:
                         out[sig] = json.loads(data)
@@ -50,20 +61,28 @@ class AnnotationStore:
                         pass
         return out
 
-    def set_many(self, items: dict[str, dict[str, Any]]) -> None:
+    def set_many(self, items: dict[str, dict[str, Any]], kind: str = "places") -> None:
+        t = self._table(kind)
         now = datetime.now().isoformat(timespec="seconds")
         with self._lock, self._db:
             self._db.executemany(
-                "INSERT OR REPLACE INTO places(sig, data, updated) VALUES(?,?,?)",
+                f"INSERT OR REPLACE INTO {t}(sig, data, updated) VALUES(?,?,?)",
                 [(s, json.dumps(d, ensure_ascii=False), now) for s, d in items.items()])
 
-    def clear_many(self, sigs: list[str]) -> None:
+    def clear_many(self, sigs: list[str], kind: str = "places") -> None:
+        t = self._table(kind)
         with self._lock, self._db:
-            self._db.executemany("DELETE FROM places WHERE sig=?", [(s,) for s in sigs])
+            self._db.executemany(f"DELETE FROM {t} WHERE sig=?", [(s,) for s in sigs])
 
-    def count(self) -> int:
+    def clear_all(self, kind: str) -> int:
+        t = self._table(kind)
+        with self._lock, self._db:
+            return self._db.execute(f"DELETE FROM {t}").rowcount
+
+    def count(self, kind: str = "places") -> int:
+        t = self._table(kind)
         with self._lock:
-            return int(self._db.execute("SELECT COUNT(*) FROM places").fetchone()[0])
+            return int(self._db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])
 
     def close(self) -> None:
         with self._lock:
@@ -143,13 +162,15 @@ class PlaceIndex:
             with gzip.open(gp, "rt", encoding="utf-8", newline="") as f:
                 r = csv.reader(f)
                 next(r, None)
+                from .geo import normalize_city_name
                 for row in r:
                     try:
-                        key = f"{row[5]}/{row[2]}"
+                        keys = (f"{row[5]}/{row[2]}", f"{row[5]}/{normalize_city_name(row[5], row[2])}")
                     except IndexError:
                         continue
-                    if key in want and key not in found:
-                        found[key] = (row[3], float(row[0]), float(row[1]))
+                    for key in keys:
+                        if key in want and key not in found:
+                            found[key] = (row[3], float(row[0]), float(row[1]))
         for key, name in want.items():
             cc = key.split("/", 1)[0]
             a1, lat, lon = found.get(key, (None, None, None))
@@ -223,6 +244,10 @@ class PlaceIndex:
             return e
         # 字面层级：国家/省/市/区县；只有两级时把第二级同时当作省和市（如“日本/箱根”）
         lv = list(toks[:4])
+        if len(lv) == 1:
+            # 只有一个不认识的地名：无法确定国家，交给界面提示用户写成“国家/地名”
+            return {"country": None, "province": None, "city": lv[0], "district": None, "cc": None,
+                    "lat": None, "lon": None, "label": lv[0], "needs_country": True}
         place = {"country": lv[0], "province": lv[1] if len(lv) > 1 else None,
                  "city": lv[2] if len(lv) > 2 else (lv[1] if len(lv) == 2 else None),
                  "district": lv[3] if len(lv) > 3 else None, "cc": None, "lat": None, "lon": None}

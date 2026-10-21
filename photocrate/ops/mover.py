@@ -148,6 +148,8 @@ class Mover:
 
     def _run_batch(self, bid: int, operation: str, progress: ProgressFn | None,
                    cancel: threading.Event | None) -> ExecResult:
+        if operation not in ("move", "copy"):
+            raise ValueError(f"不能按移动方式执行“{operation}”批次")
         res = ExecResult(bid)
         ops = [o for o in self.journal.ops(bid) if o["status"] == "pending"]
         total = len(ops)
@@ -238,7 +240,8 @@ class Mover:
         if not batch:
             res.errors.append("找不到该批次")
             return res
-        copy_only = batch["operation"] == "copy"
+        # “复制”与“写入 XMP”的撤销都是：把本批次新建的文件放入回收站
+        copy_only = batch["operation"] in ("copy", "xmp")
         self.journal.set_batch_status(bid, "undoing")
         ops = [o for o in self.journal.ops(bid) if o["status"] == "done"]
         total = len(ops)
@@ -249,14 +252,23 @@ class Mover:
                 break
             try:
                 if copy_only:
-                    if os.path.exists(long_path(o["dst"])):
-                        trash(o["dst"])
+                    target = o["dst"]
+                    if not os.path.exists(long_path(target)):
+                        # 新建的文件之后又被本软件移动过（例如 .xmp 跟着照片进了分区文件夹）：顺着日志找到现在的位置
+                        target = self.journal.find_moved(o["dst"], bid) or target
+                    if os.path.exists(long_path(target)):
+                        trash(target)
                     self.journal.set_op(o["id"], "undone")
                 else:
                     if not os.path.exists(long_path(o["dst"])):
                         if os.path.exists(long_path(o["src"])) and os.path.getsize(long_path(o["src"])) == o["size"]:
                             # 上次撤销中途退出时已经移回
                             self.journal.set_op(o["id"], "undone")
+                            res.done_files += 1
+                            continue
+                        if o["role"] == "sidecar" and self.journal.removed_by_xmp_undo(o["src"]):
+                            # 这个 .xmp 是本软件写入的，已经随“写入 XMP”批次撤销而放入回收站
+                            self.journal.set_op(o["id"], "undone", "已随“写入 XMP”撤销放入回收站")
                             res.done_files += 1
                             continue
                         raise FileNotFoundError("文件已不在目标位置（可能被手动移动或删除）")
@@ -299,6 +311,17 @@ class Mover:
         batch = self.journal.batch(bid)
         copy_only = bool(batch and batch["operation"] == "copy")
         fixed = {"moved": 0, "tmp_removed": 0, "src_removed": 0, "pending": 0}
+        if batch and batch["operation"] == "xmp":
+            # 写入 XMP：已生成的文件记为完成（撤销时会放入回收站），没生成的保持未完成
+            for o in self.journal.ops(bid):
+                if o["status"] == "pending":
+                    if os.path.exists(long_path(o["dst"])):
+                        self.journal.set_op(o["id"], "done")
+                        fixed["moved"] += 1
+                    else:
+                        fixed["pending"] += 1
+            self.journal.commit()
+            return fixed
         for o in self.journal.ops(bid):
             if o["status"] != "pending":
                 continue
@@ -331,6 +354,17 @@ class Mover:
                cancel: threading.Event | None = None) -> ExecResult:
         self.reconcile(bid)
         batch = self.journal.batch(bid)
+        if batch and batch["operation"] == "xmp":
+            # 写入内容不在日志里，无法“继续”：保留已生成的文件，其余标为跳过（可重新生成）
+            res = ExecResult(bid)
+            for o in self.journal.ops(bid):
+                if o["status"] == "pending":
+                    self.journal.set_op(o["id"], "skipped")
+                elif o["status"] == "done":
+                    res.done_files += 1
+            self.journal.commit()
+            self.journal.finish_batch(bid, "cancelled")
+            return res
         self.journal.set_batch_status(bid, "running")
         return self._run_batch(bid, batch["operation"] if batch else "move", progress, cancel)
 

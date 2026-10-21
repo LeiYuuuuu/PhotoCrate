@@ -68,7 +68,7 @@ class RegionDimension(Dimension):
     id = "region"
     label = "地区"
     en = "REGION"
-    description = "根据 GPS 离线识别国家 / 省 / 市 / 区县；没有 GPS 的放入「未知地点」。"
+    description = "按 GPS、轨迹 / 参考照片匹配或手动指定的地点，离线识别国家 / 省 / 市 / 区县；都没有的放入「未知地点」。"
     unknown = "未知地点"
     options = [
         Option("level", "层级", default="country/province/city", choices=[

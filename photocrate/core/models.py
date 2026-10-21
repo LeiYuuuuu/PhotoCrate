@@ -103,6 +103,27 @@ class PhotoGroup:
     def total_size(self) -> int:
         return sum(f.size for f in self.files)
 
+    @property
+    def member_sigs(self) -> list[str]:
+        """组内图片文件的指纹（主图在前）。用户标注按这些指纹保存/查找。"""
+        imgs = sorted(self.image_files, key=lambda f: f.path != self.primary) or self.files[:1]
+        return [f.sig for f in imgs]
+
+    @property
+    def cross_folder(self) -> bool:
+        """组内图片分处不同文件夹（跨文件夹配对的 RAW + JPG）。"""
+        return len({os.path.normcase(os.path.dirname(f.path)) for f in self.image_files}) > 1
+
+    def annotation(self, table: dict[str, Any] | None) -> Any:
+        """在 {指纹: 数据} 中找本组的标注（任一图片文件命中即可，主图优先）。"""
+        if not table:
+            return None
+        for s in self.member_sigs:
+            hit = table.get(s)
+            if hit is not None:
+                return hit
+        return None
+
     # ---- 常用分析结果的便捷访问 ------------------------------------------
     def feat(self, analyzer: str, key: str, default: Any = None) -> Any:
         d = self.feats.get(analyzer)

@@ -18,7 +18,8 @@ from .base import Page
 
 FILTERS = [
     ("all", "全部照片"), ("raw", "含 RAW"), ("jpeg", "JPG"), ("heif", "HEIC"), ("png", "PNG / 截图"),
-    ("guess", "日期为推测"), ("nodate", "无日期"), ("nogps", "无 GPS"), ("gps", "有 GPS"), ("screenshot", "截图"),
+    ("guess", "日期为推测"), ("nodate", "无日期"), ("nogps", "无 GPS"), ("gps", "有 GPS"), ("noplace", "无地点"),
+    ("cross", "跨文件夹配对"), ("screenshot", "截图"),
 ]
 SORTS = [("date_asc", "拍摄时间 ↑"), ("date_desc", "拍摄时间 ↓"), ("name", "文件名"), ("folder", "所在文件夹")]
 
@@ -216,7 +217,8 @@ class SourcePage(Page):
     def _on_progress(self, pg: Progress):
         names = {"enumerate": "枚举文件", "meta": "读取元数据", "pixel": "分析画面", "analyze": "整理日期与地点",
                  "done": "完成"}
-        self.stage.setText(f"{names.get(pg.stage, pg.stage)} · 已发现 {pg.groups} 组照片")
+        stage = pg.message if pg.stage == "analyze" and pg.message else names.get(pg.stage, pg.stage)
+        self.stage.setText(f"{stage} · 已发现 {pg.groups} 组照片")
         self.counts.setText(f"META  {pg.meta_done}/{pg.meta_total}      PIXEL  {pg.pix_done}/{pg.pix_total}")
         self.current.setText(pg.current[-90:] if pg.current else "")
         self.bar.set_value(pg.fraction)
@@ -237,7 +239,8 @@ class SourcePage(Page):
             return
         self.bar.set_value(1)
         self.status_panel.set_meta(f"DONE · {rep.seconds:.1f}s")
-        self.stage.setText(f"扫描完成：{rep.groups} 组照片 / {rep.files} 个文件")
+        paired = f"（{rep.paired_across} 组 RAW+JPG 跨文件夹配对）" if rep.paired_across else ""
+        self.stage.setText(f"扫描完成：{rep.groups} 组照片 / {rep.files} 个文件{paired}")
         self.counts.setText(f"缓存命中 {rep.meta_cached + rep.pix_cached}   新分析 {rep.meta_read + rep.pix_computed}"
                             + (f"   失败 {len(rep.errors)}" if rep.errors else ""))
         self.current.setText("")
@@ -292,6 +295,10 @@ class SourcePage(Page):
             if f == "nogps" and g.feat("geo", "has_gps"):
                 continue
             if f == "gps" and not g.feat("geo", "has_gps"):
+                continue
+            if f == "noplace" and g.feat("geo", "country"):
+                continue
+            if f == "cross" and not g.cross_folder:
                 continue
             if f == "screenshot" and g.feat("camera", "source") != "screenshot":
                 continue
