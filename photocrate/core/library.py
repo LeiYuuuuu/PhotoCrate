@@ -53,6 +53,8 @@ class Progress:
     pix_total: int = 0
     groups: int = 0
     current: str = ""
+    ai_done: int = 0
+    ai_total: int = 0
 
     @property
     def fraction(self) -> float:
@@ -60,6 +62,8 @@ class Progress:
             return 0.02
         if self.stage == "done":
             return 1.0
+        if self.stage == "ai":
+            return 0.9 + 0.1 * (self.ai_done / self.ai_total if self.ai_total else 1.0)
         m = self.meta_done / self.meta_total if self.meta_total else 1.0
         p = self.pix_done / self.pix_total if self.pix_total else 1.0
         return 0.05 + 0.25 * m + 0.65 * p
@@ -97,6 +101,9 @@ class Library:
         self.ref_sources: list[dict[str, Any]] = []
         self.fill_stats: dict[str, int] = {}
         self.paired_across = 0
+        self.trips: list = []                # 旅行自动分段的结果（core/trips.Trip）
+        from ..ai.service import AIService
+        self.ai = AIService(self)            # 场景识别 / 文字搜图 / 人物分组（模型下载后可用）
         self.refresh_exiftool()
 
     # ---- 工具状态 --------------------------------------------------------
@@ -166,7 +173,8 @@ class Library:
         prim_sigs = [g.primary_file.sig for g in groups]
         pix_cache = self.cache.get_pix_many(prim_sigs)
         prev_cache = self.cache.get_preview_many(prim_sigs)
-        wanted = {a.id: a.version for a in pixel_analyzers()}
+        snap = self.settings.snapshot()
+        wanted = {a.id: a.version for a in pixel_analyzers() if a.available(snap)}
         troot = str(thumbs_dir())
         tasks = []
         for g, sig in zip(groups, prim_sigs):
@@ -265,7 +273,43 @@ class Library:
         pg.message = "正在整理日期与地点…"
         emit()
         self.run_meta_analyzers(groups)
+
+        # 7) AI：CLIP 向量索引 + 场景识别（模型已下载且开启时）
+        self.run_ai(groups, pg, emit, cancel)
         return groups
+
+    def run_ai(self, groups: list[PhotoGroup] | None = None, pg: Progress | None = None,
+               emit: Callable[[], None] | None = None, cancel: threading.Event | None = None,
+               force: bool = False) -> dict[str, Any]:
+        """为照片建立 CLIP 索引并识别场景。没有模型时只载入已有的缓存。返回 {indexed, new, error}。"""
+        groups = self.groups if groups is None else groups
+        out: dict[str, Any] = {"indexed": 0, "new": 0, "error": None}
+        ai = self.ai
+        try:
+            if ai.clip_ready() and (force or self.settings.get("ai_enabled", True)):
+                if pg is not None:
+                    pg.stage = "ai"
+                    pg.message = "AI：场景识别 / 文字搜图索引…"
+                    pg.ai_done, pg.ai_total = 0, 0
+                    if emit:
+                        emit()
+
+                def prog(d, t):
+                    if pg is not None:
+                        pg.ai_done, pg.ai_total = d, t
+                        if emit:
+                            emit()
+                out["new"] = ai.index(groups, prog, cancel)
+                ai.classify(groups)
+            else:
+                ai.load_cached(groups)
+                if ai.emb and ai.clip_ready():
+                    ai.classify(groups)
+        except Exception as e:
+            log.warning("AI 识别失败：%s", e)
+            out["error"] = f"{type(e).__name__}: {e}"
+        out["indexed"] = len(ai.emb)
+        return out
 
     # ---- 进程池 ----------------------------------------------------------
     def _start_pool(self, tasks: list[dict], cancel: threading.Event):
@@ -372,6 +416,22 @@ class Library:
         if s.get("geo_infer"):
             infer_missing_locations(groups, int(s.get("geo_infer_minutes", 30)))
         self.regroup_similar(groups)
+        self.retrip(groups)
+        try:
+            self.ai.recluster(groups)
+        except Exception as e:
+            log.warning("人物分组失败：%s", e)
+
+    def retrip(self, groups: list[PhotoGroup] | None = None) -> list:
+        """按当前设置重新做旅行分段（只用已有的日期与地点，几毫秒）。"""
+        from .trips import Home, segment_trips
+        s = self.settings
+        groups = self.groups if groups is None else groups
+        homes = [Home.from_dict(h) for h in (s.get("home_places") or []) if h]
+        self.trips = segment_trips(groups, homes, float(s.get("trip_gap_hours", 36)),
+                                   int(s.get("trip_min_photos", 3)), float(s.get("trip_tail_hours", 12)),
+                                   s.get("trip_names") or {})
+        return self.trips
 
     def regroup_similar(self, groups: list[PhotoGroup] | None = None) -> int:
         """按当前设置重新做连拍 / 相似分组（只用缓存的指纹，几毫秒）。"""

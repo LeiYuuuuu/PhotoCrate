@@ -217,7 +217,9 @@ class SourcePage(Page):
     def _on_progress(self, pg: Progress):
         names = {"enumerate": "枚举文件", "meta": "读取元数据", "pixel": "分析画面", "analyze": "整理日期与地点",
                  "done": "完成"}
-        stage = pg.message if pg.stage == "analyze" and pg.message else names.get(pg.stage, pg.stage)
+        stage = pg.message if pg.stage in ("analyze", "ai") and pg.message else names.get(pg.stage, pg.stage)
+        if pg.stage == "ai" and pg.ai_total:
+            stage += f" {pg.ai_done}/{pg.ai_total}"
         self.stage.setText(f"{stage} · 已发现 {pg.groups} 组照片")
         self.counts.setText(f"META  {pg.meta_done}/{pg.meta_total}      PIXEL  {pg.pix_done}/{pg.pix_total}")
         self.current.setText(pg.current[-90:] if pg.current else "")

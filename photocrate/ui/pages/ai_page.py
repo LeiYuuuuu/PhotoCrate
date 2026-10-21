@@ -1,0 +1,256 @@
+"""07 AI 搜图：模型下载与状态、文字搜图 / 以图搜图、场景分类。全部在本机离线运行。"""
+from __future__ import annotations
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QLineEdit, QScrollArea, QSpinBox, QVBoxLayout,
+                               QWidget)
+
+from ...ai import models
+from ...ai.scenes import SCENE_GROUPS, SCENES
+from .. import theme
+from ..dialogs import ask, info, run_with_progress
+from ..widgets.deco import BarList, Panel, StatCard, TacButton, caption
+from ..widgets.thumbgrid import ThumbGrid
+from .base import Page
+
+GROUP_COLORS = {"自然风光": "#3FAE5A", "城市建筑": "#3C7BD9", "人物": "#E2453A", "美食": "#EE8A1E",
+                "动物植物": "#8E5AC9", "室内": "#8D8D84", "文档截图": "#55554E"}
+
+
+class AiPage(Page):
+    page_id = "ai"
+    index = "07"
+    title = "AI 搜图"
+    en = "AI search // scenes · text · similar"
+    sub = ("输入一句话找照片（如“铁塔夜景”“一碗拉面”“海边日落”），或选中一张照片找相似的；照片按画面内容自动分成场景。"
+           "使用开源中文 CLIP 模型，全部在本机运行，照片不会上传。")
+
+    def __init__(self, ctx, parent=None):
+        super().__init__(ctx, parent)
+        p = theme.current()
+        top = QHBoxLayout()
+        top.setSpacing(12)
+
+        # ---- 模型 ----
+        mp = Panel("模型", "Models // offline", "")
+        mp.setFixedWidth(520)
+        self.model_panel = mp
+        self.rows: dict[str, tuple[QLabel, TacButton]] = {}
+        for key in ("clip", "face"):
+            r = QHBoxLayout()
+            name = QLabel(models.MODELS[key]["label"])
+            name.setMinimumWidth(220)
+            st = QLabel("")
+            st.setProperty("role", "dim")
+            b = TacButton("下载", "primary", height=28)
+            b.clicked.connect(lambda _=False, k=key: self.download(k))
+            r.addWidget(name)
+            r.addWidget(st, 1)
+            r.addWidget(b)
+            mp.body.addLayout(r)
+            self.rows[key] = (st, b)
+        r = QHBoxLayout()
+        r.addWidget(QLabel("下载源"))
+        self.mirror = QComboBox()
+        for v, t in (("auto", "自动（官方失败时用国内镜像）"), ("hf", "Hugging Face 官方"), ("mirror", "国内镜像 hf-mirror.com")):
+            self.mirror.addItem(t, v)
+        self.mirror.setCurrentIndex(max(0, self.mirror.findData(ctx.settings.get("ai_mirror", "auto"))))
+        self.mirror.currentIndexChanged.connect(lambda _: ctx.set_setting("ai_mirror", self.mirror.currentData()))
+        r.addWidget(self.mirror, 1)
+        self.b_run = TacButton("分析全部照片", "secondary", en="ANALYZE", height=30)
+        self.b_run.clicked.connect(self.analyze)
+        r.addWidget(self.b_run)
+        mp.body.addLayout(r)
+        mp.body.addWidget(caption("模型下载到 " + str(models.models_dir()) + "；之后每次扫描会自动识别新照片"
+                                  "（结果有缓存）。人脸模型下载后需要重新分析一次。", "faint", 8))
+        top.addWidget(mp)
+
+        sp = Panel("索引", "Index", "")
+        cr = QHBoxLayout()
+        self.c_idx = StatCard("已识别场景", "INDEXED", accent=p.accent)
+        self.c_faces = StatCard("人脸", "FACES", accent=p.accent2)
+        self.c_people = StatCard("人物", "PEOPLE", accent=p.ok)
+        for c in (self.c_idx, self.c_faces, self.c_people):
+            cr.addWidget(c)
+        sp.body.addLayout(cr)
+        top.addWidget(sp, 1)
+        self.root.addLayout(top)
+
+        # ---- 搜索 ----
+        mid = QHBoxLayout()
+        mid.setSpacing(12)
+        left = QWidget()
+        lv = QVBoxLayout(left)
+        lv.setContentsMargins(0, 0, 0, 0)
+        scp = Panel("场景", "Scenes", "")
+        self.scene_panel = scp
+        self.mode = QComboBox()
+        self.mode.addItem("细分场景", "scene")
+        self.mode.addItem("大类", "group")
+        self.mode.currentIndexChanged.connect(lambda _: self.refresh())
+        scp.add_header_widget(self.mode)
+        self.bars = BarList(max_items=24, row_h=22, label_w=96)
+        self.bars.clicked.connect(self.show_scene)
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setWidget(self.bars)
+        sc.setFrameShape(QScrollArea.Shape.NoFrame)
+        scp.body.addWidget(sc, 1)
+        lv.addWidget(scp, 1)
+        left.setFixedWidth(330)
+        mid.addWidget(left)
+
+        rp = Panel("搜索结果", "Results", "")
+        self.res_panel = rp
+        sr = QHBoxLayout()
+        self.query = QLineEdit()
+        self.query.setPlaceholderText("输入要找的画面：铁塔夜景、拉面、海边日落、穿红衣服的人、猫…")
+        self.query.returnPressed.connect(self.search)
+        sr.addWidget(self.query, 1)
+        self.b_search = TacButton("搜索", "primary", en="SEARCH", height=32)
+        self.b_search.clicked.connect(self.search)
+        sr.addWidget(self.b_search)
+        self.b_similar = TacButton("找相似（选中一张）", "secondary", height=32)
+        self.b_similar.clicked.connect(self.similar)
+        sr.addWidget(self.b_similar)
+        sr.addWidget(QLabel("显示前"))
+        self.topn = QSpinBox()
+        self.topn.setRange(10, 1000)
+        self.topn.setValue(60)
+        self.topn.setSuffix(" 张")
+        sr.addWidget(self.topn)
+        rp.body.addLayout(sr)
+        self.grid = ThumbGrid(selectable=True)
+        self.grid.set_cell_width(150)
+        rp.body.addWidget(self.grid, 1)
+        mid.addWidget(rp, 1)
+        self.root.addLayout(mid, 1)
+
+        self.grid.selection_changed.connect(lambda g: self.b_similar.setEnabled(len(g) == 1 and self._ready()))
+        ctx.library_changed.connect(self.refresh)
+        ctx.files_changed.connect(self.refresh)
+
+    def on_show(self):
+        self.refresh()
+
+    def _ready(self) -> bool:
+        return self.ctx.library.ai.clip_ready() and bool(self.ctx.library.ai.emb)
+
+    # ---- 状态 ------------------------------------------------------------
+    def refresh(self):
+        lib = self.ctx.library
+        for key, (st, b) in self.rows.items():
+            ready = models.ready(key)
+            text = models.status_text(key)
+            st.setText(text)
+            col = theme.current().ok if ready and "缺少" not in text else theme.current().warn
+            st.setStyleSheet(f"color: {col};")
+            b.setVisible(not ready)
+        s = lib.ai.stats(lib.groups)
+        n = s["photos"] or 1
+        self.c_idx.set(f"{s['indexed']}", s["indexed"] / n, f"/ {s['photos']}")
+        self.c_faces.set(str(s["faces"]), s["faces_done"] / n, f"张脸 · {s['faces_done']} 张已检测")
+        self.c_people.set(str(s["people"]), None, f"人 · {s['named']} 已命名")
+        mode = self.mode.currentData()
+        counts: dict[str, int] = {}
+        for g in lib.groups:
+            sc = g.feats.get("scene") if g.files else None
+            if sc:
+                k = sc["group"] if mode == "group" else sc["scene"]
+                counts[k] = counts.get(k, 0) + 1
+        gcol = {name: GROUP_COLORS.get(grp) for name, grp, _ in SCENES}
+        gcol.update({g: GROUP_COLORS.get(g) for g in SCENE_GROUPS})
+        self.bars.set_items(sorted(((k, v, gcol.get(k)) for k, v in counts.items()), key=lambda t: -t[1]))
+        self.scene_panel.set_meta("")
+        ok = self._ready()
+        self.b_search.setEnabled(ok)
+        self.query.setEnabled(ok)
+        self.b_similar.setEnabled(ok and len(self.grid.selected_gids()) == 1)
+        if not ok:
+            hint = ("先下载“中文 CLIP”模型，再点“分析全部照片”。" if not lib.ai.clip_ready()
+                    else "还没有分析过照片：点“分析全部照片”。")
+            self.res_panel.set_meta(hint)
+        elif not self.grid.model_.groups:
+            self.res_panel.set_meta("输入描述后按回车搜索，或点左边的场景")
+
+    # ---- 下载 / 分析 -----------------------------------------------------
+    def download(self, key: str):
+        size = models.download_size(key)
+        if not ask(self, "下载 AI 模型", f"将下载 <b>{models.MODELS[key]['label']}</b>（约 {size / 1e6:.0f} MB）到<br>"
+                   f"{models.models_dir()}<br><br>来源：{'Hugging Face' if key == 'clip' else 'GitHub（OpenCV Zoo）'}"
+                   f"；许可：{models.MODELS[key]['license']}。只需下载一次。", ok="下载", en="DOWNLOAD"):
+            return
+        mirror = self.ctx.settings.get("ai_mirror", "auto")
+
+        def job(prog, cancel):
+            return models.download(key, lambda d, t, c: prog((d, t, c)), cancel, mirror)
+
+        res, tb = run_with_progress(self.ctx, self, "正在下载模型", "DOWNLOADING", job)
+        self.ctx.library.ai.unload()
+        self.refresh()
+        if tb:
+            last = tb.strip().splitlines()[-1]
+            info(self, "下载失败", f"{last}<br><br>可以在“下载源”里换成国内镜像再试；或手动下载后放进 {models.models_dir()}。",
+                 "ERROR")
+            return
+        if models.ready(key):
+            if ask(self, "下载完成", "模型已就绪。现在分析全部照片吗？（会重新扫描一遍，已有结果走缓存）",
+                   ok="开始分析", cancel="稍后", en="READY"):
+                self.analyze()
+
+    def analyze(self):
+        lib = self.ctx.library
+        if not lib.groups and not self.ctx.settings.get("source_dirs"):
+            info(self, "还没有照片", "请先在「资源接入」页添加照片文件夹。")
+            return
+        if not (lib.ai.clip_ready() or models.ready("face")):
+            info(self, "还没有模型", "请先下载模型。")
+            return
+        src = self.window().page("source") if hasattr(self.window(), "page") else None
+        if src is None:
+            return
+        self.ctx.navigate.emit("source")
+        src.start_scan()
+
+    # ---- 搜索 ------------------------------------------------------------
+    def _show(self, ranked: list[tuple[int, float]], title: str):
+        lib = self.ctx.library
+        n = int(self.topn.value())
+        groups, labels = [], {}
+        for gid, score in ranked[:n]:
+            g = lib.by_gid(gid)
+            if g is None or not g.files:
+                continue
+            groups.append(g)
+            labels[gid] = {"tag": f"{score:.2f}"}
+        self.grid.settings_snapshot = self.ctx.settings.snapshot()
+        self.grid.set_groups(groups, labels)
+        self.res_panel.set_meta(f"{len(groups)} ITEMS · {title}")
+
+    def search(self):
+        q = self.query.text().strip()
+        if not q or not self._ready():
+            return
+        try:
+            ranked = self.ctx.library.ai.search_text(q)
+        except Exception as e:
+            info(self, "搜索出错", str(e), "ERROR")
+            return
+        self._show(ranked, f"“{q}” · 按相关度排序（分数越高越像）")
+
+    def similar(self):
+        gids = self.grid.selected_gids()
+        if len(gids) != 1:
+            return
+        g = self.ctx.library.by_gid(gids[0])
+        self._show(self.ctx.library.ai.search_similar(gids[0]), f"与 {g.name if g else ''} 相似")
+
+    def show_scene(self, label: str):
+        lib = self.ctx.library
+        mode = self.mode.currentData()
+        gs = [g for g in lib.groups if g.files and g.feats.get("scene")
+              and (g.feats["scene"]["group"] if mode == "group" else g.feats["scene"]["scene"]) == label]
+        gs.sort(key=lambda g: -float(g.feats["scene"].get("prob") or 0))
+        self.grid.settings_snapshot = self.ctx.settings.snapshot()
+        self.grid.set_groups(gs, {g.gid: {"tag": f"{label} {g.feats['scene']['prob']:.0%}"} for g in gs})
+        self.res_panel.set_meta(f"{len(gs)} ITEMS · 场景：{label}（按把握度排序）")

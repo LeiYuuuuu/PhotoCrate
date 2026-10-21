@@ -4,6 +4,7 @@
 - meta：每个文件的归一化元数据
 - pix：每个主图 × 每个像素分析器的结果（带版本号，算法升级后自动失效）
 - preview：缩略图路径与预览尺寸
+- emb：AI 向量（CLIP 图片向量，float16），按 模型名 区分
 """
 from __future__ import annotations
 
@@ -30,6 +31,7 @@ class FeatureCache:
             CREATE TABLE IF NOT EXISTS pix(sig TEXT, analyzer TEXT, ver INTEGER, data TEXT,
                                            PRIMARY KEY(sig, analyzer));
             CREATE TABLE IF NOT EXISTS preview(sig TEXT PRIMARY KEY, thumb TEXT, w INTEGER, h INTEGER, src TEXT);
+            CREATE TABLE IF NOT EXISTS emb(sig TEXT, model TEXT, data BLOB, PRIMARY KEY(sig, model));
             """
         )
         self._db.commit()
@@ -91,6 +93,28 @@ class FeatureCache:
                     (sig, res.get("thumb"), pv.get("w"), pv.get("h"), pv.get("src")),
                 )
 
+    # ---- AI 向量 --------------------------------------------------------
+    def get_emb_many(self, sigs: list[str], model: str) -> dict[str, "Any"]:
+        import numpy as np
+        out = {}
+        with self._lock:
+            for ch in self._chunks(list(set(sigs))):
+                q = f"SELECT sig, data FROM emb WHERE model=? AND sig IN ({','.join('?' * len(ch))})"
+                for sig, data in self._db.execute(q, [model, *ch]):
+                    out[sig] = np.frombuffer(data, dtype=np.float16).astype(np.float32)
+        return out
+
+    def put_emb_many(self, items: dict[str, "Any"], model: str) -> None:
+        import numpy as np
+        with self._lock:
+            self._db.executemany("INSERT OR REPLACE INTO emb(sig, model, data) VALUES(?,?,?)",
+                                 [(s, model, np.asarray(v, dtype=np.float16).tobytes()) for s, v in items.items()])
+            self._db.commit()
+
+    def count_emb(self, model: str) -> int:
+        with self._lock:
+            return self._db.execute("SELECT COUNT(*) FROM emb WHERE model=?", (model,)).fetchone()[0]
+
     def copy_keys(self, mapping: dict[str, str]) -> None:
         """文件改名后（大小、修改时间不变）把旧指纹的缓存复制到新指纹，避免重新分析。"""
         if not mapping:
@@ -103,6 +127,8 @@ class FeatureCache:
                                  "SELECT ?, analyzer, ver, data FROM pix WHERE sig=?", (new, old))
                 self._db.execute("INSERT OR REPLACE INTO preview(sig, thumb, w, h, src) "
                                  "SELECT ?, thumb, w, h, src FROM preview WHERE sig=?", (new, old))
+                self._db.execute("INSERT OR REPLACE INTO emb(sig, model, data) "
+                                 "SELECT ?, model, data FROM emb WHERE sig=?", (new, old))
             self._db.commit()
 
     def commit(self) -> None:
@@ -112,7 +138,7 @@ class FeatureCache:
     # ---- 维护 ------------------------------------------------------------
     def clear(self) -> None:
         with self._lock:
-            self._db.executescript("DELETE FROM meta; DELETE FROM pix; DELETE FROM preview;")
+            self._db.executescript("DELETE FROM meta; DELETE FROM pix; DELETE FROM preview; DELETE FROM emb;")
             self._db.commit()
             self._db.execute("VACUUM")
 

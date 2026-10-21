@@ -17,7 +17,8 @@
 ```
 ┌──────────────────────────────── UI 层（PySide6）────────────────────────────────┐
 │  main_window.py  顶栏 / 导航 / 状态条        context.py  AppContext：共享对象 + 信号 │
-│  pages/ 01资源 02时间与地点 03分区 04统计 05挑片 06清晰度 07记录 08设置 (+插件页面) │
+│  pages/ 01资源 02时间与地点 03分区 04统计 05挑片 06旅行与地图 07AI搜图 08人物       │
+│         09清晰度 10记录 11设置 (+插件页面)    widgets/mapview.py 瓦片地图（纯 Qt 绘制） │
 │  viewer.py 大图查看 / 并排对比   culling_dialogs.py 清理 RAW、批量重命名   xmpflow.py │
 │  widgets/ deco.py 自绘控件（面板/切角按钮/数据卡/图表）  thumbgrid.py 虚拟化缩略图网格 │
 │  theme.py 两套配色 + QSS      dialogs.py 确认/进度/执行计划                         │
@@ -34,8 +35,11 @@
 │   ├ core/pairing.py    跨文件夹 RAW+JPG 配对（文件名 + 拍摄时间 + 机型，一一对应）     │
 │   ├ core/geotime.py    时区换算、GPX/KML 解析、按时间匹配轨迹 / 参考照片补 GPS          │
 │   ├ core/places.py     用户标注库（手动地点 / 时间校正）+ 地名解析与候选               │
-│   └ core/daybook.py    按天汇总 + 行程文本解析（「时间与地点」页的数据）                │
-│ analyzers/  分析器插件：date geo camera shape rating（元数据） color blur phash（像素）│
+│   ├ core/daybook.py    按天汇总 + 行程文本解析（「时间与地点」页的数据）                │
+│   └ core/trips.py      旅行自动分段 + 命名 + 常住地解析                                │
+│ ai/  models（下载）clip（中文 CLIP + 分词）scenes（零样本场景）faces（YuNet+SFace）       │
+│      people（人物聚类）service（向量索引 / 搜索 / 命名，挂在 Library.ai 上）            │
+│ analyzers/  分析器插件：date geo camera shape rating（元数据） color blur phash faces（像素）│
 │ partition/  维度插件：date region color camera lens source filetype orientation …     │
 │   └ engine.py  条件链 / 模板 → 每组的目标文件夹；预览树；预设                          │
 │ ops/planner.py  模拟运行：目标路径、重名编号、跨盘、空间检查                           │
@@ -48,7 +52,8 @@
 ┌──────────────────────────────── 数据层 ──────────────────────────────────────────┐
 │ %LOCALAPPDATA%\PhotoCrate\cache.db（元数据/特征/预览，WAL）  thumbs\（360px 缩略图）  │
 │ %APPDATA%\PhotoCrate\journal.db（操作日志） annotations.db（地点/时间校正/星级）     │
-│                     xmp_backups\（改写 .xmp 前的备份）                               │
+│                     xmp_backups\（改写 .xmp 前的备份）  models\（AI 模型）           │
+│ %LOCALAPPDATA%\PhotoCrate\tiles\（地图瓦片缓存）  cache.db 的 emb 表（CLIP 向量）   │
 │                     settings.json  logs\  plugins\  screenshots\                     │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -154,7 +159,25 @@ class Dimension:
 | 从回收站找回 | `trashbin.find_in_trash(path, t0)`：Windows 解析 `$Recycle.Bin\<SID>\$I*`（v1/v2 格式：原路径 + 删除时间 + 大小），freedesktop 读 `.trashinfo`；按“原路径相同、删除时间 ≥ t0 − 2 秒”取最新一个，`os.rename` 放回并删掉索引文件。撤销清理后自动重新扫描 |
 | 批量重命名 | `renamer.build_rename_plan`：模板与分区模板相同，另有 `{序号}` `{序号:4}` `{当日序号}` `{原名}`；同组成员同一主文件名、保留双扩展名（`.ARW.xmp`）、与已有文件重名加“ (n)”。执行走 `Mover` 的 `rename` 批次（复用移动的日志 / 撤销 / 崩溃恢复）；`Library.apply_moves` 发现文件名变化时把标注和缓存**移到**新指纹 |
 
-## 8. 安全搬运（ops/）
+## 8. 旅行、地图与 AI（第三梯队功能）
+
+AI 全部在本机离线运行；模型首次使用时下载到用户数据目录 `models\`，结果按文件指纹缓存。
+
+| 功能 | 实现 |
+|---|---|
+| 旅行自动分段 | `core/trips.segment_trips`：每张照片先判断 home（在任一常住地半径 50 km 内；没有坐标时按地名比较）/ away / unknown（没有地点）；只用 away 照片按时间切段——相邻两张间隔 > `trip_gap_hours`（默认 36；前后两张在同一个非常住国家时放宽到 2 倍）或中间出现 home 照片就断开，少于 `trip_min_photos` 张的段丢弃；unknown 照片落在某段时间范围内（前后放宽 12 小时、期间没有 home 照片）就并入。命名 = 起始日期 + 国家（国内用省份）+ 出现最多的 3 个城市；用户改名按起始日期记在 `trip_names`。结果写进 `feats["trip"]`，分区维度「旅行」、模板 `{旅行}` `{第几天}`；作为 `run_meta_analyzers` 的全库后处理步骤运行 |
+| 常住地 | `resolve_home`：支持“纬度,经度”、中文地名（经 `PlaceIndex`）、英文城市名（`Boca Raton, US`，在 GeoNames 表里查坐标，标签转成中文）；“从照片识别”= 拍摄天数最多、且占全部天数足够比例的城市 |
+| 地图 | `ui/widgets/mapview.py`：Web 墨卡托瓦片、`QNetworkAccessManager` 异步取瓦片并存成 PNG（`tiles\` 文件夹，看过的区域离线也能看），新瓦片未到时用上一级瓦片放大补位，完全离线时画经纬网格；照片按屏幕网格聚合，画代表缩略图 + 数量，点击发出 `cluster_clicked`；旅行路线 = 每天的位置中心按时间连线；高德底图时把中国境内的点从 WGS-84 转成 GCJ-02。手动指定的地点没有坐标，按城市中心（`pin_lat/pin_lon`）显示 |
+| 地名就近取大城市 | `geo._WorldIndex.nearest`：GeoNames 只有城市中心点，大城市市区里常常离卫星城更近（浅草 → 草加 / 浦安，伏见稻荷 → 向日）。在“最近距离 + 12 km、≤ 30 km、同一国家”的候选里按 `距离 − 4 × log10(人口)` 取最小 |
+| 模型下载 | `ai/models.py`：中文 CLIP（Xenova 导出的 Chinese-CLIP ViT-B/16 int8 ONNX，约 190 MB，Hugging Face，失败自动换 hf-mirror.com）；YuNet + SFace（OpenCV Zoo，GitHub）。先下到 `.part` 再改名，校验大小，拒绝网页 / LFS 指针；也可手动放文件 |
+| CLIP 推理 | `ai/clip.py`：onnxruntime CPU；自带 BERT 分词（中文按字、英文 WordPiece，词表 `data/clip_vocab_zh.txt`，最长 52）；预处理 = 直接缩放到 224×224 + CLIP 均值方差（与 Chinese-CLIP 一致）。Xenova 的模型图文合在一张图里：只编码图片时喂一句占位文字，只编码文字时喂一张空白图；加载时检查输入输出名 |
+| 向量索引 | `ai/service.AIService.index`：用缩略图（长边 360）算图片向量，按主图指纹存进 `cache.db` 的 `emb` 表（float16），移动 / 改名后照样命中；扫描末尾的“AI”阶段只算新照片 |
+| 场景识别 | `ai/scenes.py`：零样本。21 个细分场景，归为 7 个大类（自然风光、城市建筑、人物、美食、动物植物、室内、文档截图）；每个场景几句中文描述取平均向量，与图片向量做 softmax（温度 100），取最高的场景与把握度。维度「场景」（细分 / 大类，可设最低把握度） |
+| 文字搜图 / 以图搜图 | 查询文字（短查询再加一句“一张…的照片”取平均）编码后与全部图片向量点积排序；以图搜图直接用那张照片的向量 |
+| 人脸 | `ai/faces.FaceAnalyzer`（像素阶段，在扫描的后台进程里运行）：YuNet 在长边 1024 的预览上检测，SFace 对齐后提 128 维特征（float16、base64）并存一张 112×112 小头像；小于 `face_min_size` 的脸忽略。模型不在时 `available()` 为 False，不会写入空结果 |
+| 人物聚类 | `ai/people.cluster_people`：先应用用户更正（face_fix：指定归属 / “不是他”），再按已命名的人的特征中心认人（余弦 ≥ `face_threshold`，默认 0.42），其余脸按大小做贪心中心聚类并合并相近的组；只在一张照片里出现的脸归“单次出现”。命名 = 存 {名字, 特征中心}（annotations.db 的 people 表）；同名 = 合并。维度「人物」按照片里最大的已命名脸归档 |
+
+## 9. 安全搬运（ops/）
 
 | 机制 | 实现位置 |
 |---|---|
@@ -170,16 +193,16 @@ class Dimension:
 
 这些行为都有对应的单元测试（`tests/test_core.py`），包括模拟跨盘、模拟中途失败、模拟崩溃后恢复。
 
-## 9. 界面设计
+## 10. 界面设计
 
 - **视觉语言**（`ui/theme.py` + `ui/widgets/deco.py`）：直角与切角、细线框 + 四角角标、编号章节（01–08）、中文标题 + 英文等宽小标签、黄色强调块、斜纹警示带（只用在“会改动文件”的确认窗口）、分段进度条。全部自绘，不用图片素材。
 - **字体**：中文“微软雅黑”，数字与英文用 Windows 自带的 Bahnschrift（DIN 风格窄体），等宽用 Cascadia/Consolas。
 - **两套主题**：浅色「终末地」（浅灰工业底 + 高可见度黄）/ 深色「方舟」（深色终端 + 金黄 + 青色信息色）。颜色只在 `Palette` 里定义一次，所有自绘控件在绘制时读取当前配色。
 - **性能**：缩略图网格是虚拟化的 `QListView`（只绘制可见项），缩略图 LRU 缓存；预览树和统计都是内存计算，几千张即时刷新；所有耗时任务在 `QThread` 中运行，界面不卡。
 
-## 10. 扩展：插件接口（保留给未来的新功能）
+## 11. 扩展：插件接口（保留给未来的新功能）
 
-### 10.1 插件文件
+### 11.1 插件文件
 
 放到 `plugins\`（程序目录）或 `%APPDATA%\PhotoCrate\plugins\`，重启生效：
 
@@ -195,7 +218,7 @@ def register(api):
 
 后台分析进程也会加载插件（此时 `api.headless=True`，页面注册被忽略），所以像素分析器写在插件里也能并行运行。
 
-### 10.2 新增一个像素分析器（例如 AI）
+### 11.2 新增一个像素分析器（例如 AI）
 
 ```python
 class SceneAnalyzer(Analyzer):
@@ -208,19 +231,17 @@ class SceneAnalyzer(Analyzer):
 
 结果自动按文件指纹缓存；改了算法把 `version` 加 1，旧缓存自动失效。分区维度里用 `group.feats["scene"]` 读取。完整骨架见 `plugins_examples/example_ai_scene_stub.py`。
 
-### 10.3 未来功能路线（接口都已就位）
+### 11.3 未来功能路线（接口都已就位）
 
 | 功能 | 做法 |
 |---|---|
-| AI 场景分类 / 以文搜图 | Chinese-CLIP 导出 ONNX → 像素分析器存向量与标签 → “场景”维度；搜索页作为插件页面 |
-| 人脸 / 人物分组 | OpenCV YuNet + SFace（Apache 2.0）→ 像素分析器存人脸向量 → 全库聚类（可在 `run_meta_analyzers` 之后加一个“全库后处理”步骤，参照 `infer_missing_locations`）→ “人物”维度 |
-| 地图视图 | 插件页面：`QWebEngineView` + Leaflet，坐标来自 `feats["geo"]`（高德底图需 WGS-84→GCJ-02，GeoToolCN 自带转换） |
-| 关键词 / 标签写入 XMP | 在 `ops/xmpwrite.tags_for` 里加 `XMP-dc:Subject` 等标签即可复用整套“预览 → 日志 → 撤销（含更新已有 .xmp 的备份）”流程 |
+| 更大的 AI 模型 / GPU | `ai/models.FILES` 换成更大的 Chinese-CLIP 导出；`ClipEngine` 的 providers 加 `DmlExecutionProvider`（onnxruntime-directml）即可用显卡 |
+| 关键词 / 场景标签写入 XMP | 在 `ops/xmpwrite.tags_for` 里加 `XMP-dc:Subject` 等标签即可复用整套“预览 → 日志 → 撤销（含更新已有 .xmp 的备份）”流程 |
 | 照片内嵌写入（JPG/HEIC） | 目前只写 RAW 的附属文件；写进原图需要 ExifTool `-overwrite_original` 并先备份，风险较高，暂未开放 |
 
-> 注意：打包好的 exe 只包含已有的依赖。需要新第三方库（如 onnxruntime）的插件，用 `run.bat` 源码模式运行（`.venv\Scripts\pip install onnxruntime`），或安装后重新打包。
+> 注意：打包好的 exe 只包含已有的依赖（已含 onnxruntime）。需要其他第三方库的插件，用 `run.bat` 源码模式运行（`.venv\Scripts\pip install 包名`），或安装后重新打包。
 
-## 11. 文件地图
+## 12. 文件地图
 
 ```
 PhotoCrate/
@@ -230,30 +251,31 @@ PhotoCrate/
 ├─ photocrate/
 │  ├─ app.py  bootstrap.py  config.py  plugins.py
 │  ├─ core/        models formats scanner metadata imaging pixelwork geo dates cache library stats
-│  │               pairing geotime places daybook
+│  │               pairing geotime places daybook trips
+│  ├─ ai/          models clip scenes faces people service
 │  ├─ analyzers/   base builtin
 │  ├─ partition/   base dimensions engine
 │  ├─ ops/         planner mover journal pathsafe xmpwrite cleanup trashbin renamer
 │  └─ ui/          theme context dialogs timeplace_dialogs culling_dialogs xmpflow viewer
-│                  main_window  pages/  widgets/
-├─ data/           geonames_cities1000.csv.gz  place_names_zh.json
+│                  main_window  pages/  widgets/（deco thumbgrid mapview）
+├─ data/           geonames_cities1000.csv.gz  place_names_zh.json  clip_vocab_zh.txt
 ├─ assets/         app.ico app.png
 ├─ plugins/        用户插件放这里        plugins_examples/  示例插件
 ├─ tools/          get_exiftool.ps1  make_icon.py  （exiftool/ 运行后自动下载到这里）
-└─ tests/          test_core.py  test_timeplace.py  test_culling.py  make_samples.py
-                   ui_smoke.py  ui_timeplace.py  ui_culling.py
+└─ tests/          test_core.py  test_timeplace.py  test_culling.py  test_trips.py  test_ai.py
+                   make_samples.py  ui_smoke.py  ui_timeplace.py  ui_culling.py  ui_tier3.py
 ```
 
-## 12. 界面细节与调试辅助
+## 13. 界面细节与调试辅助
 
 - **F12 截图**：`MainWindow.eventFilter` 在应用级拦截 F12，用 `QScreen.grabWindow` 截取窗口区域（包括弹出的对话框），存到 `screenshots_dir()`。
 - **窗口位置记忆**：关闭时保存 `window_state`（几何 + 是否最大化）；设置项 `window_screen` 可指定下次在哪台显示器打开（`primary` / `secondary` / `#2` / 显示器名称片段），只生效一次。
 - **结果对话框等进度窗口关闭后再弹**：`dialogs.run_with_progress` 统一处理“后台任务 + 进度窗口 + 结果”。任务很快完成时，如果在进度窗口还开着时就弹结果框，Windows 会把焦点交给别的程序，结果框落到后面、看不见却挡住整个界面（端到端测试时实际遇到过）。
 - **大列表一律用 Model/View**：操作记录的文件清单可能上千行，用 `QAbstractTableModel` 按需绘制；不要对大表使用 `ResizeToContents`（每次数据变化都会扫描全部行，904 行时曾导致约 20 秒卡顿）。
 
-## 13. 已知局限
+## 14. 已知局限
 
-- 海外地点用“最近的城市点”判断，边境/海边可能归到邻近城市；国内用真实行政边界，准确度高。
+- 海外地点用“最近的城市点（附近有明显更大的城市时取大城市）”判断，边境/海边可能归到邻近城市；国内用真实行政边界，准确度高。
 - 色调与清晰度阈值没有放之四海皆准的值，默认值偏保守，建议用自己的照片在界面里调。
 - 清晰度：夜景高 ISO 噪点会让分数偏高（被判为清晰）；预览太小的 RAW（个别老机型）标为“无法判断”。
 - 视频文件（除实况照片外）不在处理范围内。
@@ -264,3 +286,7 @@ PhotoCrate/
 - 相似分组只比较时间上相邻的照片（默认 10 秒内），不同时间拍的同一场景不会归为一组；pHash 对大幅裁切 / 旋转不敏感。
 - 从回收站找回只支持 Windows 与 Linux（freedesktop）；macOS 的废纸篓没有可读的原路径记录。回收站被清空后就无法撤销清理。
 - 没有代码签名的 exe 可能被杀毒软件误报。
+- 场景识别与文字搜图用的是 ViT-B/16 量化模型：常见场景、物体、氛围很准，细分品类（具体的花名、菜名）、文字内容、人名店名不认识；搜索分数只能在同一次搜索里比较。
+- 人物分组依赖正脸：侧脸、遮挡、很小的脸会漏；同一个人跨很多年（小孩长大）可能分成几组，起同一个名字即可合并。人脸特征只保存在本机。
+- 旅行分段需要地点：没有 GPS 的照片要先在「时间与地点」补全地点，否则只能按时间间隔分段；在常住地附近的一日游（半径 50 km 内）不算旅行，可调小半径。
+- 地图底图在线加载（OpenStreetMap / 高德），首次查看需要联网；OpenStreetMap 官方瓦片服务器不适合大量请求，只建议偶尔浏览使用。

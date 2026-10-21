@@ -15,15 +15,18 @@ from ..plugins import PAGES
 from . import theme
 from .context import AppContext
 from .dialogs import choose, info, run_with_progress
+from .pages.ai_page import AiPage
 from .pages.blur_page import BlurPage
 from .pages.culling_page import CullingPage
 from .pages.base import Page
 from .pages.history_page import HistoryPage
 from .pages.overview_page import OverviewPage
 from .pages.partition_page import PartitionPage
+from .pages.people_page import PeoplePage
 from .pages.settings_page import SettingsPage
 from .pages.source_page import SourcePage
 from .pages.timeplace_page import TimePlacePage
+from .pages.travel_page import TravelPage
 from .theme import font
 from .widgets.deco import Barcode, LogoMark
 
@@ -114,6 +117,12 @@ class NavRail(QWidget):
         self.current = i
         self.update()
 
+    def resizeEvent(self, e):
+        # 页面多、窗口矮时压缩每一行，给底部装饰留出位置
+        n = max(1, len(self.items))
+        self.row_h = int(max(42, min(58, (self.height() - self.top - 130) / n)))
+        super().resizeEvent(e)
+
     def _at(self, y: float) -> int:
         i = int((y - self.top) // self.row_h)
         return i if 0 <= i < len(self.items) else -1
@@ -162,10 +171,11 @@ class NavRail(QWidget):
             qp.drawText(QRectF(r.left() + 12, r.top(), 34, r.height()), Qt.AlignmentFlag.AlignVCenter, idx)
             qp.setFont(font("cn", 11, 700))
             qp.setPen(ink)
-            qp.drawText(QRectF(r.left() + 52, r.top() + 7, r.width() - 56, 22), Qt.AlignmentFlag.AlignVCenter, title)
+            ty = r.top() + max(1.0, (r.height() - 37) / 2)       # 标题 22 + 英文 15，整体垂直居中
+            qp.drawText(QRectF(r.left() + 52, ty, r.width() - 56, 22), Qt.AlignmentFlag.AlignVCenter, title)
             qp.setFont(font("mono", 6.5, 400, 1.4))
             qp.setPen(ink2)
-            qp.drawText(QRectF(r.left() + 52, r.top() + 28, r.width() - 56, 16), Qt.AlignmentFlag.AlignVCenter, en.upper())
+            qp.drawText(QRectF(r.left() + 52, ty + 20, r.width() - 56, 15), Qt.AlignmentFlag.AlignVCenter, en.upper())
             if not active:
                 qp.setPen(QPen(QColor(p.slab2), 1))
                 qp.drawLine(QPointF(r.left() + 12, r.bottom() + 3), QPointF(r.right(), r.bottom() + 3))
@@ -244,14 +254,14 @@ class MainWindow(QMainWindow):
 
         self.pages: list[Page | QWidget] = []
         self.page_ids: list[str] = []
-        for cls in (SourcePage, TimePlacePage, PartitionPage, OverviewPage, CullingPage, BlurPage, HistoryPage,
-                    SettingsPage):
+        for cls in (SourcePage, TimePlacePage, PartitionPage, OverviewPage, CullingPage, TravelPage, AiPage,
+                    PeoplePage, BlurPage, HistoryPage, SettingsPage):
             self._add_page(cls(ctx), cls.page_id, cls.index, cls.title, cls.en.split("//")[0].strip())
         # 插件页面
         for i, spec in enumerate(PAGES):
             try:
                 w = spec.factory(ctx)
-                self._add_page(w, f"plugin_{i}", f"{9 + i:02d}", spec.title, spec.en)
+                self._add_page(w, f"plugin_{i}", f"{12 + i:02d}", spec.title, spec.en)
             except Exception as e:
                 ctx.status.emit(f"插件页面加载失败：{spec.title}：{e}")
         self.nav.changed.connect(self.go)

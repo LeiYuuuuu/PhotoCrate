@@ -29,7 +29,8 @@ LEVELS = ("country", "province", "city", "district")
 # ---------------------------------------------------------------------------
 
 class AnnotationStore:
-    KINDS = ("places", "timeshift", "rating")
+    KINDS = ("places", "timeshift", "rating", "people", "face_fix")
+    # people：已命名的人（键 = 人物 id）；face_fix：人脸更正（键 = 主图指纹#序号）
 
     def __init__(self, path: Path | None = None):
         self.path = path or (user_data_dir() / "annotations.db")
@@ -91,6 +92,17 @@ class AnnotationStore:
                             self._db.execute(f"DELETE FROM {t} WHERE sig=?", (sig,))
                         n += 1
         return n
+
+    def all(self, kind: str) -> dict[str, dict[str, Any]]:
+        t = self._table(kind)
+        out = {}
+        with self._lock:
+            for sig, data in self._db.execute(f"SELECT sig, data FROM {t}"):
+                try:
+                    out[sig] = json.loads(data)
+                except ValueError:
+                    pass
+        return out
 
     def clear_all(self, kind: str) -> int:
         t = self._table(kind)

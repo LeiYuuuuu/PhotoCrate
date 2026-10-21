@@ -77,6 +77,10 @@ class Analyzer:
     stage: str = "meta"        # "meta" 或 "pixel"
     order: int = 100           # meta 分析器的执行顺序（小的先执行）
 
+    def available(self, settings: dict[str, Any]) -> bool:
+        """pixel 分析器：此刻能否运行（例如需要的模型文件已下载）。不可用时扫描会跳过它，也不会因此反复重算。"""
+        return True
+
     def analyze(self, group: "PhotoGroup", ctx: AnalysisContext) -> dict[str, Any] | None:
         raise NotImplementedError
 

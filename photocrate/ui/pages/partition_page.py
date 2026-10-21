@@ -504,10 +504,17 @@ class PartitionPage(Page):
         self.ctx.settings.set("partition_mode", "template" if tpl else "rules")
         self._schedule()
 
+    def apply_preset_rules(self, rules: list[dict]) -> None:
+        """其他页面（如「旅行与地图」）一键套用分区条件。"""
+        self._apply_preset_data({"rules": rules})
+
     def _apply_preset(self, idx):
         ps = self.preset.itemData(idx)
         if not ps:
             return
+        self._apply_preset_data(ps)
+
+    def _apply_preset_data(self, ps):
         if ps.get("template"):
             self.tpl.setText(ps["template"])
             self.m_tpl.setChecked(True)
@@ -683,5 +690,5 @@ class PartitionPage(Page):
 def _token_order(name: str) -> int:
     order = ["年", "月", "日", "年月", "年月日", "日期", "时间", "季度", "国家", "省", "市", "区县", "地区", "冷暖", "主色", "明暗",
              "品牌", "相机", "镜头", "来源", "类型", "扩展名", "方向", "清晰度", "焦段", "感光度", "分辨率",
-             "原文件夹", "星级", "标记", "色标", "日期来源"]
+             "原文件夹", "星级", "标记", "色标", "旅行", "第几天", "旅行天数", "场景", "人物", "日期来源"]
     return order.index(name) if name in order else 100

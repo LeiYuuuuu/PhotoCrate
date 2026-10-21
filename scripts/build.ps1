@@ -27,7 +27,7 @@ if ($Tool -eq "pyinstaller") {
         --name PhotoCrate --icon assets\app.ico `
         --add-data "data;data" --add-data "assets;assets" --add-data "plugins_examples;plugins_examples" `
         --collect-data GeoToolCN --collect-all pillow_heif --collect-all rawpy `
-        --hidden-import exiftool --hidden-import send2trash `
+        --hidden-import exiftool --hidden-import send2trash --collect-all onnxruntime `
         launcher.py
     if ($LASTEXITCODE -ne 0) { Write-Host "打包失败" -ForegroundColor Red; Pause-Exit 1 }
     $dist = Join-Path $root "dist\PhotoCrate"
@@ -39,7 +39,7 @@ if ($Tool -eq "pyinstaller") {
         --windows-console-mode=disable --windows-icon-from-ico=assets\app.ico `
         --include-data-dir=data=data --include-data-dir=assets=assets `
         --include-data-dir=plugins_examples=plugins_examples `
-        --include-package-data=GeoToolCN --include-package=pillow_heif --include-package=rawpy `
+        --include-package-data=GeoToolCN --include-package=pillow_heif --include-package=rawpy --include-package=onnxruntime `
         --output-dir=build\nuitka --output-filename=PhotoCrate.exe launcher.py
     if ($LASTEXITCODE -ne 0) { Write-Host "编译失败" -ForegroundColor Red; Pause-Exit 1 }
     $src = Join-Path $root "build\nuitka\launcher.dist"

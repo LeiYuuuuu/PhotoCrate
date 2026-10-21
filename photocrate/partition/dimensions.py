@@ -398,6 +398,111 @@ class RatingDimension(Dimension):
                 "色标": lambda g, c: self._label(g)}
 
 
+class TripDimension(Dimension):
+    id = "trip"
+    label = "旅行"
+    en = "TRIP"
+    description = "按自动分出的每次旅行归档（在「旅行与地图」页可设常住地、改旅行名）；不属于任何旅行的照片放进“日常”。"
+    unknown = "日常"
+    order_by = "name"
+    options = [Option("mode", "层级", default="trip", choices=[
+        ("trip", "旅行名（2025-12-31 日本 东京·京都·大阪）"),
+        ("trip/day", "旅行名 / 第几天"),
+        ("trip/daydate", "旅行名 / 第几天 日期（第3天 01-02）"),
+        ("day", "只要第几天（放在别的条件下面用）"),
+    ]),
+        Option("other", "非旅行照片", kind="text", default="", tip="留空 = 使用设置里的“日常”")]
+
+    @staticmethod
+    def _trip(g):
+        t = g.feats.get("trip")
+        return t.get("name") if t else None
+
+    @staticmethod
+    def _day(g, with_date=False):
+        t = g.feats.get("trip")
+        if not t:
+            return None
+        from ..core.trips import day_label
+        s = day_label(int(t["day"]), int(t.get("days") or 0))
+        if with_date and g.date:
+            s += g.date.strftime(" %m-%d")
+        return s
+
+    def segments(self, g, opts, ctx):
+        other = (opts.get("other") or ctx.settings.get("trip_other_name") or self.unknown).strip()
+        mode = opts.get("mode", "trip")
+        name = self._trip(g)
+        if not name:
+            return [other]
+        if mode == "day":
+            return [self._day(g)]
+        if mode == "trip/day":
+            return [name, self._day(g)]
+        if mode == "trip/daydate":
+            return [name, self._day(g, True)]
+        return [name]
+
+    def tokens(self):
+        return {"旅行": lambda g, c: self._trip(g), "第几天": lambda g, c: self._day(g),
+                "旅行天数": lambda g, c: (f"{g.feats['trip']['days']}天" if g.feats.get("trip") else None)}
+
+
+class SceneDimension(Dimension):
+    id = "scene"
+    label = "场景（AI）"
+    en = "SCENE"
+    description = "按 AI 识别的画面内容分组（山景、海边、夜景、美食、人像…）。需要先在「AI 搜图」页下载模型并分析。"
+    unknown = "未识别"
+    order_by = "count"
+    options = [Option("mode", "分类", default="scene", choices=[("scene", "细分场景（山景 / 海边 / 夜景 / 美食…）"),
+                                                             ("group", "大类（自然风光 / 城市建筑 / 人物 / 美食…）")]),
+               Option("min_prob", "把握低于", kind="float", default=0.25, minimum=0, maximum=0.9, step=0.05,
+                      tip="AI 把握不大的照片归入“其他场景”（0 = 一律按最像的场景）")]
+
+    def segments(self, g, opts, ctx):
+        sc = g.feats.get("scene")
+        if not sc:
+            return [self.unknown]
+        if float(sc.get("prob") or 0) < float(opts.get("min_prob") or 0):
+            return ["其他场景"]
+        return [sc["group"] if opts.get("mode") == "group" else sc["scene"]]
+
+    def tokens(self):
+        return {"场景": lambda g, c: (g.feats.get("scene") or {}).get("scene"),
+                "场景大类": lambda g, c: (g.feats.get("scene") or {}).get("group")}
+
+
+class PersonDimension(Dimension):
+    id = "person"
+    label = "人物（AI）"
+    en = "PEOPLE"
+    description = "按照片里的人分组：在「人物」页给人脸组起名后生效。没有人脸的照片放进“无人像”。"
+    unknown = "无人像"
+    order_by = "count"
+    options = [Option("mode", "分法", default="main", choices=[
+        ("main", "主要人物（照片里脸最大的已命名的人）"),
+        ("group", "单人按名字，两位及以上已命名的人放“合影”"),
+        ("has", "有人像 / 无人像"),
+    ])]
+
+    def segments(self, g, opts, ctx):
+        pp = g.feats.get("people")
+        other = ctx.settings.get("people_other_name") or "其他人"
+        if not pp or not pp.get("n"):
+            return [self.unknown]
+        mode = opts.get("mode", "main")
+        if mode == "has":
+            return ["有人像"]
+        names = pp.get("names") or []
+        if mode == "group" and len(names) >= 2:
+            return ["合影"]
+        return [names[0] if names else other]
+
+    def tokens(self):
+        return {"人物": lambda g, c: "、".join(((g.feats.get("people") or {}).get("names") or [])[:3]) or None}
+
+
 class FolderDimension(Dimension):
     id = "folder"
     label = "原文件夹名"
@@ -428,6 +533,7 @@ class FixedDimension(Dimension):
 def register_builtin() -> None:
     for d in (DateDimension(), RegionDimension(), ColorDimension(), CameraDimension(), LensDimension(),
               SourceDimension(), FileTypeDimension(), OrientationDimension(), BlurDimension(), RatingDimension(),
+              TripDimension(), SceneDimension(), PersonDimension(),
               FocalDimension(), IsoDimension(), ResolutionDimension(), FolderDimension(), FixedDimension()):
         register_dimension(d)
 

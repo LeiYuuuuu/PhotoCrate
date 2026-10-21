@@ -85,7 +85,7 @@ class GeoAnalyzer(Analyzer):
             place = {k: manual.get(k) for k in ("country", "province", "city", "district", "cc")}
             return {
                 "has_gps": real, "lat": lat, "lon": lon, "located": True, "source": "manual",
-                "manual": True, "inferred": False,
+                "manual": True, "inferred": False, "pin_lat": manual.get("lat"), "pin_lon": manual.get("lon"),
                 "in_china": place.get("cc") == "CN" or place.get("country") == "中国", **place,
             }
         if not real or ctx.geo is None:
@@ -139,7 +139,9 @@ def infer_missing_locations(groups, minutes: int) -> int:
             src = best[1].feats["geo"]
             g.feats["geo"] = {**{k: src.get(k) for k in PLACE_KEYS}, "has_gps": False, "located": True,
                               "source": "inferred", "manual": False, "inferred": True,
-                              "inferred_from": best[1].name}
+                              "inferred_from": best[1].name,
+                              "pin_lat": src.get("lat") if src.get("lat") is not None else src.get("pin_lat"),
+                              "pin_lon": src.get("lon") if src.get("lon") is not None else src.get("pin_lon")}
             n += 1
     return n
 
@@ -559,3 +561,5 @@ def register_builtin() -> None:
     for a in (DateAnalyzer(), GeoAnalyzer(), RatingAnalyzer(), CameraAnalyzer(), ShapeAnalyzer(), ColorAnalyzer(),
               BlurAnalyzer(), HashAnalyzer()):
         register_analyzer(a)
+    from ..ai.faces import FaceAnalyzer        # 人脸：模型下载后才启用
+    register_analyzer(FaceAnalyzer())

@@ -160,6 +160,22 @@ DEFAULTS: dict[str, Any] = {
     "xmp_update_existing": True,      # 已有 .xmp 时更新其中对应字段（先备份，可撤销）
     # 批量重命名
     "rename_template": "{日期}_{市|省|国家|未知地点}_{序号}",
+    # 旅行自动分段
+    "home_places": [],                # 常住地 [{label, lat, lon, radius_km, names}]
+    "trip_gap_hours": 36,             # 相邻两张“离家”照片间隔超过多少小时算两次旅行
+    "trip_min_photos": 3,             # 少于几张离家照片的不算旅行
+    "trip_tail_hours": 12,            # 没有地点的照片：在旅行开始前 / 结束后多少小时内也算进这次旅行
+    "trip_names": {},                 # 用户改过的旅行名 {起始日期: 名称}
+    "trip_other_name": "日常",        # 分区时不属于任何旅行的照片放进的文件夹
+    # 地图
+    "map_tiles": "auto",              # auto（OpenStreetMap，深色主题下压暗）/ osm / amap / none
+    # AI（模型首次使用时下载到用户数据目录 models\）
+    "ai_enabled": True,               # 模型就绪后，扫描时自动做场景识别 / 文字搜图索引
+    "ai_faces": True,                 # 模型就绪后，扫描时自动检测人脸
+    "ai_mirror": "auto",              # 模型下载源：auto（先官方后镜像）/ hf / mirror
+    "face_threshold": 0.42,           # 人脸相似度（余弦）达到多少算同一人
+    "face_min_size": 40,              # 预览图（长边 1024）里小于多少像素的脸忽略
+    "people_other_name": "其他人",
     # 文件
     "pair_live_photo": True,
     "pair_across_folders": True,      # RAW 与 JPG 分处不同文件夹时，按文件名 + 拍摄时间重新配对

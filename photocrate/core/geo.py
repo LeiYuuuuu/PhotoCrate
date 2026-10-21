@@ -40,6 +40,7 @@ class _WorldIndex:
         import numpy as np
 
         lats, lons, self.names, self.admin1, self.admin2, self.cc = [], [], [], [], [], []
+        pops = []
         with gzip.open(path, "rt", encoding="utf-8", newline="") as f:
             r = csv.reader(f)
             next(r, None)
@@ -53,19 +54,40 @@ class _WorldIndex:
                 self.admin1.append(row[3])
                 self.admin2.append(row[4])
                 self.cc.append(row[5])
+                try:
+                    pops.append(int(row[6]))
+                except (ValueError, IndexError):
+                    pops.append(0)
         la = np.radians(np.asarray(lats, dtype=np.float64))
         lo = np.radians(np.asarray(lons, dtype=np.float64))
         self.xyz = np.stack([np.cos(la) * np.cos(lo), np.cos(la) * np.sin(lo), np.sin(la)], axis=1).astype(np.float32)
+        self.logpop = np.log10(np.maximum(np.asarray(pops, dtype=np.float32), 1000.0))
         self._np = np
 
     def nearest(self, lat: float, lon: float) -> tuple[int, float]:
+        """最近的城市点——但附近有明显更大的城市时取大城市。
+
+        GeoNames 只有城市中心点，大城市的市区里常常离某个卫星城的中心点更近（东京浅草 → 草加 / 浦安，
+        伏见稻荷 → 向日）。所以在“最近距离 + 12 km、且不超过 30 km”的同国候选里，按
+        距离 − 4 × log10(人口) 取最小（人口差 10 倍 ≈ 抵消 4 km 距离差）。"""
         np = self._np
         la, lo = math.radians(lat), math.radians(lon)
         q = np.array([math.cos(la) * math.cos(lo), math.cos(la) * math.sin(lo), math.sin(la)], dtype=np.float32)
         dots = self.xyz @ q
-        i = int(np.argmax(dots))
-        dist_km = math.degrees(math.acos(max(-1.0, min(1.0, float(dots[i]))))) * 111.195
-        return i, dist_km
+        k = min(64, len(dots))
+        idx = np.argpartition(-dots, k - 1)[:k]
+        dist = np.degrees(np.arccos(np.clip(dots[idx].astype(np.float64), -1.0, 1.0))) * 111.195
+        j0 = int(np.argmin(dist))
+        i0, d0 = int(idx[j0]), float(dist[j0])
+        best, best_score = i0, d0 - 4.0 * float(self.logpop[i0])
+        for j in range(k):
+            i, d = int(idx[j]), float(dist[j])
+            if i == i0 or d > d0 + 12 or d > 30 or self.cc[i] != self.cc[i0]:
+                continue
+            sc = d - 4.0 * float(self.logpop[i])
+            if sc < best_score:
+                best, best_score = i, sc
+        return best, float(dist[list(idx).index(best)])
 
 
 class GeoService:
