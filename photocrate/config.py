@@ -157,6 +157,11 @@ DEFAULTS: dict[str, Any] = {
     "similar_threshold": 12,          # 感知哈希最多相差几位（0–64，越小越严格）
     "similar_folder": "待确认_相似",
     "xmp_write_rating": True,
+    "xmp_write_keywords": True,       # 写 XMP 时带上 AI 关键词（场景 / 已命名的人物 / 旅行名）
+    "include_videos": True,           # 扫描时包含独立视频（.mp4 / .mov / .mts …）
+    "import_template": "{年}/{年月日}",  # 导入向导：存储卡照片放到哪个文件夹
+    "import_dir": "",
+    "export_dir": "",
     "xmp_update_existing": True,      # 已有 .xmp 时更新其中对应字段（先备份，可撤销）
     # 批量重命名
     "rename_template": "{日期}_{市|省|国家|未知地点}_{序号}",

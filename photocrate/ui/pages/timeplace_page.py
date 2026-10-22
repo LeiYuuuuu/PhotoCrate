@@ -341,9 +341,11 @@ class TimePlacePage(Page):
         self.x_place = QCheckBox("地点名称（手动指定 / 匹配）")
         self.x_time = QCheckBox("校正后的拍摄时间")
         self.x_rating = QCheckBox("星级 / 色标 / 弃用（在「挑片」页打的）")
+        self.x_kw = QCheckBox("AI 关键词（场景 / 已命名的人物 / 旅行名）")
         self.x_update = QCheckBox("更新已有的 .xmp（先备份，只改这几项）")
         for cb, key in ((self.x_gps, "xmp_write_gps"), (self.x_place, "xmp_write_place"),
                         (self.x_time, "xmp_write_time"), (self.x_rating, "xmp_write_rating"),
+                        (self.x_kw, "xmp_write_keywords"),
                         (self.x_update, "xmp_update_existing")):
             cb.setChecked(bool(ctx.settings.get(key, True)))
             cb.toggled.connect(lambda v, k=key: ctx.settings.set(k, bool(v)))
@@ -748,4 +750,4 @@ class TimePlacePage(Page):
             scope_text = f"全部 {len(groups)} 张照片"
         run_xmp_flow(self.ctx, self, groups, scope_text, gps=self.x_gps.isChecked(), place=self.x_place.isChecked(),
                      time=self.x_time.isChecked(), rating=self.x_rating.isChecked(),
-                     update_existing=self.x_update.isChecked())
+                     update_existing=self.x_update.isChecked(), keywords=self.x_kw.isChecked())

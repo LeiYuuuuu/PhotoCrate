@@ -112,12 +112,19 @@ class CullingPage(Page):
         self.scope_lab = caption("", "dim", 8.5)
         mp.body.addWidget(self.scope_lab)
         br = QHBoxLayout()
-        self.b_view = TacButton("大图查看", "secondary", en="VIEW", height=34)
-        self.b_xmp = TacButton("星级写入 XMP…", "secondary", en="XMP", height=34)
-        self.b_clean = TacButton("清理 RAW…", "danger", en="CLEANUP", height=34)
-        self.b_rename = TacButton("批量重命名…", "secondary", en="RENAME", height=34)
-        self.b_clear = TacButton("清除标记", "secondary", height=34)
-        for b in (self.b_view, self.b_xmp, self.b_clean, self.b_rename, self.b_clear):
+        self.b_view = TacButton("大图查看", "secondary", en="VIEW", height=32)
+        self.b_export = TacButton("导出分享…", "primary", en="EXPORT", height=32)
+        self.b_xmp = TacButton("写入 XMP…", "secondary", en="XMP", height=32)
+        self.b_rename = TacButton("批量重命名…", "secondary", en="RENAME", height=32)
+        for b in (self.b_view, self.b_export, self.b_xmp, self.b_rename):
+            br.addWidget(b)
+        br.addStretch(1)
+        mp.body.addLayout(br)
+        br = QHBoxLayout()
+        self.b_clean = TacButton("清理 RAW…", "danger", en="CLEANUP", height=32)
+        self.b_dupe = TacButton("查找重复照片…", "danger", en="DUPES", height=32)
+        self.b_clear = TacButton("清除标记", "secondary", height=32)
+        for b in (self.b_clean, self.b_dupe, self.b_clear):
             br.addWidget(b)
         br.addStretch(1)
         mp.body.addLayout(br)
@@ -159,6 +166,8 @@ class CullingPage(Page):
         self.b_clean.clicked.connect(self.cleanup)
         self.b_rename.clicked.connect(self.rename)
         self.b_clear.clicked.connect(self.clear_marks)
+        self.b_export.clicked.connect(self.export)
+        self.b_dupe.clicked.connect(self.dedupe)
         ctx.library_changed.connect(self.refresh)
         ctx.files_changed.connect(self.refresh)
         ctx.ratings_changed.connect(self._ratings_changed)
@@ -273,7 +282,8 @@ class CullingPage(Page):
         from ..xmpflow import run_xmp_flow
         gs, text = self.scope()
         run_xmp_flow(self.ctx, self, gs, text, gps=False, place=False, time=False, rating=True,
-                     update_existing=bool(self.ctx.settings.get("xmp_update_existing", True)))
+                     update_existing=bool(self.ctx.settings.get("xmp_update_existing", True)),
+                     keywords=bool(self.ctx.settings.get("xmp_write_keywords", True)))
 
     def isolate(self) -> None:
         groups = similar_extras(self._all())
@@ -329,6 +339,49 @@ class CullingPage(Page):
         msg.append(f"批次 #{res.batch_id}，可在「操作记录」页撤销（从回收站放回）。")
         self.ctx.status.emit(f"清理完成：{len(res.deleted)} 个文件放入回收站，释放 {human_size(res.freed)}")
         info(self, "清理完成", "<br><br>".join(msg), "COMPLETE")
+
+    def export(self) -> None:
+        from ..workflow_dialogs import ExportDialog, run_export
+        gs, text = self.scope()
+        if not gs:
+            return
+        dlg = ExportDialog(self, self.ctx, gs, text)
+        if dlg.exec() == ExportDialog.DialogCode.Accepted:
+            run_export(self.ctx, self, dlg)
+
+    def dedupe(self) -> None:
+        from ..workflow_dialogs import DedupeDialog
+        gs = self._all()
+        if not gs:
+            return
+        dlg = DedupeDialog(self, self.ctx, gs)
+        if dlg.exec() != DedupeDialog.DialogCode.Accepted or not dlg.plan or not dlg.plan.items:
+            return
+        plan = dlg.plan
+        self.ctx.busy = True
+
+        def job(prog, cancel):
+            return self.ctx.mover.delete(plan, lambda d, t, c: prog((d, t, c)), cancel)
+
+        try:
+            res, tb = run_with_progress(self.ctx, self, "正在删除副本", "TRASHING", job)
+        finally:
+            self.ctx.busy = False
+        if tb or res is None:
+            self.ctx.files_changed.emit()
+            info(self, "删除出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
+            return
+        from ...ops.pathsafe import human_size
+        self.ctx.library.remove_files(res.deleted)
+        self.sel = []
+        self.ctx.files_changed.emit()
+        msg = (f"已把 <b>{res.done_groups}</b> 张重复照片的副本（{len(res.deleted)} 个文件，{human_size(res.freed)}）"
+               "放入回收站。")
+        if res.failed_groups:
+            msg += f"<br><br>{res.failed_groups} 张失败（已放回）：<br>" + "<br>".join(res.errors[:6])
+        msg += f"<br><br>批次 #{res.batch_id}，可在「操作记录」页撤销（从回收站放回）。"
+        self.ctx.status.emit(f"删除重复：{len(res.deleted)} 个文件，释放 {human_size(res.freed)}")
+        info(self, "完成", msg, "COMPLETE")
 
     def rename(self) -> None:
         from ..culling_dialogs import RenameDialog

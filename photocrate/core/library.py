@@ -25,6 +25,7 @@ from .geotime import (TrackIndex, TrackPoint, describe_span, fill_locations, lib
 from .places import AnnotationStore
 from .metadata import (MetadataBackend, create_backend, exiftool_version, find_exiftool, merge_group_meta,
                        merge_meta)
+from .formats import MEDIA_ROLES
 from .models import MemberFile, PhotoGroup, file_signature
 from .pairing import pair_across_folders, renumber
 from .pixelwork import init_worker, process_task, thumb_path_for
@@ -123,7 +124,8 @@ class Library:
 
     # ---- 扫描 ------------------------------------------------------------
     def scan(self, roots: list[str], recursive: bool, progress: ProgressCb | None = None,
-             cancel: threading.Event | None = None) -> ScanReport:
+             cancel: threading.Event | None = None, pixels: bool = True) -> ScanReport:
+        """pixels=False：只读元数据、不做缩略图与画面分析（导入向导预览存储卡时用，快很多）。"""
         t0 = time.time()
         cancel = cancel or threading.Event()
         rep = ScanReport()
@@ -144,7 +146,8 @@ class Library:
                 last[0] = now
                 emit()
 
-        groups = scan(roots, recursive, bool(self.settings.get("pair_live_photo", True)), cancel, on_enum)
+        groups = scan(roots, recursive, bool(self.settings.get("pair_live_photo", True)), cancel, on_enum,
+                      include_videos=bool(self.settings.get("include_videos", True)))
         rep.groups = len(groups)
         rep.files = sum(len(g.files) for g in groups)
         pg.groups = len(groups)
@@ -152,7 +155,7 @@ class Library:
             rep.cancelled = True
             return rep
 
-        groups = self._analyze(groups, pg, emit, cancel, rep)
+        groups = self._analyze(groups, pg, emit, cancel, rep, pixels)
         if cancel.is_set():
             rep.cancelled = True
             return rep
@@ -168,7 +171,7 @@ class Library:
         return rep
 
     def _analyze(self, groups: list[PhotoGroup], pg: Progress, emit: Callable[[], None],
-                 cancel: threading.Event, rep: ScanReport) -> list[PhotoGroup]:
+                 cancel: threading.Event, rep: ScanReport, pixels: bool = True) -> list[PhotoGroup]:
         # 1) 像素任务（缓存未命中的部分）先提交到进程池，与 ExifTool 读取并行
         prim_sigs = [g.primary_file.sig for g in groups]
         pix_cache = self.cache.get_pix_many(prim_sigs)
@@ -188,7 +191,7 @@ class Library:
                 g.feats["preview"] = {"w": pv["w"], "h": pv["h"], "src": pv["src"]}
             need = [aid for aid, ver in wanted.items() if aid not in g.feats]
             need_thumb = g.thumb is None
-            if need or need_thumb:
+            if pixels and (need or need_thumb):
                 tasks.append({
                     "gid": g.gid, "sig": sig, "path": g.primary, "kind": g.primary_file.role,
                     "need": need, "need_thumb": need_thumb,
@@ -275,7 +278,8 @@ class Library:
         self.run_meta_analyzers(groups)
 
         # 7) AI：CLIP 向量索引 + 场景识别（模型已下载且开启时）
-        self.run_ai(groups, pg, emit, cancel)
+        if pixels:
+            self.run_ai(groups, pg, emit, cancel)
         return groups
 
     def run_ai(self, groups: list[PhotoGroup] | None = None, pg: Progress | None = None,
@@ -403,6 +407,10 @@ class Library:
                         g.feats.pop(a.id, None)
                 except Exception as e:
                     log.warning("分析器 %s 处理 %s 失败：%s", a.id, g.primary, e)
+            if a.id == "date":
+                # 视频的 UTC 时间按同一时段照片的时区换算（地点 / 旅行都依赖正确的本地时间）
+                from .videos import align_video_times
+                align_video_times(groups)
         # GPS 补全：轨迹文件 / 参考照片 / 同批带 GPS 的照片，按拍摄时间匹配
         self.fill_stats = {}
         if s.get("gps_fill", True):
@@ -602,7 +610,7 @@ class Library:
             if len(keep) == len(g.files):
                 continue
             n += len(g.files) - len(keep)
-            if not any(f.role in ("raw", "jpeg", "heif", "png", "image") for f in keep):
+            if not any(f.role in MEDIA_ROLES for f in keep):
                 g.files = []
                 continue
             if all(os.path.normcase(os.path.abspath(f.path)) != os.path.normcase(os.path.abspath(g.primary))

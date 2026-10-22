@@ -134,6 +134,29 @@ class Journal:
                 cur, bid, moved = r[0], r[1], True
         return cur if moved else None
 
+    def later_dependents(self, batch_id: int) -> list[int]:
+        """之后的“移动 / 重命名”批次里，接着移动了本批次结果的那些批次（连带的也算），按编号从小到大。
+        撤销本批次前要先（从新到旧）撤销它们，否则文件已不在本批次记录的位置。"""
+        out: set[int] = set()
+        frontier = [batch_id]
+        with self._lock:
+            while frontier:
+                b = frontier.pop()
+                dsts = [r[0].lower() for r in self._db.execute(
+                    "SELECT dst FROM ops WHERE batch_id=? AND status='done'", (b,))]
+                if not dsts:
+                    continue
+                for i in range(0, len(dsts), 500):
+                    ch = dsts[i:i + 500]
+                    q = ("SELECT DISTINCT o.batch_id FROM ops o JOIN batches bb ON bb.id = o.batch_id "
+                         "WHERE bb.operation IN ('move', 'rename') AND o.batch_id > ? AND o.status = 'done' "
+                         f"AND lower(o.src) IN ({','.join('?' * len(ch))})")
+                    for (nb,) in self._db.execute(q, (b, *ch)):
+                        if nb not in out:
+                            out.add(nb)
+                            frontier.append(nb)
+        return sorted(out)
+
     def removed_by_xmp_undo(self, path: str) -> bool:
         """path 是否是某个“写入 XMP”批次新建、之后又被撤销（放入回收站）的文件——沿移动记录往前追溯到它最初的位置。"""
         cur = path

@@ -46,6 +46,7 @@
 │ ops/mover.py    执行 / 撤销 / 崩溃恢复          ops/journal.py  操作日志（SQLite）       │
 │ ops/xmpwrite.py 写回 XMP 附属文件（只给 RAW；新建或更新已有并备份；记日志、可撤销）     │
 │ ops/cleanup.py  清理 RAW 计划   ops/trashbin.py 回收站放入 / 找回   ops/renamer.py 改名 │
+│ ops/importer.py 导入向导   ops/dedupe.py 重复照片   ops/exporter.py 导出 JPG / 网页相册   │
 │ ops/pathsafe.py Windows 文件名清洗、长路径                                            │
 │ plugins.py      插件加载与注册接口                                                     │
 └───────────────────────────────────────┬─────────────────────────────────────────┘
@@ -177,7 +178,17 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 | 人脸 | `ai/faces.FaceAnalyzer`（像素阶段，在扫描的后台进程里运行）：YuNet 在长边 1024 的预览上检测，SFace 对齐后提 128 维特征（float16、base64）并存一张 112×112 小头像；小于 `face_min_size` 的脸忽略。模型不在时 `available()` 为 False，不会写入空结果 |
 | 人物聚类 | `ai/people.cluster_people`：先应用用户更正（face_fix：指定归属 / “不是他”），再按已命名的人的特征中心认人（余弦 ≥ `face_threshold`，默认 0.42），其余脸按大小做贪心中心聚类并合并相近的组；只在一张照片里出现的脸归“单次出现”。命名 = 存 {名字, 特征中心}（annotations.db 的 people 表）；同名 = 合并。维度「人物」按照片里最大的已命名脸归档 |
 
-## 9. 安全搬运（ops/）
+## 9. 补全工作流：视频、导入、去重、导出、AI 关键词
+
+| 功能 | 实现 |
+|---|---|
+| 视频 | `formats.VIDEO_EXTS`；`scanner.group_directory`：与照片同名的 .mov/.mp4 仍是实况照片的视频部分，其余视频各成一组（角色 `video`，`PhotoGroup.is_video`），索尼 `C0001M01.XML`、佳能 `.THM` 作为附属文件跟随。元数据：带时区的 CreationDate（苹果 Keys、索尼 XML）直接用；只有 QuickTime CreateDate（UTC）时 `core/videos.align_video_times` 找 24 小时内按 UTC 最接近、时区已知的照片，用它的时区换算（`tz_from`），找不到标 `tz_guess`。像素阶段用 OpenCV 取 12% 处的一帧做缩略图（CLIP / 人脸照常），清晰度不评分；XMP 不写视频；大图查看器显示该帧 + 播放按钮，双击 / 回车交给系统播放器 |
+| 导入向导 | `ops/importer.py`：`detect_sources`（Windows：GetLogicalDrives + GetDriveType，可移动盘或带 DCIM 的盘）；`card_roots`（DCIM、PRIVATE/M4ROOT/CLIP、AVCHD…）；用一个临时 `Library` 以 `scan(pixels=False)` 只读元数据；`classify` 按导入记录（`imports.db`：卡上文件指纹 → 导入后的路径，目标文件仍在才算）或照片库已有同一指纹判断“已导入”；`build_import_plan` = 分区模板定文件夹 + 可选改名模板（与批量重命名同一套）→ operation `copy` 的计划，目标已有同名同大小文件也算已导入；执行走 `Mover.execute`（先写日志、成组复制、可撤销），完成后 `record_import` 写导入记录。复制保留修改时间，所以指纹不变，读卡时的元数据缓存直接命中 |
+| 去重 | `ops/dedupe.find_duplicates`：只看主体文件（照片 / 视频）；按大小分桶 → 头尾各 1 MB 的 BLAKE2b → 全文件 BLAKE2b；并查集把共享内容的照片组连成簇；一组的全部内容都包含在另一组里才算多余副本（RAW+JPG 优先于单独 JPG，默认按扫描顺序保留「资源接入」靠前文件夹里的）；副本带原件没有的修图记录时跳过。`build_dedupe_plan` → operation `delete`，复用清理 RAW 的回收站删除 / 撤销 |
+| 导出 | `ops/exporter.py`：`render_one` = 选最佳源（JPG/HEIC/PNG，只有 RAW 时用内嵌预览）→ EXIF 转正 → 缩小（不放大）→ 水印（白字 + 半透明阴影，字号随长边缩放）→ EXIF：默认去掉 GPS IFD，或全部去掉；`export_jpegs` 文件名沿用原名或用改名模板，重名加编号；`export_album` 写 `index.html`（数据内嵌 JSON、Leaflet 从 CDN 加载、坐标四舍五入到 0.01°）+ `photos/` + `thumbs/`。导出只写新文件，不进操作日志 |
+| AI 关键词 | `xmpwrite.ai_keywords`：场景（把握 ≥ 0.3）、已命名的人物、旅行名 → `XMP-dc:Subject` 与 `XMP-lr:HierarchicalSubject`（“场景|大类|场景”“人物|名字”“旅行|名称”）；列表值用 ExifTool 的 `-TAG-=v -TAG+=v` 写入，已有关键词不动、不会重复；和星级一样只写 RAW 的 .xmp，可更新已有 .xmp（先备份、可撤销） |
+
+## 10. 安全搬运（ops/）
 
 | 机制 | 实现位置 |
 |---|---|
@@ -189,20 +200,23 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 | 撤销：按日志逆序移回；原位置被占用就改名恢复，不覆盖；清理本批新建的空文件夹 | `mover.undo` |
 | 崩溃恢复：启动时发现 running 状态的批次 → 按磁盘实际状态修正日志 → 继续或回滚 | `mover.reconcile/resume/rollback` + `main_window._check_recovery` |
 | 取消：只在两组之间响应，绝不留下复制一半的文件 | `mover._run_batch` |
+| 再次分区：移动到数据源以外的文件夹后，数据源自动加上目标（目标包含旧数据源时合并） | `planner.sources_after_move` + `partition_page._done` → `source_page.set_dirs` |
+| 搬空的旧文件夹自动清理：只删数据源 / 目标文件夹**里面**真正空了的子文件夹，根文件夹本身不删；撤销时 `makedirs` 重建 | `mover.execute(keep_roots=…)` → `mover.prune_emptied` |
+| 撤销依赖链：批次 A 的照片又被后来的批次 B 移动 / 改名过时，撤销 A 先提示，再按从新到旧依次撤销 B…A | `journal.later_dependents` + `history_page._undo` |
 | 删除一律进回收站；清理的撤销从回收站放回 | `mover.trash`（send2trash）、`mover.delete`、`trashbin.restore_from_trash` |
 
-这些行为都有对应的单元测试（`tests/test_core.py`），包括模拟跨盘、模拟中途失败、模拟崩溃后恢复。
+这些行为都有对应的单元测试（`tests/test_core.py`、`tests/test_repartition.py`），包括模拟跨盘、模拟中途失败、模拟崩溃后恢复。
 
-## 10. 界面设计
+## 11. 界面设计
 
 - **视觉语言**（`ui/theme.py` + `ui/widgets/deco.py`）：直角与切角、细线框 + 四角角标、编号章节（01–08）、中文标题 + 英文等宽小标签、黄色强调块、斜纹警示带（只用在“会改动文件”的确认窗口）、分段进度条。全部自绘，不用图片素材。
 - **字体**：中文“微软雅黑”，数字与英文用 Windows 自带的 Bahnschrift（DIN 风格窄体），等宽用 Cascadia/Consolas。
 - **两套主题**：浅色「终末地」（浅灰工业底 + 高可见度黄）/ 深色「方舟」（深色终端 + 金黄 + 青色信息色）。颜色只在 `Palette` 里定义一次，所有自绘控件在绘制时读取当前配色。
 - **性能**：缩略图网格是虚拟化的 `QListView`（只绘制可见项），缩略图 LRU 缓存；预览树和统计都是内存计算，几千张即时刷新；所有耗时任务在 `QThread` 中运行，界面不卡。
 
-## 11. 扩展：插件接口（保留给未来的新功能）
+## 12. 扩展：插件接口（保留给未来的新功能）
 
-### 11.1 插件文件
+### 12.1 插件文件
 
 放到 `plugins\`（程序目录）或 `%APPDATA%\PhotoCrate\plugins\`，重启生效：
 
@@ -218,7 +232,7 @@ def register(api):
 
 后台分析进程也会加载插件（此时 `api.headless=True`，页面注册被忽略），所以像素分析器写在插件里也能并行运行。
 
-### 11.2 新增一个像素分析器（例如 AI）
+### 12.2 新增一个像素分析器（例如 AI）
 
 ```python
 class SceneAnalyzer(Analyzer):
@@ -231,7 +245,7 @@ class SceneAnalyzer(Analyzer):
 
 结果自动按文件指纹缓存；改了算法把 `version` 加 1，旧缓存自动失效。分区维度里用 `group.feats["scene"]` 读取。完整骨架见 `plugins_examples/example_ai_scene_stub.py`。
 
-### 11.3 未来功能路线（接口都已就位）
+### 12.3 未来功能路线（接口都已就位）
 
 | 功能 | 做法 |
 |---|---|
@@ -241,7 +255,7 @@ class SceneAnalyzer(Analyzer):
 
 > 注意：打包好的 exe 只包含已有的依赖（已含 onnxruntime）。需要其他第三方库的插件，用 `run.bat` 源码模式运行（`.venv\Scripts\pip install 包名`），或安装后重新打包。
 
-## 12. 文件地图
+## 13. 文件地图
 
 ```
 PhotoCrate/
@@ -251,34 +265,38 @@ PhotoCrate/
 ├─ photocrate/
 │  ├─ app.py  bootstrap.py  config.py  plugins.py
 │  ├─ core/        models formats scanner metadata imaging pixelwork geo dates cache library stats
-│  │               pairing geotime places daybook trips
+│  │               pairing geotime places daybook trips videos
 │  ├─ ai/          models clip scenes faces people service
 │  ├─ analyzers/   base builtin
 │  ├─ partition/   base dimensions engine
 │  ├─ ops/         planner mover journal pathsafe xmpwrite cleanup trashbin renamer
-│  └─ ui/          theme context dialogs timeplace_dialogs culling_dialogs xmpflow viewer
+│  │               importer dedupe exporter
+│  └─ ui/          theme context dialogs timeplace_dialogs culling_dialogs workflow_dialogs xmpflow viewer
 │                  main_window  pages/  widgets/（deco thumbgrid mapview）
 ├─ data/           geonames_cities1000.csv.gz  place_names_zh.json  clip_vocab_zh.txt
 ├─ assets/         app.ico app.png
 ├─ plugins/        用户插件放这里        plugins_examples/  示例插件
 ├─ tools/          get_exiftool.ps1  make_icon.py  （exiftool/ 运行后自动下载到这里）
 └─ tests/          test_core.py  test_timeplace.py  test_culling.py  test_trips.py  test_ai.py
-                   make_samples.py  ui_smoke.py  ui_timeplace.py  ui_culling.py  ui_tier3.py
+                   test_workflow.py  test_repartition.py  make_samples.py  ui_smoke.py  ui_timeplace.py
+                   ui_culling.py  ui_tier3.py  ui_workflow.py  ui_repartition.py
 ```
 
-## 13. 界面细节与调试辅助
+## 14. 界面细节与调试辅助
 
 - **F12 截图**：`MainWindow.eventFilter` 在应用级拦截 F12，用 `QScreen.grabWindow` 截取窗口区域（包括弹出的对话框），存到 `screenshots_dir()`。
 - **窗口位置记忆**：关闭时保存 `window_state`（几何 + 是否最大化）；设置项 `window_screen` 可指定下次在哪台显示器打开（`primary` / `secondary` / `#2` / 显示器名称片段），只生效一次。
 - **结果对话框等进度窗口关闭后再弹**：`dialogs.run_with_progress` 统一处理“后台任务 + 进度窗口 + 结果”。任务很快完成时，如果在进度窗口还开着时就弹结果框，Windows 会把焦点交给别的程序，结果框落到后面、看不见却挡住整个界面（端到端测试时实际遇到过）。
 - **大列表一律用 Model/View**：操作记录的文件清单可能上千行，用 `QAbstractTableModel` 按需绘制；不要对大表使用 `ResizeToContents`（每次数据变化都会扫描全部行，904 行时曾导致约 20 秒卡顿）。
 
-## 14. 已知局限
+## 15. 已知局限
 
 - 海外地点用“最近的城市点（附近有明显更大的城市时取大城市）”判断，边境/海边可能归到邻近城市；国内用真实行政边界，准确度高。
 - 色调与清晰度阈值没有放之四海皆准的值，默认值偏保守，建议用自己的照片在界面里调。
 - 清晰度：夜景高 ISO 噪点会让分数偏高（被判为清晰）；预览太小的 RAW（个别老机型）标为“无法判断”。
-- 视频文件（除实况照片外）不在处理范围内。
+- 视频只做整理（日期、旅行、分区、去重、导入）：不评清晰度、不导出、不写 XMP；画面分析只看一帧。
+- 导入向导读不了以 MTP 方式连接、没有盘符的设备（iPhone、部分安卓）：先用手机自带方式导出到文件夹再导入。
+- 网页相册的地图要联网加载（Leaflet + OpenStreetMap）；照片和列表离线可看。
 - 跨文件夹配对需要两边都有 EXIF 拍摄时间；没有拍摄时间的 RAW/JPG 分开存放后会各算一张。
 - GPS 补全的精度取决于参考数据：手机照片之间间隔很久时只能取最近的一张（时间窗口内）；GPX 轨迹没有时区问题，最准确。
 - 写回 XMP 只针对 RAW；JPG/HEIC 的地点、校正时间与星级只保存在软件里。

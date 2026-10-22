@@ -48,6 +48,21 @@ def rating_change_for_key(key, current: dict | None) -> dict | None:
 # 读图
 # ---------------------------------------------------------------------------
 
+def fmt_duration(sec) -> str:
+    try:
+        s = int(round(float(sec)))
+    except (TypeError, ValueError):
+        return ""
+    return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
+
+
+def play_video(group) -> None:
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QDesktopServices
+    f = best_file(group)
+    QDesktopServices.openUrl(QUrl.fromLocalFile(f.path))
+
+
 def best_file(group):
     imgs = [f for f in group.image_files if f.role != "raw"]
     if imgs:
@@ -63,6 +78,10 @@ def _pil_to_qimage(im) -> QImage:
 
 def load_full_image(group, exiftool: str | None = None) -> QImage:
     f = best_file(group)
+    if f.role == "video":
+        from ..core.imaging import load_video_frame
+        im, _ = load_video_frame(f.path, 2560)
+        return _pil_to_qimage(im)
     if f.role in ("jpeg", "png", "image"):
         r = QImageReader(f.path)
         r.setAutoTransform(True)
@@ -240,7 +259,29 @@ class ImagePane(QWidget):
         self._drag = None
 
     def mouseDoubleClickEvent(self, e):
+        if self.group is not None and getattr(self.group, "is_video", False):
+            play_video(self.group)
+            return
         self.toggle_100(e.position())
+
+    def _paint_play(self, qp: QPainter) -> None:
+        """视频：中间画播放按钮和时长，双击 / 回车用系统播放器播放。"""
+        from PySide6.QtGui import QPolygonF
+        c = QRectF(self.rect()).center()
+        qp.setPen(Qt.PenStyle.NoPen)
+        qp.setBrush(QColor(0, 0, 0, 150))
+        qp.drawEllipse(c, 42, 42)
+        qp.setBrush(QColor("#FFFFFF"))
+        qp.drawPolygon(QPolygonF([QPointF(c.x() - 13, c.y() - 20), QPointF(c.x() - 13, c.y() + 20),
+                                  QPointF(c.x() + 22, c.y())]))
+        dur = (self.group.meta or {}).get("duration")
+        txt = ("视频 " + fmt_duration(dur) if dur else "视频") + " · 双击 / 回车 播放"
+        qp.setFont(font("cn", 10, 600))
+        tw = QFontMetrics(qp.font()).horizontalAdvance(txt) + 20
+        r = QRectF(c.x() - tw / 2, c.y() + 54, tw, 26)
+        qp.fillRect(r, QColor(0, 0, 0, 160))
+        qp.setPen(QColor("#FFFFFF"))
+        qp.drawText(r, Qt.AlignmentFlag.AlignCenter, txt)
 
     def wheelEvent(self, e):
         if not self.img:
@@ -267,6 +308,8 @@ class ImagePane(QWidget):
             qp.setPen(QColor("#8A8C8E"))
             qp.setFont(font("mono", 10))
             qp.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "LOADING…" if self.loading else "无法读取这张照片")
+        if self.group is not None and getattr(self.group, "is_video", False) and self.img:
+            self._paint_play(qp)
         if self.zoom is not None:
             qp.setFont(font("display", 10, 600))
             txt = f"{self.zoom * 100:.0f}%"
@@ -553,6 +596,10 @@ class ViewerWindow(QDialog):
             self.toggle_compare()
         elif k == Qt.Key.Key_F:
             self.showNormal() if self.isFullScreen() else self.showFullScreen()
+        elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            g = self.current_group()
+            if g is not None and getattr(g, "is_video", False):
+                play_video(g)
         elif k == Qt.Key.Key_I:
             self.top.setVisible(not self.top.isVisible())
         else:

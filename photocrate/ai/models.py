@@ -107,7 +107,7 @@ def _urls(name: str, mirror: str) -> list[str]:
 
 def _fetch(url: str, dst: Path, done_before: int, total: int, label: str, progress: ProgressFn | None,
            cancel: threading.Event | None) -> None:
-    req = urllib.request.Request(url, headers={"User-Agent": "PhotoCrate/1.3"})
+    req = urllib.request.Request(url, headers={"User-Agent": "PhotoCrate/1.4"})
     tmp = dst.with_suffix(dst.suffix + ".part")
     with urllib.request.urlopen(req, timeout=30) as r, open(tmp, "wb") as f:
         size = int(r.headers.get("Content-Length") or 0)

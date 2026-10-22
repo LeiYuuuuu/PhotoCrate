@@ -526,6 +526,8 @@ class BlurAnalyzer(Analyzer):
     def analyze_pixels(self, px: PixelInput, settings):
         import cv2
 
+        if px.kind == "video":
+            return {"score": None, "video": True}      # 视频的单帧有运动模糊，不评清晰度
         gray = px.gray(1024)
         h, w = gray.shape
         lap = cv2.Laplacian(gray, cv2.CV_64F)

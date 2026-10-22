@@ -1,4 +1,4 @@
-"""07 操作记录：每次移动/复制的完整清单，可撤销、导出。"""
+"""10 操作记录：每次移动/复制的完整清单，可撤销、导出。"""
 from __future__ import annotations
 
 import os
@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QHea
 from ...ops.journal import OPERATION_LABELS, STATUS_LABELS
 from ...ops.pathsafe import human_size
 from .. import theme
-from ..dialogs import ask, info, run_with_progress
+from ..dialogs import ask, choose, info, run_with_progress
 from ..theme import font
 from ..widgets.deco import Panel, TacButton, caption
 from ..widgets.thumbgrid import open_folder
@@ -61,7 +61,7 @@ class OpsModel(QAbstractTableModel):
 
 class HistoryPage(Page):
     page_id = "history"
-    index = "07"
+    index = "10"
     title = "操作记录"
     en = "Operation log // undo"
     sub = "每次执行前都会先写日志。选中一个批次即可查看清单、撤销（把文件移回原处）或导出。"
@@ -135,7 +135,10 @@ class HistoryPage(Page):
         p = theme.current()
         self.table.setRowCount(len(self._batches))
         for r, b in enumerate(self._batches):
-            vals = [f"{b['id']}", (b["created"] or "").replace("T", " "), OPERATION_LABELS.get(b["operation"], b["operation"]),
+            opname = OPERATION_LABELS.get(b["operation"], b["operation"])
+            if b["operation"] == "copy" and '"import"' in (b.get("note") or ""):
+                opname = "导入"
+            vals = [f"{b['id']}", (b["created"] or "").replace("T", " "), opname,
                     b["spec"] or "", f"{b['groups']} / {b['total']}", human_size(b["bytes"] or 0),
                     STATUS_LABELS.get(b["status"], b["status"])]
             for c, v in enumerate(vals):
@@ -201,25 +204,48 @@ class HistoryPage(Page):
         b = self._current()
         if not b:
             return
-        op = {"copy": "删除复制出来的文件（放入回收站）",
+        op = {"copy": "删除复制 / 导入出来的文件（放入回收站；存储卡上的原文件不受影响）",
               "xmp": "把这一批新建的 .xmp 附属文件放入回收站、更新过的 .xmp 换回修改前的备份"
                      "（之后若在 Lightroom 等软件里又改过它们，那些改动也会被撤掉）",
               "delete": "从系统回收站把这些文件放回原来的位置（如果回收站已清空或文件已被手动还原，会跳过并标注）",
               "rename": "把文件名改回原来的名字",
               }.get(b["operation"], "把文件移回原来的位置")
-        if not ask(self, f"撤销批次 #{b['id']}", f"将{op}，共 {b['done'] or b['total']} 个文件。<br>"
-                   "如果之后手动改动过这些文件，相关文件会被跳过并在清单里标注。", ok="撤销", danger=True, en="UNDO"):
+        deps = self.ctx.journal.later_dependents(b["id"]) if b["operation"] in ("move", "rename") else []
+        chain = [b["id"]]
+        if deps:
+            # 这批照片之后又被移动 / 改名过：必须从新到旧依次撤销，文件才能一路回到最初的位置
+            names = "、".join(f"#{d}" for d in reversed(deps))
+            if choose(self, f"撤销批次 #{b['id']}",
+                      f"这一批照片之后又被批次 {names} 移动或改名过，单独撤销 #{b['id']} 找不到文件。<br><br>"
+                      f"将按从新到旧的顺序依次撤销 {names} 和 #{b['id']}，照片回到 #{b['id']} 之前的位置。",
+                      [("cancel", "取消", "secondary"), ("all", f"依次撤销 {len(deps) + 1} 个批次", "danger")],
+                      en="UNDO CHAIN") != "all":
+                return
+            chain = sorted(deps, reverse=True) + [b["id"]]
+        elif not ask(self, f"撤销批次 #{b['id']}", f"将{op}，共 {b['done'] or b['total']} 个文件。<br>"
+                     "如果之后手动改动过这些文件，相关文件会被跳过并在清单里标注。", ok="撤销", danger=True, en="UNDO"):
             return
         mover = self.ctx.mover
 
         def job(prog, cancel):
-            return mover.undo(b["id"], lambda d, t, c: prog((d, t, c)), cancel)
+            out = []
+            for bid in chain:
+                if cancel.is_set():
+                    break
+                out.append(mover.undo(bid, lambda d, t, c: prog((d, t, c)), cancel))
+            return out
 
-        res, tb = run_with_progress(self.ctx, self, "正在撤销", "ROLLBACK", job)
-        if tb or res is None:
+        results, tb = run_with_progress(self.ctx, self, "正在撤销", "ROLLBACK", job)
+        if tb or not results:
             self.refresh()
             info(self, "撤销出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
             return
+        for r in results[:-1]:                      # 依次套用每一步的路径变化
+            self.ctx.library.apply_moves(r.mapping)
+        res = results[-1]
+        if len(results) > 1:
+            res.done_files = sum(r.done_files for r in results)
+            res.errors = [e for r in results for e in r.errors]
         self._undone(res, b)
 
     def _undone(self, res, b=None):

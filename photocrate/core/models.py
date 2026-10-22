@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from .formats import KIND_LABELS, ext_of
+from .formats import KIND_LABELS, MEDIA_ROLES, ext_of
 
 
 def file_signature(path: str, size: int, mtime_ns: int) -> str:
@@ -72,7 +72,12 @@ class PhotoGroup:
 
     @property
     def image_files(self) -> list[MemberFile]:
-        return [f for f in self.files if f.role in ("raw", "jpeg", "heif", "png", "image")]
+        """组里的“主体”文件：照片（RAW / JPG / HEIC …）或独立视频；不含附属文件与实况照片的视频部分。"""
+        return [f for f in self.files if f.role in MEDIA_ROLES]
+
+    @property
+    def is_video(self) -> bool:
+        return self.primary_file.role == "video"
 
     @property
     def has_raw(self) -> bool:

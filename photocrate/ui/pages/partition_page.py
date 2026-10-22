@@ -657,8 +657,10 @@ class PartitionPage(Page):
         extra = {"spec": plan.spec_text}
         self.ctx.busy = True
 
+        keep = list(self.ctx.settings.get("source_dirs") or []) + [plan.target_root]
+
         def job(prog, cancel):
-            return mover.execute(plan, lambda d, t, c: prog((d, t, c)), cancel, extra)
+            return mover.execute(plan, lambda d, t, c: prog((d, t, c)), cancel, extra, keep_roots=keep)
 
         res, tb = run_with_progress(self.ctx, self, "正在" + ("复制" if plan.operation == "copy" else "移动") + "照片",
                                     "EXECUTING", job)
@@ -681,6 +683,20 @@ class PartitionPage(Page):
         if res.failed_groups:
             msg.append(f"<span style='color:{theme.current().danger}'>{res.failed_groups} 组失败（已整组退回原处）：</span><br>"
                        + "<br>".join(res.errors[:8]))
+        if plan.operation == "move" and res.done_files:
+            from ...ops.planner import sources_after_move
+            old = list(self.ctx.settings.get("source_dirs") or [])
+            new = sources_after_move(old, plan.target_root)
+            if new != old:
+                # 照片已经搬到目标文件夹：数据源跟过去，之后“重新扫描 → 按新规则再分”才找得到它们
+                src = self.window().page("source") if hasattr(self.window(), "page") else None
+                if src is not None and hasattr(src, "set_dirs"):
+                    src.set_dirs(new)
+                else:
+                    self.ctx.settings.set("source_dirs", new)
+                msg.append(f"已把目标文件夹 {plan.target_root} 加入「资源接入」的数据源，以后重新扫描会从那里读取。")
+        if res.pruned_dirs:
+            msg.append(f"清理了 {len(res.pruned_dirs)} 个搬空的旧文件夹（撤销时会重新建出来）。")
         msg.append(f"批次编号 #{res.batch_id}，可随时在「记录」页撤销。")
         self.ctx.status.emit(f"完成：已{op} {res.done_files} 个文件（批次 #{res.batch_id}）")
         if ask(self, "执行完成", "<br><br>".join(msg), ok="打开目标文件夹", cancel="关闭", en="COMPLETE"):

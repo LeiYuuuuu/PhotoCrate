@@ -87,6 +87,34 @@ class _NameBook:
         self.names(folder).add(name.lower())
 
 
+def _inside(path: str, root: str) -> bool:
+    """path 是否在 root 里面（或就是 root），不区分大小写 / 斜杠方向。"""
+    a = os.path.normcase(os.path.abspath(path))
+    b = os.path.normcase(os.path.abspath(root))
+    return a == b or a.startswith(b.rstrip("\\/") + os.sep)
+
+
+def sources_after_move(source_dirs: list[str], target_root: str) -> list[str]:
+    """移动之后的数据源：照片已经搬到目标文件夹，下次扫描要从那里读。
+    目标在某个数据源里面 → 不变；目标包含某些数据源 → 用目标替换它们（放在第一个被替换的位置）；否则追加。"""
+    if not target_root:
+        return list(source_dirs)
+    tgt = os.path.normpath(target_root)
+    if any(_inside(tgt, d) for d in source_dirs):
+        return list(source_dirs)
+    out, placed = [], False
+    for d in source_dirs:
+        if _inside(d, tgt):
+            if not placed:
+                out.append(tgt)
+                placed = True
+            continue
+        out.append(d)
+    if not placed:
+        out.append(tgt)
+    return out
+
+
 def _subfolder_for(member, group, split: str) -> str | None:
     """RAW/JPG 拆分时，成员应放入的子文件夹名。"""
     if split == "none":

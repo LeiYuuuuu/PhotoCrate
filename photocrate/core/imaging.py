@@ -121,10 +121,42 @@ def load_raw_preview(path: str, max_side: int, exiftool: str | None) -> tuple[An
     return Image.fromarray(rgb), "raw-decoded"
 
 
+def load_video_frame(path: str, max_side: int = 1024, at: float = 0.12):
+    """取视频里一帧（默认在 12% 处，避开开头的黑屏）作为预览。返回 PIL.Image，同时返回 (时长秒, 宽, 高)。"""
+    import cv2
+    from PIL import Image
+
+    cap = cv2.VideoCapture(path)
+    try:
+        if not cap.isOpened():
+            raise IOError("无法打开视频（缺少解码器或文件损坏）")
+        n = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        fps = cap.get(cv2.CAP_PROP_FPS) or 0
+        dur = (n / fps) if n > 0 and fps > 0 else None
+        frame = None
+        if n > 10:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(n * at))
+            ok, frame = cap.read()
+            if not ok:
+                frame = None
+        if frame is None:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                raise IOError("读不到视频画面")
+        im = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        return _finish(im, max_side), (dur, im.width, im.height)
+    finally:
+        cap.release()
+
+
 def load_preview(path: str, kind: str, max_side: int = 1024, exiftool: str | None = None):
     """返回 (PIL.Image RGB, 来源说明)；失败抛异常。"""
     from PIL import Image, ImageOps
 
+    if kind == "video":
+        im, _ = load_video_frame(path, max_side)
+        return im, "video-frame"
     if kind == "raw":
         im, src = load_raw_preview(path, max_side, exiftool)
         return _finish(im, max_side), src

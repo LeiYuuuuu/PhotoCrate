@@ -117,6 +117,17 @@ def tooltip_for(g, settings: dict | None = None) -> str:
         lines.append(f"地点：{place}{how}")
     if geo.get("lat") is not None and geo.get("source") in ("gps", "track"):
         lines.append(f"GPS：{geo['lat']:.5f}, {geo['lon']:.5f}" + ("（匹配）" if geo.get("source") == "track" else ""))
+    if g.is_video:
+        from ..viewer import fmt_duration
+        dur = fmt_duration(m.get("duration"))
+        note = []
+        if dur:
+            note.append(f"时长 {dur}")
+        if dd.get("tz_from"):
+            note.append(f"时区按附近照片 {dd['tz_from']} 推断")
+        elif dd.get("tz_guess"):
+            note.append("时区未知（按电脑时区显示）")
+        lines.append("视频" + ("：" + "，".join(note) if note else "") + "（双击看画面，回车播放）")
     cam = g.feat("camera", "model")
     if cam:
         lines.append(f"相机：{cam}")
@@ -257,7 +268,16 @@ class ThumbDelegate(QStyledItemDelegate):
             qp.setPen(QColor(fg))
             qp.drawText(tr, Qt.AlignmentFlag.AlignCenter, text)
             ty += 19
-        if self.show_score:
+        if g.is_video:
+            from ..viewer import fmt_duration
+            txt = "▶ " + (fmt_duration((g.meta or {}).get("duration")) or "视频")
+            qp.setFont(font("display", 9.5, 700))
+            tw = QFontMetrics(qp.font()).horizontalAdvance(txt) + 14
+            tr = QRect(img.right() - tw - 3, img.bottom() - 21, tw, 18)
+            qp.fillRect(tr, QColor(0, 0, 0, 175))
+            qp.setPen(QColor("#FFFFFF"))
+            qp.drawText(tr, Qt.AlignmentFlag.AlignCenter, txt)
+        if self.show_score and not g.is_video:
             sc = g.feat("blur", "score")
             st = blur_state(g, self.blur_threshold)
             txt = "—" if sc is None else f"{sc:.0f}"

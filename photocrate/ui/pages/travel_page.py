@@ -96,6 +96,9 @@ class TravelPage(Page):
         self.b_reset.clicked.connect(self.reset_name)
         tr.addWidget(self.b_reset)
         tr.addStretch(1)
+        self.b_export = TacButton("导出相册…", "secondary", en="ALBUM", height=28)
+        self.b_export.clicked.connect(self.export_trip)
+        tr.addWidget(self.b_export)
         self.b_part = TacButton("按旅行分区…", "primary", en="PARTITION", height=28)
         self.b_part.clicked.connect(self.to_partition)
         tr.addWidget(self.b_part)
@@ -335,6 +338,23 @@ class TravelPage(Page):
         names.pop(t.key, None)
         self.ctx.set_setting("trip_names", names)
         self._retrip()
+
+    def export_trip(self):
+        """把选中的旅行（或全部照片）导出成网页相册 / 分享用 JPG。"""
+        from ..workflow_dialogs import ExportDialog, run_export
+        lib = self.ctx.library
+        t = self.current_trip()
+        if t is None:
+            groups = [g for g in lib.groups if g.files]
+            scope, title = f"全部 {len(groups)} 张照片", "我的相册"
+        else:
+            groups = [g for gid in t.gids if (g := lib.by_gid(gid)) is not None and g.files]
+            scope, title = f"旅行「{t.name}」{len(groups)} 张", t.name
+        if not groups:
+            return
+        dlg = ExportDialog(self, self.ctx, groups, scope, album=True, title=title)
+        if dlg.exec() == ExportDialog.DialogCode.Accepted:
+            run_export(self.ctx, self, dlg)
 
     def to_partition(self):
         page = self.window().page("partition") if hasattr(self.window(), "page") else None

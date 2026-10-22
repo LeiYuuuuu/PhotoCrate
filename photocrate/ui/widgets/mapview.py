@@ -33,7 +33,7 @@ PROVIDERS = {
                                "&x={x}&y={y}&z={z}"], "1234", "© 高德地图", True),
     "none": ("不显示底图（离线）", [], "", "", False),
 }
-USER_AGENT = b"PhotoCrate/1.3 (local photo organizer; desktop app)"
+USER_AGENT = b"PhotoCrate/1.4 (local photo organizer; desktop app)"
 
 
 def provider_for(setting: str, dark: bool = False) -> str:

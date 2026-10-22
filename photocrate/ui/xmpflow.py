@@ -6,19 +6,20 @@ from .dialogs import info, run_with_progress
 
 
 def run_xmp_flow(ctx, parent, groups: list, scope_text: str, *, gps: bool, place: bool, time: bool,
-                 rating: bool, update_existing: bool) -> object | None:
+                 rating: bool, update_existing: bool, keywords: bool = False) -> object | None:
     from ..ops.xmpwrite import build_xmp_plan, write_xmp
     from .timeplace_dialogs import XmpDialog
     lib = ctx.library
     if not lib.exiftool_path:
         info(parent, "需要 ExifTool", "写入 XMP 需要 ExifTool。请在「系统设置」中检测或指定 exiftool.exe。")
         return None
-    if not (gps or place or time or rating):
+    if not (gps or place or time or rating or keywords):
         info(parent, "没有选择写入内容", "请至少勾选一项要写入的内容。")
         return None
-    plan = build_xmp_plan(groups, gps, place, time, rating, update_existing)
+    plan = build_xmp_plan(groups, gps, place, time, rating, update_existing, keywords)
     if not plan.tasks:
-        hint = ("只有补全了地点（轨迹匹配 / 手动指定）、校正了时间，或在本软件里打过星级 / 色标 / 弃用的 RAW 才会写入。")
+        hint = ("只有补全了地点（轨迹匹配 / 手动指定）、校正了时间、在本软件里打过星级 / 色标 / 弃用，"
+                "或有 AI 关键词（场景 / 已命名的人物 / 旅行）的 RAW 才会写入。")
         ex = (f"已有 .xmp（未勾选“更新已有 .xmp”）{plan.skipped_exists} 张 · " if plan.skipped_exists else "")
         info(parent, "没有需要写入的照片",
              f"范围：{scope_text}<br>没有可写内容 {plan.skipped_nothing} 张 · {ex}非 RAW {plan.skipped_no_raw} 张。"

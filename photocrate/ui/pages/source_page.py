@@ -66,6 +66,9 @@ class SourcePage(Page):
         self.b_scan.clicked.connect(self.start_scan)
         self.b_cancel.clicked.connect(self.cancel_scan)
         row2.addWidget(self.b_scan, 1)
+        self.b_import = TacButton("导入存储卡…", "secondary", en="IMPORT", height=38)
+        self.b_import.clicked.connect(self.import_media)
+        row2.addWidget(self.b_import)
         row2.addWidget(self.b_cancel)
         src.body.addLayout(row2)
         self.tool_note = caption("", "warn", 8.5)
@@ -157,6 +160,13 @@ class SourcePage(Page):
         self._update_tool_note()
 
     # ---- 文件夹 ----------------------------------------------------------
+    def set_dirs(self, dirs: list[str]) -> None:
+        """由其他页面更新数据源（例如移动到新的目标文件夹之后）。"""
+        self.dirs.clear()
+        for d in dirs:
+            self.dirs.addItem(d)
+        self.ctx.settings.set("source_dirs", self._dirs())
+
     def _dirs(self) -> list[str]:
         return [self.dirs.item(i).text() for i in range(self.dirs.count())]
 
@@ -168,6 +178,53 @@ class SourcePage(Page):
             if d not in self._dirs():
                 self.dirs.addItem(d)
             self.ctx.settings.set("source_dirs", self._dirs())
+
+    def import_media(self):
+        """导入向导：存储卡 / 手机 / 文件夹 → 复制到电脑（跳过已导入的）→ 可选加入数据源并扫描。"""
+        from ...ops.importer import ImportHistory, history_path, record_import
+        from ..dialogs import info, run_with_progress
+        from ..workflow_dialogs import ImportDialog
+        if self.ctx.busy:
+            return
+        dlg = ImportDialog(self, self.ctx)
+        if dlg.exec() != ImportDialog.DialogCode.Accepted or not dlg.plan or not dlg.plan.items:
+            return
+        plan, groups = dlg.plan, dlg.check.new
+        self.ctx.busy = True
+
+        def job(prog, cancel):
+            return self.ctx.mover.execute(plan, lambda d, t, c: prog((d, t, c)), cancel,
+                                          {"spec": plan.spec_text, "kind": "import"})
+        try:
+            res, tb = run_with_progress(self.ctx, self, "正在导入", "IMPORTING", job)
+        finally:
+            self.ctx.busy = False
+        if tb or res is None:
+            info(self, "导入出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
+            return
+        hist = ImportHistory(history_path())
+        try:
+            record_import(hist, plan, res, groups)
+        finally:
+            hist.close()
+        self.ctx.files_changed.emit()
+        dst = dlg.dst.text().strip()
+        msg = f"已导入 {res.done_groups} 张照片 / 视频（{res.done_files} 个文件）到<br>{dst}"
+        if res.failed_groups:
+            msg += f"<br><br>{res.failed_groups} 张失败：<br>" + "<br>".join(res.errors[:6])
+        if res.cancelled:
+            msg += "<br><br>已取消，剩余文件未导入（下次导入会接着来）。"
+        msg += f"<br><br>批次 #{res.batch_id}，可在「操作记录」页撤销。"
+        self.ctx.status.emit(f"导入完成：{res.done_files} 个文件")
+        info(self, "导入完成", msg, "COMPLETE")
+        if dlg.cb_add.isChecked() and res.done_files:
+            norm = os.path.normcase(os.path.normpath(dst))
+            covered = any(norm == os.path.normcase(d) or norm.startswith(os.path.normcase(d) + os.sep)
+                          for d in self._dirs())
+            if not covered:
+                self.dirs.addItem(os.path.normpath(dst))
+                self.ctx.settings.set("source_dirs", self._dirs())
+            QTimer.singleShot(0, self.start_scan)
 
     def _rm_dir(self):
         for it in self.dirs.selectedItems():

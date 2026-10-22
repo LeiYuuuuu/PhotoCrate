@@ -7,7 +7,9 @@
    - .aae：IMG_1234.AAE 或 IMG_O1234.AAE（iOS 编辑记录）
    - .json：Google 相册导出的 IMG_1.JPG.json / IMG_1.JPG.supplemental-metadata.json
    - .mov/.mp4：同名 Live Photo 视频（可在设置中关闭）
-3. 找不到主人的附属文件不处理（留在原处）。
+   - .xml / .thm：相机给视频写的附属文件（索尼 C0001.MP4 + C0001M01.XML，佳能 MVI_0001.MP4 + .THM）
+3. 没有同名照片的 .mov/.mp4 以及 .mts/.avi/.mkv 等是独立视频，各自成一组（include_videos=False 时忽略）。
+4. 找不到主人的附属文件不处理（留在原处）。
 """
 from __future__ import annotations
 
@@ -63,11 +65,13 @@ def _member(entry: os.DirEntry, role: str) -> MemberFile | None:
     return MemberFile(path=entry.path, role=role, size=st.st_size, mtime_ns=st.st_mtime_ns)
 
 
-def group_directory(files: list[os.DirEntry], pair_live: bool = True) -> list[tuple[list[MemberFile], str]]:
+def group_directory(files: list[os.DirEntry], pair_live: bool = True,
+                    include_videos: bool = True) -> list[tuple[list[MemberFile], str]]:
     """把一个目录里的文件分成若干文件组，返回 [(成员列表, 主图路径)]。"""
     images_by_stem: dict[str, list[MemberFile]] = defaultdict(list)
     sidecars: list[os.DirEntry] = []
     lives: list[os.DirEntry] = []
+    videos: list[os.DirEntry] = []
 
     for e in files:
         name = e.name
@@ -80,6 +84,8 @@ def group_directory(files: list[os.DirEntry], pair_live: bool = True) -> list[tu
             sidecars.append(e)
         elif kind == "live":
             lives.append(e)
+        elif kind == "video":
+            videos.append(e)
         else:
             m = _member(e, kind)
             if m:
@@ -109,6 +115,25 @@ def group_directory(files: list[os.DirEntry], pair_live: bool = True) -> list[tu
         if m:
             g.append(m)
 
+    # 实况照片的视频部分跟随照片；其余 .mov/.mp4 与 .mts/.avi … 是独立视频
+    standalone: list[os.DirEntry] = list(videos)
+    for e in lives:
+        base = os.path.splitext(e.name.lower())[0]
+        g = by_stem_group.get(base)
+        if pair_live and g is not None and any(m.role in ("heif", "jpeg") for m in g):
+            attach(e, g, "live")
+        else:
+            standalone.append(e)
+    if include_videos:
+        for e in standalone:
+            m = _member(e, "video")
+            if m:
+                g = [m]
+                groups.append(g)
+                stem = os.path.splitext(e.name.lower())[0]
+                by_stem_group.setdefault(stem, g)
+                by_fullname[e.name.lower()] = g
+
     for e in sidecars:
         lname = e.name.lower()
         base, ext = os.path.splitext(lname)
@@ -124,6 +149,10 @@ def group_directory(files: list[os.DirEntry], pair_live: bool = True) -> list[tu
         else:
             # IMG_1.CR3.xmp → 先按完整文件名，再按主文件名
             target = by_fullname.get(base) or by_stem_group.get(base)
+            if target is None and ext == ".xml" and base.endswith("m01"):
+                target = by_stem_group.get(base[:-3])           # 索尼 C0001M01.XML → C0001.MP4
+            if ext in (".xml", ".thm") and target is not None and not any(m.role == "video" for m in target):
+                target = None                                   # .xml / .thm 只认视频的
             if target is None and ext == ".aae":
                 # IMG_O1234.AAE → IMG_1234
                 for prefix in ("img_o", "img_e"):
@@ -134,13 +163,6 @@ def group_directory(files: list[os.DirEntry], pair_live: bool = True) -> list[tu
         if target is not None:
             attach(e, target, "sidecar")
 
-    if pair_live:
-        for e in lives:
-            base = os.path.splitext(e.name.lower())[0]
-            g = by_stem_group.get(base)
-            if g is not None and any(m.role in ("heif", "jpeg") for m in g):
-                attach(e, g, "live")
-
     out = []
     for g in groups:
         primary = _pick_primary(g)
@@ -150,7 +172,7 @@ def group_directory(files: list[os.DirEntry], pair_live: bool = True) -> list[tu
 
 def _pick_primary(members: list[MemberFile]) -> str:
     """显示与像素分析用哪个文件：优先 JPG（快），其次 HEIC/PNG/其他，最后 RAW。"""
-    order = {"jpeg": 0, "heif": 1, "png": 2, "image": 3, "raw": 4}
+    order = {"jpeg": 0, "heif": 1, "png": 2, "image": 3, "raw": 4, "video": 5}
     imgs = [m for m in members if m.role in order]
     imgs.sort(key=lambda m: (order[m.role], m.path.lower()))
     return imgs[0].path
@@ -162,6 +184,7 @@ def scan(
     pair_live: bool = True,
     cancel: threading.Event | None = None,
     progress: ProgressFn | None = None,
+    include_videos: bool = True,
 ) -> list[PhotoGroup]:
     groups: list[PhotoGroup] = []
     seen_paths: set[str] = set()
@@ -170,7 +193,7 @@ def scan(
         if not os.path.isdir(root):
             continue
         for d, files in _iter_dir(root, recursive, cancel):
-            for members, primary in group_directory(files, pair_live):
+            for members, primary in group_directory(files, pair_live, include_videos):
                 key = os.path.normcase(os.path.abspath(primary))
                 if key in seen_paths:   # 多个源文件夹相互包含时去重
                     continue

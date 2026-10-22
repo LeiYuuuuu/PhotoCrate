@@ -14,9 +14,12 @@ JPEG_EXTS = {".jpg", ".jpeg", ".jpe", ".jfif"}
 HEIF_EXTS = {".heic", ".heif", ".hif"}
 PNG_EXTS = {".png"}
 OTHER_IMAGE_EXTS = {".tif", ".tiff", ".webp", ".bmp", ".gif", ".avif"}
-# 附属文件：修图记录 / 编辑记录 / 导出元数据
-SIDECAR_EXTS = {".xmp", ".aae", ".json", ".pp3", ".dop", ".on1"}
+# 附属文件：修图记录 / 编辑记录 / 导出元数据；.xml / .thm 是相机给视频写的附属文件（索尼 C0001M01.XML、佳能 .THM）
+SIDECAR_EXTS = {".xmp", ".aae", ".json", ".pp3", ".dop", ".on1", ".xml", ".thm"}
+# .mov / .mp4 与同名照片在一起时是实况照片（Live Photo）的视频部分，否则是独立视频
 LIVE_EXTS = {".mov", ".mp4"}
+VIDEO_EXTS = {".mov", ".mp4", ".m4v", ".mts", ".m2ts", ".avi", ".mkv", ".3gp", ".wmv", ".mpg", ".mpeg", ".webm"}
+MEDIA_ROLES = ("raw", "jpeg", "heif", "png", "image", "video")
 
 IMAGE_EXTS = RAW_EXTS | JPEG_EXTS | HEIF_EXTS | PNG_EXTS | OTHER_IMAGE_EXTS
 
@@ -26,6 +29,7 @@ KIND_LABELS = {
     "heif": "HEIC",
     "png": "PNG",
     "image": "其他图片",
+    "video": "视频",
 }
 
 
@@ -50,8 +54,14 @@ def file_kind(path: str) -> str | None:
         return "sidecar"
     if e in LIVE_EXTS:
         return "live"
+    if e in VIDEO_EXTS:
+        return "video"
     return None
 
 
 def is_image(path: str) -> bool:
     return ext_of(path) in IMAGE_EXTS
+
+
+def is_video(path: str) -> bool:
+    return ext_of(path) in VIDEO_EXTS

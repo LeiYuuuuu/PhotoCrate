@@ -1,4 +1,4 @@
-"""06 清晰度检测：调节阈值、实时查看被判为模糊的照片，可一键移入「待确认_模糊」文件夹。"""
+"""09 清晰度检测：调节阈值、实时查看被判为模糊的照片，可一键移入「待确认_模糊」文件夹。"""
 from __future__ import annotations
 
 import math
@@ -31,7 +31,7 @@ def _from_slider(i: int) -> float:
 
 class BlurPage(Page):
     page_id = "blur"
-    index = "06"
+    index = "09"
     title = "清晰度检测"
     en = "Sharpness scan // laplacian variance"
     sub = "分数越低越模糊。拖动阈值，观察哪些照片被标红，找到适合你照片的值；结果只是建议，绝不会自动删除。"

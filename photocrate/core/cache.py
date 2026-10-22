@@ -15,7 +15,7 @@ import threading
 from pathlib import Path
 from typing import Any, Iterable
 
-META_VERSION = 5     # v5：增加星级 / 色标（rating, label）
+META_VERSION = 6     # v5：增加星级 / 色标（rating, label）；v6：视频（带时区的拍摄时间、时长、QuickTime GPS）
 
 
 class FeatureCache:

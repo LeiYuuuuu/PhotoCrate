@@ -35,6 +35,8 @@ EXIFTOOL_TAGS = [
     "FocalLength#", "FocalLengthIn35mmFormat#", "ISO#", "FNumber#", "ExposureTime#",
     "ImageWidth#", "ImageHeight#", "ImageSize#", "Orientation#",
     "Software", "UserComment", "MIMEType", "Rating#", "Label",
+    # 视频：带时区的拍摄时间（苹果 CreationDate、索尼 XML 的 CreationDateValue）、时长、QuickTime GPS、索尼机型
+    "CreationDate", "CreationDateValue", "Duration#", "GPSCoordinates#", "DeviceManufacturer", "DeviceModelName",
 ]
 
 
@@ -155,6 +157,21 @@ def normalize_exiftool(d: dict[str, Any]) -> dict[str, Any]:
             if sw and sh and sw > 16 and sh > 16:
                 w, h = sw, sh
     lat, lon = _clean_gps(g("GPSLatitude"), g("GPSLongitude"))
+    if lat is None and g("GPSCoordinates"):
+        parts = str(g("GPSCoordinates")).replace(",", " ").split()
+        if len(parts) >= 2:
+            lat, lon = _clean_gps(parts[0], parts[1])
+    mime = _text(g("MIMEType")) or ""
+    video = mime.startswith("video/")
+    dt_orig = _text(g("DateTimeOriginal"))
+    offset = _text(g("OffsetTimeOriginal"))
+    if video and not dt_orig:
+        # 视频优先用带时区的本地拍摄时间；没有时 CreateDate 是 UTC（ExifTool 已按电脑时区换算，之后再按同批照片校正）
+        for k in ("CreationDate", "CreationDateValue"):
+            t = _text(g(k))
+            if t:
+                dt_orig = t
+                break
     lens = None
     for k in ("LensModel", "LensID", "Lens"):
         t = _text(g(k))
@@ -163,15 +180,15 @@ def normalize_exiftool(d: dict[str, Any]) -> dict[str, Any]:
             break
     sub = _text(g("SubSecTimeOriginal"))
     return {
-        "dt_original": _text(g("DateTimeOriginal")),
+        "dt_original": dt_orig,
         "subsec": sub,
-        "offset": _text(g("OffsetTimeOriginal")),
+        "offset": offset,
         "dt_create": _text(g("CreateDate")),
         "dt_xmp": _text(g("DateCreated")),
         "lat": lat, "lon": lon, "alt": _num(g("GPSAltitude")),
         "gps_utc": _text(g("GPSDateTime")) if lat is not None else None,
-        "make": _text(g("Make")),
-        "model": _text(g("Model")),
+        "make": _text(g("Make")) or _text(g("DeviceManufacturer")),
+        "model": _text(g("Model")) or _text(g("DeviceModelName")),
         "lens": lens,
         "focal": _num(g("FocalLength")),
         "focal35": _num(g("FocalLengthIn35mmFormat")),
@@ -186,6 +203,9 @@ def normalize_exiftool(d: dict[str, Any]) -> dict[str, Any]:
         "mime": _text(g("MIMEType")),
         "rating": _rating(g("Rating")),
         "label": _text(g("Label")),
+        "video": video,
+        "duration": _num(g("Duration")) if video else None,
+        "qt_utc": bool(video and not dt_orig),        # 时间来自 QuickTime CreateDate（UTC 换算到电脑时区）
     }
 
 

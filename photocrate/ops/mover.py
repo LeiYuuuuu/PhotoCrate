@@ -35,7 +35,9 @@ class ExecResult:
     done_groups: int = 0
     cancelled: bool = False
     mapping: dict[str, str] = field(default_factory=dict)   # 旧路径(normcase) → 新路径
+    pruned_dirs: list[str] = field(default_factory=list)     # 移动后清理掉的空文件夹
     errors: list[str] = field(default_factory=list)
+    copied: list[tuple[str, str]] = field(default_factory=list)   # 复制批次：(源, 目标)
 
 
 def _norm(p: str) -> str:
@@ -142,9 +144,39 @@ class Mover:
 
     # ---- 执行 ------------------------------------------------------------
     def execute(self, plan, progress: ProgressFn | None = None, cancel: threading.Event | None = None,
-                extra: dict | None = None) -> ExecResult:
+                extra: dict | None = None, keep_roots: list[str] | None = None) -> ExecResult:
+        """keep_roots：数据源 / 目标文件夹。移动后被搬空的子文件夹（只限这些文件夹里面、不含它们本身）会被删掉，
+        这样按新规则重新分区不会留下一堆空的旧文件夹；撤销时会重新建出来。"""
         bid = self.journal.create_batch(plan, extra)          # 先写日志
-        return self._run_batch(bid, plan.operation, progress, cancel)
+        res = self._run_batch(bid, plan.operation, progress, cancel)
+        if keep_roots and plan.operation in ("move", "rename"):
+            res.pruned_dirs = self.prune_emptied(bid, keep_roots)
+        return res
+
+    def prune_emptied(self, bid: int, keep_roots: list[str]) -> list[str]:
+        """删除本批次搬空的源文件夹（逐级向上，到 keep_roots 为止；只删真正空的文件夹）。"""
+        from .planner import _inside
+        roots = [os.path.normpath(r) for r in keep_roots if r]
+        dirs = {os.path.dirname(o["src"]) for o in self.journal.ops(bid) if o["status"] == "done"}
+        removed = []
+        for d in sorted(dirs, key=lambda p: -len(p)):
+            cur = os.path.normpath(d)
+            while True:
+                if not any(_inside(cur, r) and os.path.normcase(cur) != os.path.normcase(os.path.abspath(r))
+                           for r in roots):
+                    break
+                try:
+                    if not os.path.isdir(long_path(cur)) or os.listdir(long_path(cur)):
+                        break
+                    os.rmdir(long_path(cur))
+                    removed.append(cur)
+                except OSError:
+                    break
+                parent = os.path.dirname(cur)
+                if parent == cur:
+                    break
+                cur = parent
+        return removed
 
     def _run_batch(self, bid: int, operation: str, progress: ProgressFn | None,
                    cancel: threading.Event | None) -> ExecResult:
@@ -183,6 +215,8 @@ class Mover:
                 for o in done_here:
                     if not copy_only:
                         res.mapping[_norm(o["src"])] = o["dst"]
+                    else:
+                        res.copied.append((o["src"], o["dst"]))
                     res.done_files += 1
             except Exception as e:
                 log.warning("移动失败：%s", e)

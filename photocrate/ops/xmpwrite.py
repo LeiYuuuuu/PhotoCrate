@@ -14,6 +14,8 @@
 - 校正后的拍摄时间：XMP-exif:DateTimeOriginal 与 XMP-photoshop:DateCreated（带时区）；
 - 星级 / 色标 / 弃用：XMP-xmp:Rating（弃用写成 -1，Bridge 显示为“拒绝”）、XMP-xmp:Label（Red / Yellow …）。
   “留用”是 Lightroom 目录里的旗标，XMP 里没有对应标准字段，只保存在本软件里。
+- AI 关键词：场景、已命名的人物、旅行名写进 XMP-dc:Subject（关键词）与 XMP-lr:HierarchicalSubject
+  （Lightroom 的层级关键词：场景|城市建筑|夜景、人物|张三、旅行|2026-01-01 日本 …）。只增删这几个词，不动已有的其他关键词。
 """
 from __future__ import annotations
 
@@ -35,7 +37,7 @@ class XmpTask:
     gid: int
     raw: str
     xmp: str
-    tags: dict[str, str]
+    tags: dict[str, str | list[str]]          # 列表 = 关键词这类多值标签（逐个添加，不重复）
     what: list[str]              # 写入了哪些内容（显示用）
     mode: str = "create"         # create（新建）/ edit（更新已有 .xmp）
     backup: str = ""             # edit 时原文件的备份位置
@@ -84,9 +86,27 @@ def _fmt_dt(dt: datetime, tz: str | None) -> str:
     return dt.strftime("%Y:%m:%d %H:%M:%S") + (tz or "")
 
 
+def ai_keywords(g, min_prob: float = 0.3) -> tuple[list[str], list[str]]:
+    """照片的 AI 关键词：(普通关键词, Lightroom 层级关键词)。"""
+    flat: list[str] = []
+    hier: list[str] = []
+    sc = g.feats.get("scene") or {}
+    if sc.get("scene") and float(sc.get("prob") or 0) >= min_prob:
+        flat.append(sc["scene"])
+        hier.append(f"场景|{sc['group']}|{sc['scene']}" if sc.get("group") else f"场景|{sc['scene']}")
+    for name in (g.feats.get("people") or {}).get("names") or []:
+        flat.append(name)
+        hier.append(f"人物|{name}")
+    tr = g.feats.get("trip") or {}
+    if tr.get("name"):
+        flat.append(tr["name"])
+        hier.append(f"旅行|{tr['name']}")
+    return flat, hier
+
+
 def tags_for(g, write_gps: bool, write_place: bool, write_time: bool,
-             write_rating: bool = False) -> tuple[dict[str, str], list[str]]:
-    tags: dict[str, str] = {}
+             write_rating: bool = False, write_keywords: bool = False) -> tuple[dict, list[str]]:
+    tags: dict = {}
     what: list[str] = []
     geo = g.feats.get("geo") or {}
     if not geo.get("has_gps"):
@@ -117,7 +137,25 @@ def tags_for(g, write_gps: bool, write_place: bool, write_time: bool,
         tags["XMP-xmp:Rating"] = "-1" if r.get("flag") == "reject" else str(int(r.get("rating") or 0))
         tags["XMP-xmp:Label"] = r.get("label") or ""
         what.append("星级/色标")
+    if write_keywords:
+        flat, hier = ai_keywords(g)
+        if flat:
+            tags["XMP-dc:Subject"] = flat
+            tags["XMP-lr:HierarchicalSubject"] = hier
+            what.append("关键词")
     return tags, what
+
+
+def exiftool_args(tags: dict) -> list[str]:
+    """单值标签直接赋值；多值（关键词）先删同名再加，重复写入不会出现两个相同的词。"""
+    args = []
+    for k, v in tags.items():
+        if isinstance(v, list):
+            for x in v:
+                args += [f"-{k}-={x}", f"-{k}+={x}"]
+        else:
+            args.append(f"-{k}={v}")
+    return args
 
 
 def sidecar_path(raw_path: str) -> str:
@@ -137,17 +175,18 @@ def existing_xmp(g, raw_path: str) -> str | None:
 
 
 def build_xmp_plan(groups, write_gps: bool = True, write_place: bool = True, write_time: bool = True,
-                   write_rating: bool = False, update_existing: bool = False) -> XmpPlan:
+                   write_rating: bool = False, update_existing: bool = False,
+                   write_keywords: bool = False) -> XmpPlan:
     plan = XmpPlan()
     parts = [n for n, on in (("GPS", write_gps), ("地点", write_place), ("校正时间", write_time),
-                             ("星级/色标", write_rating)) if on]
+                             ("星级/色标", write_rating), ("AI 关键词", write_keywords)) if on]
     plan.spec_text = "写入 XMP：" + "、".join(parts)
     dirs = set()
     for g in groups:
         if not g.files:
             continue
         raws = [f for f in g.image_files if f.role == "raw"]
-        tags, what = tags_for(g, write_gps, write_place, write_time, write_rating)
+        tags, what = tags_for(g, write_gps, write_place, write_time, write_rating, write_keywords)
         if not tags:
             plan.skipped_nothing += 1
             continue
@@ -218,7 +257,7 @@ def write_xmp(plan: XmpPlan, exiftool_path: str, journal, progress: Callable[[in
             try:
                 if not os.path.exists(t.raw):
                     raise FileNotFoundError("照片已不在原位置，请重新扫描")
-                args = [f"-{k}={v}" for k, v in t.tags.items()]
+                args = exiftool_args(t.tags)
                 if t.mode == "edit":
                     if not os.path.exists(t.xmp):
                         raise FileNotFoundError("原有的 .xmp 已不存在，请重新扫描")
