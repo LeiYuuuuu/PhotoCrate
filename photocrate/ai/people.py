@@ -3,7 +3,9 @@
 - 已命名的人（用户起过名字）保存在 annotations.db 的 people 表：{名字, 特征中心}，以后的照片按相似度自动认出；
 - 其余人脸用“贪心中心聚类 + 合并”分组：按脸从大到小依次加入最像的组（余弦相似度 ≥ 阈值），
   然后把中心足够像的组合并。只出现一次的脸归入“其他人”，不单独成组；
-- 用户的更正（“这张不是他”）存在 face_fix 表，键 = 主图指纹#第几张脸。
+- 用户的更正（“这张不是他”“这不是人脸”“这是人脸”）存在 face_fix 表，键 = 主图指纹#第几张脸；
+- 不是真人的脸（动物、玩偶、手办、动漫、雕像……人脸检测器也会框出来）由 AIService.screen_faces
+  用 CLIP 判断后通过 excluded 传进来，不参与分组。
 给一个组起的名字和已有的人相同 → 合并成同一个人。
 """
 from __future__ import annotations
@@ -71,11 +73,15 @@ def _norm(v):
 
 
 def cluster_people(groups, persons: dict[str, dict], fixes: dict[str, dict], threshold: float = 0.42,
-                   other_name: str = "其他人") -> tuple[list[Cluster], list[FaceRef]]:
-    """返回 (人物列表（已命名在前，其余按人数排序）, 落单的人脸)。同时写入 g.feats["people"]。"""
+                   other_name: str = "其他人", excluded: set[str] | None = None) -> tuple[list[Cluster], list[FaceRef]]:
+    """返回 (人物列表（已命名在前，其余按人数排序）, 落单的人脸)。同时写入 g.feats["people"]。
+
+    excluded：不是真人的脸（键 = 主图指纹#序号），整个跳过。
+    """
     import numpy as np
 
-    faces = collect_faces(groups)
+    excluded = excluded or set()
+    faces = [f for f in collect_faces(groups) if f.key not in excluded]
     for g in groups:
         g.feats.pop("people", None)
     clusters: dict[str, Cluster] = {}

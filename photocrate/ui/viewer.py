@@ -165,6 +165,7 @@ class ImageCache(QObject):
 class ImagePane(QWidget):
     view_changed = Signal(object)     # (zoom or None, cx, cy)
     activated = Signal(object)
+    nav = Signal(int)                 # 点左右两侧的箭头：-1 上一张，+1 下一张
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -176,6 +177,11 @@ class ImagePane(QWidget):
         self.loading = False
         self.title = ""
         self._drag: QPointF | None = None
+        self._press: QPointF | None = None
+        self._press_zone = 0
+        self._hover_zone = 0
+        self._inside = False
+        self.can_prev = self.can_next = False
         self.setMouseTracking(True)
         self.setMinimumSize(200, 200)
 
@@ -241,24 +247,82 @@ class ImagePane(QWidget):
         r = self._img_rect()
         return (p.x() - r.left()) / max(1.0, r.width()), (p.y() - r.top()) / max(1.0, r.height())
 
+    # ---- 左右翻页区 ----
+    def _zone_w(self) -> float:
+        return min(120.0, max(56.0, self.width() * 0.1))
+
+    def zone_at(self, p: QPointF) -> int:
+        """鼠标在左侧翻页区返回 -1，右侧 +1，其余 0（到头了那一侧不算）。"""
+        if self.width() < 240:
+            return 0
+        if p.x() < self._zone_w() and self.can_prev:
+            return -1
+        if p.x() > self.width() - self._zone_w() and self.can_next:
+            return 1
+        return 0
+
+    def _update_cursor(self) -> None:
+        if self._hover_zone:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        elif self.zoom is not None and self.img:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor if self._drag is not None else Qt.CursorShape.OpenHandCursor)
+        else:
+            self.unsetCursor()
+
+    def set_nav(self, can_prev: bool, can_next: bool) -> None:
+        self.can_prev, self.can_next = can_prev, can_next
+        self.update()
+
+    def enterEvent(self, e):
+        self._inside = True
+        self.update()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._inside = False
+        self._hover_zone = 0
+        self._update_cursor()
+        self.update()
+        super().leaveEvent(e)
+
     # ---- 鼠标 ----
     def mousePressEvent(self, e):
         self.activated.emit(self)
         if e.button() == Qt.MouseButton.LeftButton:
             self._drag = e.position()
+            self._press = e.position()
+            self._press_zone = self.zone_at(e.position())
+            self._update_cursor()
 
     def mouseMoveEvent(self, e):
+        z = self.zone_at(e.position()) if self._drag is None else self._hover_zone
+        if z != self._hover_zone:
+            self._hover_zone = z
+            self.update()
         if self._drag is not None and self.img and self.zoom is not None:
             d = e.position() - self._drag
             self._drag = e.position()
             r = self._img_rect()
             self.set_view(self.zoom, self.cx - d.x() / max(1.0, r.width()), self.cy - d.y() / max(1.0, r.height()),
                           emit=True)
+        self._update_cursor()
 
     def mouseReleaseEvent(self, e):
-        self._drag = None
+        moved = (e.position() - self._press).manhattanLength() if self._press is not None else 99
+        if (e.button() == Qt.MouseButton.LeftButton and self._press_zone and moved < 6
+                and self.zone_at(e.position()) == self._press_zone):
+            self.nav.emit(self._press_zone)                  # 点一下翻页（拖动放大的照片不算）
+        self._drag = self._press = None
+        self._press_zone = 0
+        self._hover_zone = self.zone_at(e.position())
+        self._update_cursor()
+        self.update()
 
     def mouseDoubleClickEvent(self, e):
+        z = self.zone_at(e.position())
+        if z:                                                # 在翻页区快速点两下 = 翻两张，不放大
+            self.nav.emit(z)
+            return
         if self.group is not None and getattr(self.group, "is_video", False):
             play_video(self.group)
             return
@@ -317,10 +381,40 @@ class ImagePane(QWidget):
             qp.fillRect(QRectF(self.width() - tw - 10, 10, tw, 22), QColor(0, 0, 0, 160))
             qp.setPen(QColor(p.accent))
             qp.drawText(QRectF(self.width() - tw - 10, 10, tw, 22), Qt.AlignmentFlag.AlignCenter, txt)
+        if self._inside:
+            self._paint_nav(qp)
         if self.active:
             qp.setPen(QPen(QColor(p.accent), 3))
             qp.drawRect(QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5))
         qp.end()
+
+    def _paint_nav(self, qp: QPainter) -> None:
+        """鼠标移到窗口里时，左右两侧显示翻页箭头；指到哪一侧，哪一侧变亮。"""
+        if self.width() < 240:
+            return
+        p = theme.current()
+        zw = self._zone_w()
+        for side, ok in ((-1, self.can_prev), (1, self.can_next)):
+            if not ok:
+                continue
+            hot = self._hover_zone == side
+            if hot:
+                band = QRectF(0, 0, zw, self.height()) if side < 0 else QRectF(self.width() - zw, 0, zw, self.height())
+                qp.fillRect(band, QColor(0, 0, 0, 70))
+            cx = zw / 2 if side < 0 else self.width() - zw / 2
+            c = QPointF(cx, self.height() / 2)
+            qp.setPen(Qt.PenStyle.NoPen)
+            qp.setBrush(QColor(0, 0, 0, 170 if hot else 95))
+            qp.drawEllipse(c, 26, 26)
+            pen = QPen(QColor(p.accent) if hot else QColor(255, 255, 255, 200), 3.2)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            qp.setPen(pen)
+            qp.setBrush(Qt.BrushStyle.NoBrush)
+            dx = -5 * side
+            from PySide6.QtGui import QPolygonF
+            qp.drawPolyline(QPolygonF([QPointF(c.x() + dx, c.y() - 10), QPointF(c.x() - dx, c.y()),
+                                       QPointF(c.x() + dx, c.y() + 10)]))
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +455,7 @@ class InfoBar(QWidget):
                 return
             qp.setFont(font("mono", 7.5))
             qp.setPen(QColor("#686C73"))
-            hint = "← → 翻页  ·  Z/双击 100%  ·  C 对比  ·  1–5 星  0 清除  ·  6–9 色标  ·  P 留用  X 弃用  U 取消  ·  Esc 关闭"
+            hint = "← → 或点两侧 翻页  ·  Z/双击 100%  ·  C 对比  ·  1–5 星  0 清除  ·  6–9 色标  ·  P 留用  X 弃用  U 取消  ·  Esc 关闭"
             qp.drawText(QRectF(0, 0, self.width() - 12, self.height()),
                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, hint)
         qp.end()
@@ -430,6 +524,7 @@ class ViewerWindow(QDialog):
         for pane in (self.pane_a, self.pane_b):
             pane.view_changed.connect(lambda v, src=pane: self._sync(src, v))
             pane.activated.connect(self._activate)
+            pane.nav.connect(lambda step, src=pane: self._nav(src, step))
         self.active = self.pane_a
         self.pane_a.active = False
         if hasattr(ctx, "ratings_changed"):
@@ -458,6 +553,12 @@ class ViewerWindow(QDialog):
         for k in (self.index + 1, self.index - 1, self.index + 2):     # 预读附近的
             if 0 <= k < len(self.groups):
                 self.cache.request(self.groups[k])
+        last = len(self.groups) - 1
+        if self.compare:
+            self.pane_a.set_nav(self.left_index > 0, self.left_index < last)
+        else:
+            self.pane_a.set_nav(self.index > 0, self.index < last)
+        self.pane_b.set_nav(self.index > 0, self.index < last)
         self._update_info()
 
     def _refresh_images(self) -> None:
@@ -527,6 +628,17 @@ class ViewerWindow(QDialog):
         if not self.compare:
             self.pane_a.set_view(None, 0.5, 0.5)
         self._show()
+
+    def _nav(self, pane, step: int) -> None:
+        """点照片两侧的箭头翻页。对比模式下，左边的箭头只换左边那张，右边的只换右边那张。"""
+        if self.compare and pane is self.pane_a:
+            i = max(0, min(len(self.groups) - 1, self.left_index + step))
+            if i != self.left_index:
+                self.left_index = i
+                self.pane_a.img = None
+                self._show()
+            return
+        self.go(self.index + step)
 
     def toggle_compare(self) -> None:
         if not self.compare:

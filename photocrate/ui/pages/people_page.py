@@ -16,6 +16,7 @@ from ..widgets.thumbgrid import ThumbGrid
 from .base import Page
 
 LONERS = "__loners__"
+NONFACE = "__nonface__"
 
 
 def face_pixmap(b64: str, size: int = 96) -> QPixmap:
@@ -91,8 +92,13 @@ class PeoplePage(Page):
         self.b_remove = TacButton("选中的照片不是 TA", "secondary", height=30)
         self.b_remove.clicked.connect(self.remove_selected)
         rr.addWidget(self.b_remove)
+        self.b_notface = TacButton("不是人脸", "secondary", height=30)
+        self.b_notface.setToolTip("选中的照片里这张“脸”不是真人（动物、玩偶、海报……）；不选照片 = 整组都不是")
+        self.b_notface.clicked.connect(self.toggle_face)
+        rr.addWidget(self.b_notface)
         rr.addStretch(1)
-        rr.addWidget(caption("误认时选中照片点左边按钮，以后不会再把这张脸归给 TA。", "faint", 8))
+        self.fix_hint = caption("误认时选中照片点左边按钮，以后不会再把这张脸归给 TA。", "faint", 8)
+        rr.addWidget(self.fix_hint)
         rp.body.addLayout(rr)
         split.addWidget(rp)
         split.setSizes([480, 900])
@@ -131,6 +137,13 @@ class PeoplePage(Page):
             it.setData(Qt.ItemDataRole.UserRole, LONERS)
             it.setToolTip("只在一张照片里出现过的脸（不单独成组；分区时算“其他人”）")
             self.list.addItem(it)
+        if ai.nonfaces:
+            cov = max(ai.nonfaces, key=lambda f: f.size)
+            it = QListWidgetItem(QIcon(face_pixmap(cov.crop)), f"不是人脸 · {len({f.gid for f in ai.nonfaces})}")
+            it.setData(Qt.ItemDataRole.UserRole, NONFACE)
+            it.setForeground(theme.current().c("ink3"))
+            it.setToolTip("被认出“不是真人”的脸：动物、玩偶、手办、动漫人物、雕像等。不参与人物分组；认错了可以恢复。")
+            self.list.addItem(it)
         self.list.blockSignals(False)
         s = ai.stats(lib.groups)
         self.list_panel.set_meta(f"{len(ai.people)} PEOPLE · {s['named']} NAMED · {s['faces']} FACES")
@@ -139,7 +152,8 @@ class PeoplePage(Page):
         elif s["faces_done"] < s["photos"]:
             self.hint.setText(f"还有 {s['photos'] - s['faces_done']} 张照片没做人脸检测：到「AI 搜图」页点“分析全部照片”。")
         else:
-            self.hint.setText(f"共检测到 {s['faces']} 张脸。只在一张照片里出现的脸不单独成组。")
+            extra = f"其中 {s['nonfaces']} 张不是真人的脸（动物、玩偶等），已排除。" if s["nonfaces"] else ""
+            self.hint.setText(f"共检测到 {s['faces']} 张脸。{extra}只在一张照片里出现的脸不单独成组。")
         row = 0
         for i in range(self.list.count()):
             if self.list.item(i).data(Qt.ItemDataRole.UserRole) == keep:
@@ -160,6 +174,10 @@ class PeoplePage(Page):
             faces = lib.ai.loners
             title = "只出现一次的脸"
             named = False
+        elif cid == NONFACE:
+            faces = lib.ai.nonfaces
+            title = "不是人脸（不参与分组）"
+            named = False
         else:
             c = lib.ai.cluster(cid) if cid else None
             faces = c.faces if c else []
@@ -175,11 +193,16 @@ class PeoplePage(Page):
         self.grid.set_groups(groups)
         self.photo_panel.set_meta(f"{len(groups)} ITEMS · {title}")
         self.name.setText(title if named else "")
-        ok = cid not in (None, LONERS)
+        ok = cid not in (None, LONERS, NONFACE)
         self.b_name.setEnabled(ok)
         self.name.setEnabled(ok)
         self.b_forget.setEnabled(named)
         self.b_remove.setEnabled(ok)
+        self.b_remove.setVisible(cid != NONFACE)
+        self.b_notface.setEnabled(cid is not None)
+        self.b_notface.setText("是人脸（恢复）" if cid == NONFACE else "不是人脸")
+        self.fix_hint.setText("选中认错的照片点“是人脸”，这张脸会重新参与人物分组。" if cid == NONFACE else
+                              "认错人：选中照片点“不是 TA”。不是真人（动物、玩偶…）：点“不是人脸”。")
 
     # ---- 操作 ------------------------------------------------------------
     def _recluster(self, msg: str):
@@ -214,6 +237,41 @@ class PeoplePage(Page):
             self.ctx.library.ai.forget_person(cid)
             self._cur = None
             self._recluster(f"已忘记：{c.name}")
+
+    def _faces_of(self, cid):
+        ai = self.ctx.library.ai
+        if cid == LONERS:
+            return ai.loners
+        if cid == NONFACE:
+            return ai.nonfaces
+        c = ai.cluster(cid)
+        return c.faces if c else []
+
+    def toggle_face(self):
+        """“不是人脸”：把选中照片里属于这一组的脸排除；在“不是人脸”组里则是恢复。"""
+        cid = self._cid()
+        if cid is None:
+            return
+        faces = self._faces_of(cid)
+        sel = set(self.grid.selected_gids())
+        restore = cid == NONFACE
+        if sel:
+            keys = [f.key for f in faces if f.gid in sel]
+        else:
+            if restore:
+                info(self, "先选照片", "在右边选中认错的照片（可多选），再点“是人脸（恢复）”。")
+                return
+            it = self.list.currentItem()
+            label = it.text().split(" · ")[0] if it else ""
+            if not ask(self, "整组都不是人脸", f"没有选中照片。把“{label}”这一组的 {len(faces)} 张脸都标成“不是人脸”吗？"
+                       "以后不再参与人物分组（随时可以在“不是人脸”里恢复）。", ok="都不是人脸"):
+                return
+            keys = [f.key for f in faces]
+        if not keys:
+            return
+        self.ctx.library.ai.mark_faces(keys, human=restore)
+        n = len({f.gid for f in faces if f.key in set(keys)})
+        self._recluster(f"{n} 张照片里的脸已恢复为人脸" if restore else f"{n} 张照片里的脸已标为“不是人脸”")
 
     def remove_selected(self):
         cid = self._cid()

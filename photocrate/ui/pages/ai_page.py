@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QLineEdit, QScrollArea, QSpinBox, QVBoxLayout,
-                               QWidget)
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import (QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea, QSpinBox,
+                               QVBoxLayout, QWidget)
 
 from ...ai import models
 from ...ai.scenes import SCENE_GROUPS, SCENES
@@ -120,6 +121,42 @@ class AiPage(Page):
         self.topn.setSuffix(" 张")
         sr.addWidget(self.topn)
         rp.body.addLayout(sr)
+        # 找相似时显示“目标照片”
+        self.target = QFrame()
+        self.target.setObjectName("simTarget")
+        self.target.setStyleSheet(f"#simTarget {{ border: 1px solid {p.accent}; border-left: 4px solid {p.accent}; }}")
+        tl = QHBoxLayout(self.target)
+        tl.setContentsMargins(8, 6, 8, 6)
+        tl.setSpacing(12)
+        self.t_img = QLabel()
+        self.t_img.setFixedSize(150, 100)
+        self.t_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.t_img.setStyleSheet("background: #0B0C0D;")
+        tl.addWidget(self.t_img)
+        tv = QVBoxLayout()
+        tv.setSpacing(2)
+        tv.addWidget(caption("目标照片 · TARGET", "faint", 8))
+        self.t_name = QLabel("")
+        self.t_name.setStyleSheet("font-size: 13pt; font-weight: 600;")
+        tv.addWidget(self.t_name)
+        self.t_info = caption("", "dim", 9)
+        self.t_info.setWordWrap(True)
+        tv.addWidget(self.t_info)
+        tv.addStretch(1)
+        tl.addLayout(tv, 1)
+        tb = QVBoxLayout()
+        self.b_tview = TacButton("大图对比", "secondary", height=28)
+        self.b_tview.setToolTip("在大图里依次查看目标和结果；按 C 可以并排对比")
+        self.b_tview.clicked.connect(self.view_target)
+        self.b_tclose = TacButton("清除", "secondary", height=28)
+        self.b_tclose.clicked.connect(self.clear_results)
+        tb.addWidget(self.b_tview)
+        tb.addWidget(self.b_tclose)
+        tb.addStretch(1)
+        tl.addLayout(tb)
+        self.target.hide()
+        self.target_gid: int | None = None
+        rp.body.addWidget(self.target)
         self.grid = ThumbGrid(selectable=True)
         self.grid.set_cell_width(150)
         rp.body.addWidget(self.grid, 1)
@@ -213,7 +250,7 @@ class AiPage(Page):
         src.start_scan()
 
     # ---- 搜索 ------------------------------------------------------------
-    def _show(self, ranked: list[tuple[int, float]], title: str):
+    def _show(self, ranked: list[tuple[int, float]], title: str, fmt: str = "{:.2f}", target=None):
         lib = self.ctx.library
         n = int(self.topn.value())
         groups, labels = [], {}
@@ -222,10 +259,42 @@ class AiPage(Page):
             if g is None or not g.files:
                 continue
             groups.append(g)
-            labels[gid] = {"tag": f"{score:.2f}"}
+            labels[gid] = {"tag": fmt.format(score)}
         self.grid.settings_snapshot = self.ctx.settings.snapshot()
         self.grid.set_groups(groups, labels)
         self.res_panel.set_meta(f"{len(groups)} ITEMS · {title}")
+        self._set_target(target)
+
+    def _set_target(self, g) -> None:
+        self.target_gid = g.gid if g is not None else None
+        if g is None:
+            self.target.hide()
+            return
+        pm = QPixmap(g.thumb) if g.thumb else QPixmap()
+        if pm.isNull():
+            self.t_img.setText("无预览")
+        else:
+            self.t_img.setPixmap(pm.scaled(self.t_img.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                           Qt.TransformationMode.SmoothTransformation))
+        self.t_name.setText(g.name)
+        bits = [g.date.strftime("%Y-%m-%d %H:%M")] if g.date else []
+        sc = g.feats.get("scene")
+        if sc:
+            bits.append(f"场景：{sc['scene']}")
+        bits.append(f"找到 {len(self.grid.model_.groups)} 张相似的照片，按相似度从高到低排列"
+                    if self.grid.model_.groups else "没有找到明显相似的照片")
+        self.t_info.setText("   ·   ".join(bits))
+        self.target.show()
+
+    def view_target(self):
+        g = self.ctx.library.by_gid(self.target_gid) if self.target_gid is not None else None
+        if g is not None:
+            self.ctx.open_viewer([g] + list(self.grid.model_.groups), 0, self.window())
+
+    def clear_results(self):
+        self.grid.set_groups([], {})
+        self._set_target(None)
+        self.res_panel.set_meta("输入描述后按回车搜索，或点左边的场景")
 
     def search(self):
         q = self.query.text().strip()
@@ -236,14 +305,22 @@ class AiPage(Page):
         except Exception as e:
             info(self, "搜索出错", str(e), "ERROR")
             return
-        self._show(ranked, f"“{q}” · 按相关度排序（分数越高越像）")
+        self._show(ranked, f"“{q}” · 只显示明显相关的，按相关度排序（分数越高越像）" if ranked
+                   else f"“{q}” · 没有找到明显相关的照片，换个说法试试")
 
     def similar(self):
         gids = self.grid.selected_gids()
         if len(gids) != 1:
             return
-        g = self.ctx.library.by_gid(gids[0])
-        self._show(self.ctx.library.ai.search_similar(gids[0]), f"与 {g.name if g else ''} 相似")
+        lib = self.ctx.library
+        g = lib.by_gid(gids[0])
+        try:
+            ranked = lib.ai.search_similar(gids[0])
+        except Exception as e:
+            info(self, "找相似出错", str(e), "ERROR")
+            return
+        self._show(ranked, f"与 {g.name if g else ''} 相似 · 百分比 = 综合相似度（内容 + 颜色构图）",
+                   fmt="{:.0%}", target=g)
 
     def show_scene(self, label: str):
         lib = self.ctx.library
@@ -253,4 +330,5 @@ class AiPage(Page):
         gs.sort(key=lambda g: -float(g.feats["scene"].get("prob") or 0))
         self.grid.settings_snapshot = self.ctx.settings.snapshot()
         self.grid.set_groups(gs, {g.gid: {"tag": f"{label} {g.feats['scene']['prob']:.0%}"} for g in gs})
+        self._set_target(None)
         self.res_panel.set_meta(f"{len(gs)} ITEMS · 场景：{label}（按把握度排序）")

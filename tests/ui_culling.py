@@ -179,6 +179,29 @@ def main(out: str, theme_name: str = "light") -> int:
         QTest.keyClick(v, Qt.Key.Key_Right)
         yield 200
         assert v.groups[v.index].stem == "DSC00002"
+        # 点照片右侧 / 左侧的箭头翻页
+        from PySide6.QtCore import QPoint
+        pw, ph = v.pane_a.width(), v.pane_a.height()
+        QTest.mouseClick(v.pane_a, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(pw - 30, ph // 2))
+        yield 200
+        assert v.groups[v.index].stem == "DSC00003", v.groups[v.index].stem
+        QTest.mouseClick(v.pane_a, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(30, ph // 2))
+        yield 200
+        assert v.groups[v.index].stem == "DSC00002"
+        QTest.mouseClick(v.pane_a, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(pw // 2, ph // 2))
+        yield 100
+        assert v.groups[v.index].stem == "DSC00002", "点中间不应该翻页"
+        v.go(0)
+        yield 200
+        assert not v.pane_a.can_prev and v.pane_a.can_next
+        QTest.mouseClick(v.pane_a, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(30, ph // 2))
+        yield 100
+        assert v.index == 0, "第一张再点左边不动"
+        v.go(1)
+        yield 300
+        v.pane_a._inside, v.pane_a._hover_zone = True, 1
+        shot("cull_03b_viewer_nav", v)
+        v.pane_a._inside, v.pane_a._hover_zone = False, 0
         QTest.keyClick(v, Qt.Key.Key_Z)
         assert v.pane_a.zoom == 1.0
         shot("cull_03_viewer_100", v)

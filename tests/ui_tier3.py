@@ -227,6 +227,10 @@ def main(out: str, theme_name: str = "light") -> int:
         ap.similar()
         yield 200
         assert ap.grid.model_.groups and ap.grid.model_.groups[0].gid != top[0].gid
+        assert ap.target.isVisible() and ap.target_gid == top[0].gid and ap.t_name.text() == top[0].name
+        tags = [ap.grid.model_.labels[g.gid]["tag"] for g in ap.grid.model_.groups]
+        vals = [int(x.rstrip("%")) for x in tags]
+        assert vals == sorted(vals, reverse=True) and vals[0] >= 30, tags
         shot("t3_03_ai_search")
         log(f"AI 搜图：“红” → 前 3 张都是红色图；场景 {len(ap.bars.items)} 类；以图搜图正常")
 
@@ -254,6 +258,29 @@ def main(out: str, theme_name: str = "light") -> int:
             from photocrate.partition.base import DIMENSIONS
             g = next(g for g in lib.groups if g.stem == "ASTRO_1")
             assert DIMENSIONS["person"].segments(g, {"mode": "main"}, PartitionContext(s.snapshot())) == ["宇航员"]
+            # “不是人脸”：选中另一组里的一张照片标掉，再从“不是人脸”里恢复
+            from photocrate.ui.pages.people_page import NONFACE
+            other = next(c for c in lib.ai.people if not c.named)
+            for i in range(pg.list.count()):
+                if pg.list.item(i).data(Qt.ItemDataRole.UserRole) == other.cid:
+                    pg.list.setCurrentRow(i)
+            yield 200
+            victim = pg.grid.model_.groups[0]
+            pg.grid.select_gids({victim.gid})
+            pg.toggle_face()
+            yield 300
+            assert [f.gid for f in lib.ai.nonfaces] == [victim.gid]
+            items = [pg.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(pg.list.count())]
+            assert items[-1] == NONFACE and pg.list.item(len(items) - 1).text() == "不是人脸 · 1"
+            pg.list.setCurrentRow(len(items) - 1)
+            yield 200
+            assert pg.b_notface.text() == "是人脸（恢复）" and not pg.b_remove.isVisible()
+            shot("t3_05_people_nonface")
+            pg.grid.select_gids({victim.gid})
+            pg.toggle_face()
+            yield 300
+            assert not lib.ai.nonfaces
+            log("人物：选中照片标“不是人脸”→ 进入“不是人脸”组；再恢复回来")
             lib.ai.clear_people()
             lib.ai.recluster(lib.groups)
         result["ok"] = True

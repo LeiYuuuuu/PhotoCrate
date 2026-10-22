@@ -38,6 +38,7 @@
 │   ├ core/daybook.py    按天汇总 + 行程文本解析（「时间与地点」页的数据）                │
 │   └ core/trips.py      旅行自动分段 + 命名 + 常住地解析                                │
 │ ai/  models（下载）clip（中文 CLIP + 分词）scenes（零样本场景）faces（YuNet+SFace）       │
+│      visual（画面指纹：颜色布局 + 直方图，给“找相似”用）                                   │
 │      people（人物聚类）service（向量索引 / 搜索 / 命名，挂在 Library.ai 上）            │
 │ analyzers/  分析器插件：date geo camera shape rating（元数据） color blur phash faces（像素）│
 │ partition/  维度插件：date region color camera lens source filetype orientation …     │
@@ -153,7 +154,7 @@ class Dimension:
 |---|---|
 | 星级 / 色标 / 留弃 | `AnnotationStore` 新表 `rating`（`{rating 0–5, label, flag pick/reject}`，同样按组内每个图片文件的指纹存）；`RatingAnalyzer` 合并照片 / .xmp 里原有的 `Rating`（-1 = 拒绝）与 `Label`，本软件打的优先，输出 `feats["rating"] = {rating, label, flag, manual}`。`Library.set_rating` 立即更新，不需要重新分析；分区维度「星级 / 标记」（模板 `{星级}` `{标记}` `{色标}`） |
 | 键盘打分 | `rating_change_for_key`（viewer.py）统一翻译按键：0–5 星、6–9 红黄绿蓝（再按一次取消）、P / X / U；缩略图网格通过 `thumbgrid.HOOKS`（主窗口安装：`rate` → `AppContext.rate`，`open` → 大图查看器）在所有页面生效，`ratings_changed` 信号只触发重绘 |
-| 大图查看 | `ViewerWindow`：后台线程解码（JPG 全尺寸 + EXIF 方向；只有 RAW 时取相机内嵌大预览），LRU 留 8 张并预读前后几张；`ImagePane` 记录 `zoom`（None = 适合窗口）与视图中心 `cx, cy`（图像比例坐标），缩放时保持鼠标下那一点不动、平移时不让图像边缘离开窗口；对比模式两个 Pane 互相转发 `view_changed`，缩放与位置同步 |
+| 大图查看 | `ViewerWindow`：照片左右两侧是翻页区（宽为窗口的 10%，56–120 像素），鼠标移进窗口时显示箭头，点一下翻页、拖动放大的照片不算点击、在翻页区双击 = 翻两张；对比模式下左右两张各自翻页；后台线程解码（JPG 全尺寸 + EXIF 方向；只有 RAW 时取相机内嵌大预览），LRU 留 8 张并预读前后几张；`ImagePane` 记录 `zoom`（None = 适合窗口）与视图中心 `cx, cy`（图像比例坐标），缩放时保持鼠标下那一点不动、平移时不让图像边缘离开窗口；对比模式两个 Pane 互相转发 `view_changed`，缩放与位置同步 |
 | 相似 / 连拍分组 | `HashAnalyzer`（像素阶段，32×32 DCT 取低频 8×8 → 64 位 pHash，带缓存）；`group_similar`：按拍摄时间排序，与上一张相差 ≤ N 秒、且与上一张或本组第一张汉明距离 ≤ 阈值就并入，组内按清晰度分数排名，最高的标 `best`。只用缓存的指纹，调参数时几毫秒重算 |
 | 星级写入 XMP | `xmpwrite.tags_for` 写 `XMP-xmp:Rating`（弃用 = -1）与 `XMP-xmp:Label`，只写本软件改过的。**已有 .xmp 时可更新**：先完整备份到 `xmp_backups\时间戳\`，ExifTool `-overwrite_original` 只改这几个标签，日志里记 `xmp_edit`（src = 备份），撤销 = 当前文件进回收站、备份拷回；失败时立即换回备份 |
 | 清理 RAW | `cleanup.build_cleanup_plan`：`keep_jpg` / `unrated_raw` / `rejected` → operation = `delete` 的计划（RAW 连同它的 .xmp / .pp3 / .dop）；`Mover.delete` 逐组放入回收站（一组里失败就把已删的放回），批次记下开始时间 `t0` |
@@ -174,9 +175,11 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 | CLIP 推理 | `ai/clip.py`：onnxruntime CPU；自带 BERT 分词（中文按字、英文 WordPiece，词表 `data/clip_vocab_zh.txt`，最长 52）；预处理 = 直接缩放到 224×224 + CLIP 均值方差（与 Chinese-CLIP 一致）。Xenova 的模型图文合在一张图里：只编码图片时喂一句占位文字，只编码文字时喂一张空白图；加载时检查输入输出名 |
 | 向量索引 | `ai/service.AIService.index`：用缩略图（长边 360）算图片向量，按主图指纹存进 `cache.db` 的 `emb` 表（float16），移动 / 改名后照样命中；扫描末尾的“AI”阶段只算新照片 |
 | 场景识别 | `ai/scenes.py`：零样本。21 个细分场景，归为 7 个大类（自然风光、城市建筑、人物、美食、动物植物、室内、文档截图）；每个场景几句中文描述取平均向量，与图片向量做 softmax（温度 100），取最高的场景与把握度。维度「场景」（细分 / 大类，可设最低把握度） |
-| 文字搜图 / 以图搜图 | 查询文字（短查询再加一句“一张…的照片”取平均）编码后与全部图片向量点积排序；以图搜图直接用那张照片的向量 |
+| 文字搜图 | 查询文字（短查询再加一句“一张…的照片”取平均）编码后与全部图片向量点积。CLIP 的文字-图片分数挤在很窄的区间（相关约 0.40、无关约 0.37），只按分数排，特写人像也会混进“街道”的前几十名，所以再做**主体对比**：从互相排斥的主体场景（`scenes.SUBJECT_SCENES`：人像 / 自拍 / 合影、美食、饮品、文档截图、室内、猫狗）里取和搜索词无关的几类（文字相似度低于中位数），照片像其中之一比像搜索词还高出 `SEARCH_MARGIN`（0.03）就去掉，略高的降低排名；夜景、雪景、日落等时间 / 天气场景能和任何主体同时出现，不参与比较；另外去掉分数低于全库中位数的 |
+| 以图搜图（找相似） | 综合相似度 = 内容（CLIP 图片向量，55%）+ 画面（`ai/visual.py`：8×8 YCbCr 颜色布局 + 64 格颜色直方图，30%）+ 结构（pHash，15%）。每一项先减去全库中位数（“随便两张”的水平）再缩放到 0–1，缺哪项按其余几项算；低于 `SIMILAR_MIN`（0.30）不显示。画面指纹从缩略图计算（每张约 1 毫秒），缓存在 emb 表（键 `vis-v1`），以前分析过的照片在下次扫描或第一次找相似时补算。结果上方显示目标照片，「大图对比」把目标和结果放进查看器 |
 | 人脸 | `ai/faces.FaceAnalyzer`（像素阶段，在扫描的后台进程里运行）：YuNet 在长边 1024 的预览上检测，SFace 对齐后提 128 维特征（float16、base64）并存一张 112×112 小头像；小于 `face_min_size` 的脸忽略。模型不在时 `available()` 为 False，不会写入空结果 |
 | 人物聚类 | `ai/people.cluster_people`：先应用用户更正（face_fix：指定归属 / “不是他”），再按已命名的人的特征中心认人（余弦 ≥ `face_threshold`，默认 0.42），其余脸按大小做贪心中心聚类并合并相近的组；只在一张照片里出现的脸归“单次出现”。命名 = 存 {名字, 特征中心}（annotations.db 的 people 表）；同名 = 合并。维度「人物」按照片里最大的已命名脸归档 |
+| 排除不是真人的脸 | YuNet 只认“脸的形状”，鹿、猫、玩偶、手办、动漫人物、雕像都会被框出来，SFace 还会把同一个玩偶的几张照片聚成一个“人”。`AIService.screen_faces` 用 CLIP 比较每张 112×112 人脸小图与两组描述（`HUMAN_PROMPTS` 真人的脸 / `OTHER_PROMPTS` 动物、动漫、玩偶、手办、雕像、面具），softmax（×100）后“真人”几项的概率和 < `HUMAN_MIN`（0.5）即排除；结果按人脸键缓存在 emb 表（键 `facekind-v1`）。公开测试图上真人 > 0.9、猫脸 0.02、卡通脸 0.26。描述向量分不开（模型异常）或没有 CLIP 时不判断。用户更正存 face_fix：`notface` 强制排除、`human` 覆盖 AI 判断；被排除的脸在「人物」页的「不是人脸」组里，可恢复 |
 
 ## 9. 补全工作流：视频、导入、去重、导出、AI 关键词
 
@@ -266,7 +269,7 @@ PhotoCrate/
 │  ├─ app.py  bootstrap.py  config.py  plugins.py
 │  ├─ core/        models formats scanner metadata imaging pixelwork geo dates cache library stats
 │  │               pairing geotime places daybook trips videos
-│  ├─ ai/          models clip scenes faces people service
+│  ├─ ai/          models clip scenes faces people service visual
 │  ├─ analyzers/   base builtin
 │  ├─ partition/   base dimensions engine
 │  ├─ ops/         planner mover journal pathsafe xmpwrite cleanup trashbin renamer
@@ -278,7 +281,8 @@ PhotoCrate/
 ├─ plugins/        用户插件放这里        plugins_examples/  示例插件
 ├─ tools/          get_exiftool.ps1  make_icon.py  （exiftool/ 运行后自动下载到这里）
 └─ tests/          test_core.py  test_timeplace.py  test_culling.py  test_trips.py  test_ai.py
-                   test_workflow.py  test_repartition.py  make_samples.py  ui_smoke.py  ui_timeplace.py
+                   test_workflow.py  test_repartition.py  test_search_rank.py  test_faces_screen.py
+                   make_samples.py  ui_smoke.py  ui_timeplace.py
                    ui_culling.py  ui_tier3.py  ui_workflow.py  ui_repartition.py
 ```
 
