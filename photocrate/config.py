@@ -116,6 +116,7 @@ def plugin_dirs() -> list[Path]:
 
 DEFAULTS: dict[str, Any] = {
     "theme": "light",                 # light = 终末地·浅色工业风；dark = 方舟·深色终端风
+    "ui_motion": True,               # 可即时关闭的轻量界面动效
     "window_state": {},               # 上次关闭时的窗口位置/大小
     "window_screen": "",              # 下次启动在哪台显示器打开：primary / secondary / #2 / 显示器名称片段
     "exiftool_path": "",              # 留空 = 自动查找

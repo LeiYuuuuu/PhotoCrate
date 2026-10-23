@@ -6,7 +6,7 @@ import time
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QListWidget, QSlider)
+                               QLineEdit, QListWidget, QSlider, QScrollArea, QWidget, QLayout)
 
 from ...core.library import Progress
 from .. import theme
@@ -107,7 +107,19 @@ class SourcePage(Page):
             grid.addWidget(c, i // 3, i % 3)
         st.body.addLayout(grid)
         top.addWidget(st, 1)
-        self.root.addLayout(top)
+        # 小窗口让接入面板滚动，保持两排统计卡片的真实高度。
+        top_widget = QWidget()
+        top_widget.setLayout(top)
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        self.source_overview = QScrollArea()
+        self.source_overview.setWidgetResizable(True)
+        self.source_overview.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.source_overview.setWidget(top_widget)
+        self.source_overview.setMinimumHeight(240)
+        self.source_overview.setMaximumHeight(top_widget.minimumSizeHint().height() + 2)
+        self.root.addWidget(self.source_overview)
+
 
         # ---- 浏览 ----
         br = Panel("照片浏览与挑选", "Browser // select", "")

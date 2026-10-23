@@ -15,7 +15,7 @@ from ...config import plugin_dirs, thumbs_dir, user_data_dir
 from ...core.dates import DEFAULT_FILENAME_PATTERNS, compile_patterns, parse_filename_date
 from ...ops.pathsafe import human_size
 from ...plugins import LOADED
-from .. import theme
+from .. import theme, motion
 from ..dialogs import ask
 from ..theme import font
 from ..widgets.deco import Panel, TacButton, caption
@@ -74,6 +74,10 @@ class SettingsPage(Page):
         r.addWidget(self.t_dark)
         r.addStretch(1)
         ap.body.addLayout(r)
+        self.motion_toggle = QCheckBox("界面动效 · 导航、切页与按钮反馈")
+        self.motion_toggle.setChecked(bool(self.s.get("ui_motion")))
+        self.motion_toggle.toggled.connect(self._motion)
+        ap.body.addWidget(self.motion_toggle)
         left.addWidget(ap)
 
         # ---- ExifTool ----
@@ -300,6 +304,10 @@ class SettingsPage(Page):
         self.ctx.status.emit("正在按新设置重新整理日期与地点…")
         self.ctx.run(lambda prog, cancel: lib.run_meta_analyzers(), None,
                      lambda _: (self.ctx.library_changed.emit(), self.ctx.status.emit("已按新设置更新")))
+
+    def _motion(self, enabled):
+        self.ctx.set_setting("ui_motion", enabled)
+        motion.set_enabled(enabled)
 
     def _theme(self):
         name = "light" if self.t_light.isChecked() else "dark"

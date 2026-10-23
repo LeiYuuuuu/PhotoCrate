@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QMainWindow, QSizePoli
 from .. import APP_NAME, APP_NAME_EN, APP_TAGLINE, __version__
 from ..config import find_resource, screenshots_dir
 from ..plugins import PAGES
-from . import theme
+from . import theme, motion
 from .context import AppContext
 from .dialogs import choose, info, run_with_progress
 from .pages.ai_page import AiPage
@@ -34,7 +34,7 @@ from .widgets.deco import Barcode, LogoMark
 class TopBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(60)
+        self.setFixedHeight(68)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(18, 0, 18, 0)
         lay.setSpacing(12)
@@ -103,7 +103,10 @@ class NavRail(QWidget):
         self.setFixedWidth(196)
         self.items: list[tuple[str, str, str]] = []   # (编号, 中文, 英文)
         self.current = 0
+        self.marker = motion.Motion(self, 0, 220)
         self._hover = -1
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName("页面导航")
         self.row_h = 58
         self.top = 18
         self.setMouseTracking(True)
@@ -115,12 +118,13 @@ class NavRail(QWidget):
 
     def set_current(self, i: int) -> None:
         self.current = i
+        self.marker.to(i)
         self.update()
 
     def resizeEvent(self, e):
         # 页面多、窗口矮时压缩每一行，给底部装饰留出位置
         n = max(1, len(self.items))
-        self.row_h = int(max(42, min(58, (self.height() - self.top - 130) / n)))
+        self.row_h = int(max(42, min(58, (self.height() - self.top - 64) / n)))
         super().resizeEvent(e)
 
     def _at(self, y: float) -> int:
@@ -143,12 +147,25 @@ class NavRail(QWidget):
         if i >= 0 and i != self.current:
             self.changed.emit(i)
 
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up, Qt.Key.Key_Home, Qt.Key.Key_End):
+            target = self.current + (1 if e.key() == Qt.Key.Key_Down else -1)
+            if e.key() == Qt.Key.Key_Home:
+                target = 0
+            elif e.key() == Qt.Key.Key_End:
+                target = len(self.items) - 1
+            self.changed.emit(max(0, min(len(self.items) - 1, target)))
+            e.accept()
+            return
+        super().keyPressEvent(e)
+
     def paintEvent(self, e):
         p = theme.current()
         qp = QPainter(self)
         qp.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
         qp.fillRect(self.rect(), QColor(p.slab))
+        qp.fillRect(QRectF(0, self.top + self.marker.value * self.row_h + 8, 3, self.row_h - 16), QColor(p.accent))
         for i, (idx, title, en) in enumerate(self.items):
             y = self.top + i * self.row_h
             r = QRectF(10, y + 3, w - 20, self.row_h - 6)
@@ -158,10 +175,9 @@ class NavRail(QWidget):
                                   QPointF(r.right(), r.top() + 10), QPointF(r.right(), r.bottom()),
                                   QPointF(r.left(), r.bottom())])
                 qp.setPen(Qt.PenStyle.NoPen)
-                qp.setBrush(QColor(p.accent))
+                qp.setBrush(QColor(p.slab2))
                 qp.drawPolygon(poly)
-                ink, ink2 = QColor(p.accent_ink), QColor(p.accent_ink)
-                ink2.setAlpha(150)
+                ink, ink2 = QColor(p.slab_ink), QColor(p.accent)
             else:
                 if i == self._hover:
                     qp.fillRect(r, QColor(p.slab2))
@@ -173,23 +189,22 @@ class NavRail(QWidget):
             qp.setPen(ink)
             ty = r.top() + max(1.0, (r.height() - 37) / 2)       # 标题 22 + 英文 15，整体垂直居中
             qp.drawText(QRectF(r.left() + 52, ty, r.width() - 56, 22), Qt.AlignmentFlag.AlignVCenter, title)
-            qp.setFont(font("mono", 6.5, 400, 1.4))
+            qp.setFont(font("mono", 7, 400, 0.5))
             qp.setPen(ink2)
             qp.drawText(QRectF(r.left() + 52, ty + 20, r.width() - 56, 15), Qt.AlignmentFlag.AlignVCenter, en.upper())
-            if not active:
-                qp.setPen(QPen(QColor(p.slab2), 1))
-                qp.drawLine(QPointF(r.left() + 12, r.bottom() + 3), QPointF(r.right(), r.bottom() + 3))
-        # 底部装饰
-        qp.setFont(font("mono", 6.5, 400, 1.5))
-        qp.setPen(QColor(p.slab_ink2))
-        qp.save()
-        qp.translate(22, h - 24)
-        qp.rotate(-90)
-        qp.drawText(QPointF(0, 0), "PHOTOCRATE // LOCAL ARCHIVE")
-        qp.restore()
-        qp.fillRect(QRectF(34, h - 120, 2, 96), QColor(p.accent))
-        for k in range(8):
-            qp.fillRect(QRectF(46 + k * 9, h - 30, 5, 5), QColor(p.slab2 if k % 3 else p.slab_ink2))
+            if active:
+                qp.fillRect(QRectF(r.right() - 5, r.top() + 12, 2, r.height() - 24), QColor(p.accent))
+            if self.hasFocus() and active:
+                qp.setPen(QPen(QColor(p.accent2), 1))
+                qp.setBrush(Qt.BrushStyle.NoBrush)
+                qp.drawRect(r.adjusted(1, 1, -1, -1))
+        # 只在导航下方有空间时绘制页脚，不与长菜单重叠。
+        if self.top + len(self.items) * self.row_h < h - 48:
+            qp.setFont(font("mono", 7, 400, 0.8))
+            qp.setPen(QColor(p.slab_ink2))
+            qp.drawText(QRectF(22, h - 40, w - 40, 16), Qt.AlignmentFlag.AlignLeft, "LOCAL / ARCHIVE")
+            qp.fillRect(QRectF(22, h - 16, 26, 2), QColor(p.accent))
+            qp.fillRect(QRectF(52, h - 16, w - 74, 2), QColor(p.slab2))
         qp.end()
 
 
@@ -226,6 +241,7 @@ class MainWindow(QMainWindow):
     def __init__(self, ctx: AppContext):
         super().__init__()
         self.ctx = ctx
+        motion.set_enabled(bool(ctx.settings.get("ui_motion")))
         self.setWindowTitle(f"{APP_NAME} {APP_NAME_EN.title()}")
         icon = find_resource("assets", "app.png")
         if icon:
@@ -373,11 +389,18 @@ class MainWindow(QMainWindow):
         return self.pages[self.page_ids.index(pid)] if pid in self.page_ids else None
 
     def go(self, i: int) -> None:
+        if not 0 <= i < len(self.pages):
+            return
+        for veil in self.stack.findChildren(motion.PageVeil):
+            veil.hide()
+        snapshot = self.stack.grab() if motion.enabled() and self.isVisible() and i != self.stack.currentIndex() else None
         self.nav.set_current(i)
         self.stack.setCurrentIndex(i)
         w = self.pages[i]
         if hasattr(w, "on_show"):
             w.on_show()
+        if snapshot is not None:
+            motion.PageVeil(self.stack, snapshot)
 
     def _update_readouts(self):
         lib = self.ctx.library

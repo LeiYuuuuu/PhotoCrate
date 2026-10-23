@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen, QP
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
                                QWidget)
 
-from .. import theme
+from .. import theme, motion
 from ..theme import font
 
 
@@ -153,7 +153,7 @@ class SectionHeader(QWidget):
         if lx < w - 120:
             qp.setPen(QPen(QColor(p.line), 1))
             qp.drawLine(QPointF(lx, y), QPointF(w - 92, y))
-            for i, tx in enumerate(range(int(lx), int(w - 92), 12)):
+            for i, tx in enumerate(range(int(lx), min(int(lx) + 100, int(w - 92)), 20)):
                 h = 6 if i % 5 == 0 else 3
                 qp.drawLine(QPointF(tx, y), QPointF(tx, y + h))
             qp.setFont(font("mono", 8, 400, 1.0))
@@ -184,7 +184,7 @@ class Panel(QFrame):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(1, 1, 1, 1)
         outer.setSpacing(0)
-        self.header_h = 36 if title else 0
+        self.header_h = 40 if title else 0
         if title:
             self.header = QWidget()
             self.header.setFixedHeight(self.header_h)
@@ -215,16 +215,15 @@ class Panel(QFrame):
         qp.fillRect(r, QColor(p.surface))
         qp.setPen(QPen(QColor(p.line), 1))
         qp.drawRect(r)
-        # 角标
-        qp.setPen(QPen(QColor(p.ink), 2))
+        # 单侧定位角标，避免每块面板重复四角造成视觉噪声。
+        qp.setPen(QPen(QColor(p.ink3), 1))
         L = 9
-        for (x, y, dx, dy) in ((r.left() + 1, r.top() + 1, 1, 1), (r.right(), r.top() + 1, -1, 1),
-                               (r.left() + 1, r.bottom(), 1, -1), (r.right(), r.bottom(), -1, -1)):
+        for (x, y, dx, dy) in ((r.right(), r.top() + 1, -1, 1),):
             qp.drawLine(x, y, x + dx * L, y)
             qp.drawLine(x, y, x, y + dy * L)
         if self.title:
             h = self.header_h
-            qp.fillRect(QRectF(14, h / 2 - 4, 8, 8), QColor(p.accent))
+            qp.fillRect(QRectF(14, h / 2 - 6, 3, 12), QColor(p.accent2))
             qp.setPen(QColor(p.ink))
             f = font("cn", 10.5, 700)
             qp.setFont(f)
@@ -263,6 +262,8 @@ class TacButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(height)
         self._hover = False
+        self.feedback = motion.Motion(self, 0, 150)
+        self._focus_visible = False
         f = font("cn", 10, 700 if variant in ("primary", "danger", "dark") else 500)
         self.setFont(f)
         extra = QFontMetrics(font("mono", 7)).horizontalAdvance(en.upper()) + 10 if en else 0
@@ -272,13 +273,36 @@ class TacButton(QPushButton):
         s = super().sizeHint()
         return QSize(max(s.width(), self.minimumWidth()), self.height())
 
+    def focusInEvent(self, event):
+        self._focus_visible = event.reason() != Qt.FocusReason.MouseFocusReason
+        super().focusInEvent(event)
+        self.update()
+
+    def focusOutEvent(self, event):
+        self._focus_visible = False
+        super().focusOutEvent(event)
+        self.update()
+
+    def mousePressEvent(self, event):
+        # 已有键盘焦点时再次鼠标点击，也应退出键盘焦点提示。
+        self._focus_visible = False
+        super().mousePressEvent(event)
+        self.update()
+
+    def keyPressEvent(self, event):
+        self._focus_visible = True
+        super().keyPressEvent(event)
+        self.update()
+
     def enterEvent(self, e):
         self._hover = True
+        self.feedback.to(1)
         self.update()
         super().enterEvent(e)
 
     def leaveEvent(self, e):
         self._hover = False
+        self.feedback.to(0)
         self.update()
         super().leaveEvent(e)
 
@@ -313,8 +337,13 @@ class TacButton(QPushButton):
             fill = QColor(p.surface2 if (self._hover or down) else p.surface)
             ink, border = QColor(p.ink), QColor(p.ink if self._hover else p.ink2)
             if down:
-                fill = QColor(p.accent)
+                fill, ink = QColor(p.accent), QColor(p.accent_ink)
         qp.fillPath(path, fill)
+        if enabled and self.feedback.value > 0:
+            qp.save()
+            qp.setClipPath(path)
+            qp.fillRect(QRectF(10, h - 3, (w - 20) * self.feedback.value, 2), ink)
+            qp.restore()
         qp.setPen(QPen(border, 1))
         qp.drawPath(path)
         # 左下角小三角
@@ -341,10 +370,11 @@ class TacButton(QPushButton):
                         self.en.upper())
         else:
             qp.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self.text())
-        if self.hasFocus() and enabled:
+        if self.hasFocus() and self._focus_visible and enabled:
             qp.setBrush(Qt.BrushStyle.NoBrush)   # 之前画小三角时设置了画刷，不清掉会把整个按钮填黑
-            qp.setPen(QPen(QColor(p.accent2), 1, Qt.PenStyle.DotLine))
-            qp.drawRect(QRectF(3, 3, w - 7 - c / 2, h - 7))
+            # 沿用按钮的切角轮廓，避免矩形虚线压住文字或跨过切角。
+            qp.setPen(QPen(QColor(p.accent2), 2))
+            qp.drawPath(path)
         qp.end()
 
 
@@ -434,14 +464,17 @@ class StatCard(QWidget):
         qp.setPen(QPen(QColor(p.line), 1))
         qp.drawRect(r)
         acc = QColor(self.accent or p.accent)
-        qp.fillRect(QRectF(r.left(), r.top(), 4, r.height()), acc if self.accent else QColor(p.ink))
+        qp.fillRect(QRectF(r.left() + 16, r.top(), 28, 2), acc)
         qp.setFont(font("cn", 9.5, 600))
         qp.setPen(QColor(p.ink2))
         qp.drawText(QRectF(16, 8, r.width() - 24, 18), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.label)
+        label_width = QFontMetrics(qp.font()).horizontalAdvance(self.label)
         qp.setFont(font("mono", 7, 400, 1.2))
         qp.setPen(QColor(p.ink3))
-        qp.drawText(QRectF(16, 8, r.width() - 26, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                    self.en.upper())
+        # 窄卡片优先保留中文，避免中英文标题互相覆盖。
+        if label_width + QFontMetrics(qp.font()).horizontalAdvance(self.en.upper()) + 48 < r.width():
+            qp.drawText(QRectF(16, 8, r.width() - 26, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                        self.en.upper())
         fv = font("display", 24, 600)
         qp.setFont(fv)
         qp.setPen(QColor(p.ink))
@@ -483,8 +516,9 @@ class SegProgress(QWidget):
         self.update()
 
     def tick(self) -> None:
-        self._phase = (self._phase + 1) % self.segments
-        self.update()
+        if self.isVisible() and motion.enabled() and (self.busy or 0 < self.value < 1):
+            self._phase = (self._phase + 1) % self.segments
+            self.update()
 
     def paintEvent(self, e):
         p = _p()
@@ -497,8 +531,8 @@ class SegProgress(QWidget):
         for i in range(n):
             x = i * (sw + gap)
             if i < filled:
-                col = QColor(p.accent)
-            elif self.busy and (i - self._phase) % n < 3:
+                col = QColor(p.accent_hover if motion.enabled() and 0 < self.value < 1 and (i - self._phase) % n < 3 else p.accent)
+            elif self.busy and motion.enabled() and (i - self._phase) % n < 3:
                 col = QColor(p.ink3)
             else:
                 col = QColor(p.surface2)

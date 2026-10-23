@@ -55,19 +55,19 @@ class Palette:
 
 LIGHT = Palette(
     name="light",
-    bg="#E6E6E1", surface="#F4F4F0", surface2="#DADAD3", line="#C3C3BA",
-    ink="#151515", ink2="#55554E", ink3="#8D8D84",
-    slab="#1A1B1C", slab2="#2A2C2E", slab_ink="#EEEEE8", slab_ink2="#8A8C8E",
-    accent="#FFE100", accent_hover="#F2D400", accent_ink="#151515",
+    bg="#E9ECEB", surface="#FAFBF8", surface2="#E0E5E3", line="#CCD3D0",
+    ink="#202827", ink2="#52615D", ink3="#707E78",
+    slab="#171F20", slab2="#293435", slab_ink="#F0F3EB", slab_ink2="#9AA9A7",
+    accent="#F2DD46", accent_hover="#FFE96C", accent_ink="#151515",
     accent2="#16A9BC", danger="#E2453A", ok="#2F9E62", warn="#EE8A1E",
 )
 
 DARK = Palette(
     name="dark",
-    bg="#111214", surface="#181A1D", surface2="#202327", line="#2E3237",
-    ink="#ECECE8", ink2="#A3A7AC", ink3="#686C73",
-    slab="#090A0B", slab2="#16181B", slab_ink="#ECECE8", slab_ink2="#7B8086",
-    accent="#F7D23E", accent_hover="#FFDD55", accent_ink="#111214",
+    bg="#10171C", surface="#1A242B", surface2="#25323A", line="#35434C",
+    ink="#E6EDF0", ink2="#ADBCC5", ink3="#8296A2",
+    slab="#0C1217", slab2="#1C2931", slab_ink="#E6EDF0", slab_ink2="#8FA5B3",
+    accent="#E9CF72", accent_hover="#F7E19B", accent_ink="#111214",
     accent2="#1EC6E6", danger="#F25A4E", ok="#3FBF7F", warn="#FF9F1C",
 )
 
@@ -129,7 +129,7 @@ def _make_assets(p: Palette) -> dict[str, str]:
 def stylesheet(p: Palette) -> str:
     a = _make_assets(p)
     return f"""
-* {{ outline: none; }}
+QPushButton:focus {{ border: 1px solid {p.accent2}; }}
 QWidget {{ background: transparent; color: {p.ink}; font-size: 10pt; }}
 QMainWindow, QDialog, #PageRoot {{ background: {p.bg}; }}
 QToolTip {{ background: {p.slab}; color: {p.slab_ink}; border: 1px solid {p.accent}; padding: 5px 8px; }}
@@ -169,7 +169,7 @@ QRadioButton::indicator:checked {{ background: {p.accent}; border: 1px solid {p.
 QRadioButton::indicator {{ border-radius: 7px; }}
 QCheckBox:disabled, QRadioButton:disabled {{ color: {p.ink3}; }}
 
-QPushButton {{ background: {p.surface}; border: 1px solid {p.ink2}; padding: 6px 14px; min-height: 18px; }}
+QPushButton {{ background: {p.surface}; border: 1px solid {p.line}; padding: 6px 14px; min-height: 18px; }}
 QPushButton:hover {{ border: 1px solid {p.ink}; background: {p.surface2}; }}
 QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink}; }}
 QPushButton:disabled {{ color: {p.ink3}; border-color: {p.line}; }}
@@ -197,7 +197,7 @@ QTreeView::item:selected, QTableView::item:selected, QListWidget::item:selected 
 QTreeView::branch:has-children:closed {{ image: url("{a['branch_closed']}"); }}
 QTreeView::branch:has-children:open {{ image: url("{a['branch_open']}"); }}
 QHeaderView::section {{ background: {p.slab}; color: {p.slab_ink}; border: none; border-right: 1px solid {p.slab2};
-    padding: 5px 8px; font-size: 8.5pt; }}
+    padding: 7px 10px; font-size: 9pt; }}
 QTableCornerButton::section {{ background: {p.slab}; border: none; }}
 
 QScrollArea {{ border: none; }}
