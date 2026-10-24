@@ -7,6 +7,7 @@
   方便比较对焦。单击某一边使它成为“当前”（打分作用于当前这边，边框高亮）。
 - 打分：1–5 星、0 清除星级，6 红 7 黄 8 绿 9 蓝 色标（再按一次取消），P 留用，X 弃用，U 取消留弃。
 - I 显示 / 隐藏信息条。
+- E 修图（图层、调整图层、修复画笔、文字…；原片只读，保存写新文件）。
 
 读图：有 JPG/HEIC/PNG 时读它（全尺寸）；只有 RAW 时取相机内嵌的大预览（Sony/Canon/Nikon 通常是全尺寸 JPEG）。
 在后台线程解码，附近几张预先加载，翻页不卡。
@@ -455,7 +456,7 @@ class InfoBar(QWidget):
                 return
             qp.setFont(font("mono", 7.5))
             qp.setPen(QColor("#686C73"))
-            hint = "← → 或点两侧 翻页  ·  Z/双击 100%  ·  C 对比  ·  1–5 星  0 清除  ·  6–9 色标  ·  P 留用  X 弃用  U 取消  ·  Esc 关闭"
+            hint = "← → 或点两侧 翻页  ·  Z/双击 100%  ·  C 对比  ·  E 修图  ·  1–5 星  0 清除  ·  6–9 色标  ·  P 留用  X 弃用  U 取消  ·  Esc 关闭"
             qp.drawText(QRectF(0, 0, self.width() - 12, self.height()),
                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, hint)
         qp.end()
@@ -714,6 +715,10 @@ class ViewerWindow(QDialog):
                 play_video(g)
         elif k == Qt.Key.Key_I:
             self.top.setVisible(not self.top.isVisible())
+        elif k == Qt.Key.Key_E:
+            g = self.current_group()
+            if g is not None and not getattr(g, "is_video", False) and hasattr(self.ctx, "open_editor"):
+                self.ctx.open_editor(g, self.parent() or self)
         else:
             g = self.current_group()
             change = rating_change_for_key(k, g.feats.get("rating") if g else None)

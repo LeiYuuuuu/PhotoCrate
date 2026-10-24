@@ -54,6 +54,7 @@ class _Hooks(QObject):
         super().__init__()
         self.rate = None        # fn(gids, change)
         self.open = None        # fn(groups, index, widget)
+        self.edit = None        # fn(group)：打开修图窗口
 
 
 HOOKS = _Hooks()
@@ -422,6 +423,10 @@ class ThumbGrid(QListView):
             a0.triggered.connect(lambda: self._open(idx))
             a1.setText("用系统程序打开")
             acts.insert(0, a0)
+        if HOOKS.edit is not None and not g.is_video:
+            ae = QAction("修图（图层 / 调整 / 修复）…", m)
+            ae.triggered.connect(lambda: HOOKS.edit(g))
+            acts.insert(1 if HOOKS.open is not None else 0, ae)
         for a in acts:
             m.addAction(a)
         if HOOKS.rate is not None:

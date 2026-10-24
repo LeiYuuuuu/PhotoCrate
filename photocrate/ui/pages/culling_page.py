@@ -113,10 +113,12 @@ class CullingPage(Page):
         mp.body.addWidget(self.scope_lab)
         br = QHBoxLayout()
         self.b_view = TacButton("大图查看", "secondary", en="VIEW", height=32)
+        self.b_edit = TacButton("修图…", "secondary", en="EDIT", height=32)
+        self.b_edit.setToolTip("用图层、调整图层、修复画笔、文字等修这张照片（类似 Photoshop）。原片不动，保存为新文件。")
         self.b_export = TacButton("导出分享…", "primary", en="EXPORT", height=32)
         self.b_xmp = TacButton("写入 XMP…", "secondary", en="XMP", height=32)
         self.b_rename = TacButton("批量重命名…", "secondary", en="RENAME", height=32)
-        for b in (self.b_view, self.b_export, self.b_xmp, self.b_rename):
+        for b in (self.b_view, self.b_edit, self.b_export, self.b_xmp, self.b_rename):
             br.addWidget(b)
         br.addStretch(1)
         mp.body.addLayout(br)
@@ -162,6 +164,7 @@ class CullingPage(Page):
         self.thr.valueChanged.connect(lambda _: self._regroup.start())
         self.grid.selection_changed.connect(self._sel)
         self.b_view.clicked.connect(self.view)
+        self.b_edit.clicked.connect(self.edit)
         self.b_xmp.clicked.connect(self.write_xmp)
         self.b_clean.clicked.connect(self.cleanup)
         self.b_rename.clicked.connect(self.rename)
@@ -264,6 +267,15 @@ class CullingPage(Page):
             first = self.sel[0]
             idx = next((i for i, g in enumerate(self.shown) if g.gid == first), 0)
         self.ctx.open_viewer(self.shown, idx, self.window())
+
+    def edit(self) -> None:
+        """修图：选中的第一张，没有选中时用列表里的第一张。"""
+        lib = self.ctx.library
+        g = lib.by_gid(self.sel[0]) if self.sel else next((x for x in self.shown if not x.is_video), None)
+        if g is None:
+            info(self, "没有可以修的照片", "先在下方选中一张照片。")
+            return
+        self.ctx.open_editor(g, self.window())
 
     def clear_marks(self) -> None:
         gs, text = self.scope()

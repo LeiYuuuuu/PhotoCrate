@@ -14,8 +14,9 @@ JPEG_EXTS = {".jpg", ".jpeg", ".jpe", ".jfif"}
 HEIF_EXTS = {".heic", ".heif", ".hif"}
 PNG_EXTS = {".png"}
 OTHER_IMAGE_EXTS = {".tif", ".tiff", ".webp", ".bmp", ".gif", ".avif"}
-# 附属文件：修图记录 / 编辑记录 / 导出元数据；.xml / .thm 是相机给视频写的附属文件（索尼 C0001M01.XML、佳能 .THM）
-SIDECAR_EXTS = {".xmp", ".aae", ".json", ".pp3", ".dop", ".on1", ".xml", ".thm"}
+# 附属文件：修图记录 / 编辑记录 / 导出元数据；.xml / .thm 是相机给视频写的附属文件（索尼 C0001M01.XML、佳能 .THM）；
+# .pcedit 是本软件的修图工程（与原片同名时跟着照片移动 / 改名）
+SIDECAR_EXTS = {".xmp", ".aae", ".json", ".pp3", ".dop", ".on1", ".xml", ".thm", ".pcedit"}
 # .mov / .mp4 与同名照片在一起时是实况照片（Live Photo）的视频部分，否则是独立视频
 LIVE_EXTS = {".mov", ".mp4"}
 VIDEO_EXTS = {".mov", ".mp4", ".m4v", ".mts", ".m2ts", ".avi", ".mkv", ".3gp", ".wmv", ".mpg", ".mpeg", ".webm"}

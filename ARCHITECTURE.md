@@ -20,6 +20,7 @@
 │  pages/ 01资源 02时间与地点 03分区 04统计 05挑片 06旅行与地图 07AI搜图 08人物       │
 │         09清晰度 10记录 11设置 (+插件页面)    widgets/mapview.py 瓦片地图（纯 Qt 绘制） │
 │  viewer.py 大图查看 / 并排对比   culling_dialogs.py 清理 RAW、批量重命名   xmpflow.py │
+│  editor/ 修图窗口：window（菜单 / 选项栏 / 对话框）canvas（画布）tools（16 个工具）panels │
 │  widgets/ deco.py 自绘控件（面板/切角按钮/数据卡/图表）  thumbgrid.py 虚拟化缩略图网格 │
 │  theme.py 两套配色 + QSS      dialogs.py 确认/进度/执行计划                         │
 └───────────────────────────────────────┬─────────────────────────────────────────┘
@@ -49,6 +50,8 @@
 │ ops/cleanup.py  清理 RAW 计划   ops/trashbin.py 回收站放入 / 找回   ops/renamer.py 改名 │
 │ ops/importer.py 导入向导   ops/dedupe.py 重复照片   ops/exporter.py 导出 JPG / 网页相册   │
 │ ops/pathsafe.py Windows 文件名清洗、长路径                                            │
+│ edit/  修图核心（不依赖界面）：document 图层栈 / 渲染 / 选区 / 历史  adjust 调整参数      │
+│        blend 混合模式  paint 画笔 / 修复 / 选区工具  filters 滤镜  text 文字  io 打开 / 保存 │
 │ plugins.py      插件加载与注册接口                                                     │
 └───────────────────────────────────────┬─────────────────────────────────────────┘
 ┌──────────────────────────────── 数据层 ──────────────────────────────────────────┐
@@ -191,6 +194,22 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 | 导出 | `ops/exporter.py`：`render_one` = 选最佳源（JPG/HEIC/PNG，只有 RAW 时用内嵌预览）→ EXIF 转正 → 缩小（不放大）→ 水印（白字 + 半透明阴影，字号随长边缩放）→ EXIF：默认去掉 GPS IFD，或全部去掉；`export_jpegs` 文件名沿用原名或用改名模板，重名加编号；`export_album` 写 `index.html`（数据内嵌 JSON、Leaflet 从 CDN 加载、坐标四舍五入到 0.01°）+ `photos/` + `thumbs/`。导出只写新文件，不进操作日志 |
 | AI 关键词 | `xmpwrite.ai_keywords`：场景（把握 ≥ 0.3）、已命名的人物、旅行名 → `XMP-dc:Subject` 与 `XMP-lr:HierarchicalSubject`（“场景|大类|场景”“人物|名字”“旅行|名称”）；列表值用 ExifTool 的 `-TAG-=v -TAG+=v` 写入，已有关键词不动、不会重复；和星级一样只写 RAW 的 .xmp，可更新已有 .xmp（先备份、可撤销） |
 
+## 9.5 修图（edit/ + ui/editor/）
+
+和软件其他部分同样分两层：`photocrate/edit` 是纯 numpy / OpenCV / Pillow 的核心（单元测试 `tests/test_editor.py`），`photocrate/ui/editor` 只负责界面。不新增依赖。原片只读：导出写新文件（`io.export_image` 拒绝覆盖原片路径），工程存 `.pcedit`。
+
+| 部分 | 实现 |
+|---|---|
+| 图层 | `Layer`：`pixel`（RGBA uint8 + 左上角位置，可以比画布大 / 小）、`text`（参数 + 按参数用 Pillow 画出的像素，改参数就重画）、`adjust`（`adjust.py` 的参数，作用于下面所有图层合成的结果）。蒙版 uint8：像素 / 文字图层与像素同尺寸、跟着图层移动；调整图层与画布同尺寸 |
+| 混合 | `blend.composite`：W3C Compositing 公式（带底层 alpha），18 种模式含色相 / 饱和度 / 颜色 / 明度（SetLum / SetSat） |
+| 渲染 | `Document.render(level, rect)`：在 2^-level 级别上只合成一块。每层按级别缓存代理图——宽高补齐到 2^level 的整数倍再整数倍盒式平均（有透明时先预乘），所以画笔只改一小块时可以只更新代理图的这一块，结果与整张重算完全一致。调整图层里有半径的操作（高光阴影分区、清晰度、锐化、降噪）按 `RenderCtx.scale` 换算，且渲染一块时四周多算 `adjust.margin()`；大半径模糊先缩小再模糊。拖滑块时缓存“这一层下面所有图层的合成结果”（`hot`，签名 = 下面每层的版本号 / 属性） |
+| 画布 | `CanvasView`：缩放 < 100% 时选不小于屏幕像素的级别；整张代理图 ≤ 600 万像素就整张算（平移不重算），否则只算可见区域外加 30%。连续操作时上一帧 > 90 ms 就先用低一级出图、停手 250 ms 后补清晰的。画笔每一笔只重算改动的矩形并直接写进显示缓冲。选区蚂蚁线 = `cv2.findContours` 的轮廓 |
+| 调整 | `adjust.develop`：白平衡 + 曝光（线性空间，每通道一张查找表）→ 色阶 → 高光 / 阴影（按模糊后的亮度分区，逐像素幂次）→ 白 / 黑色阶、对比度、褪色（查表）→ 清晰度 → 曲线（Fritsch–Carlson 单调三次插值）→ HSL（8 个色带，相邻色带线性分配权重）→ 饱和度 / 自然饱和度 → 分离色调 → 反相 → 暗角（按画布位置）→ 锐化（只锐化亮度）→ 降噪（双边滤波）→ 颗粒。14 个预设就是几组参数 |
+| 历史 | 两种步骤：画笔一笔 = 局部步骤（改动矩形改前 / 改后两块像素）；其他一切 = 状态步骤（图层列表、属性、像素数组的**引用**）。约定除画笔外的改动都换新数组、不原地改，所以记引用就够。连续拖同一个滑块（同一个 key）合并成一步；最多 60 步 / 1.5 GB |
+| 工具 | 选框 / 套索（自由、多边形）/ 魔棒（`cv2.floodFill` FIXED_RANGE 或全图同色）/ 对象选择（GrabCut，先双边滤波去颗粒，在长边约 900 px 的合成图上算再放大）/ 裁剪（可旋转的裁剪框，拉直时自动缩到不露透明角，`cv2.warpAffine` 的逆映射一次完成旋转 + 裁剪）/ 画笔（覆盖度取最大值，同一笔不会越涂越深）/ 仿制图章（从这一笔开始时的快照里按偏移取）/ 污点修复与内容识别填充（`cv2.inpaint` Telea，大区域先缩小补再放大，并按周围高频细节的强度补回噪点）/ 油漆桶 / 渐变 / 文字 / 自由变换（预览时只给图层挂一个仿射矩阵，渲染代理图时 warp；提交时按原尺寸 warp，缩小很多时先盒式缩小防锯齿） |
+| 滤镜 | `filters.py`：每个滤镜 `fn(rgba, scale, **参数)`；对话框里改参数时只在当前显示级别的代理图上算（`Document.previews`），确定后按原尺寸分条应用（每条上下多算一圈），有选区时按选区混合 |
+| 打开 / 保存 | 与「导出分享」共用读图（RAW 用内嵌全尺寸预览）；导出带原片 EXIF（方向改为 1、更新宽高、可去 GPS）与 ICC；整张合成分 512 行一条、多线程并行。`.pcedit` = zip（document.json + 每层 PNG + exif.bin / icc.icc），扩展名加进 `formats.SIDECAR_EXTS`，与原片同名时作为附属文件跟着照片移动 / 改名 |
+
 ## 10. 安全搬运（ops/）
 
 | 机制 | 实现位置 |
@@ -277,8 +296,9 @@ PhotoCrate/
 │  ├─ partition/   base dimensions engine
 │  ├─ ops/         planner mover journal pathsafe xmpwrite cleanup trashbin renamer
 │  │               importer dedupe exporter
+│  ├─ edit/        document adjust blend paint filters text io（修图核心）
 │  └─ ui/          theme context dialogs timeplace_dialogs culling_dialogs workflow_dialogs xmpflow viewer
-│                  main_window  pages/  widgets/（deco thumbgrid mapview）
+│                  main_window  pages/  widgets/（deco thumbgrid mapview）  editor/（window canvas tools panels icons）
 ├─ data/           geonames_cities1000.csv.gz  place_names_zh.json  clip_vocab_zh.txt
 ├─ assets/         app.ico app.png
 ├─ plugins/        用户插件放这里        plugins_examples/  示例插件
@@ -311,6 +331,7 @@ PhotoCrate/
 - 相似分组只比较时间上相邻的照片（默认 10 秒内），不同时间拍的同一场景不会归为一组；pHash 对大幅裁切 / 旋转不敏感。
 - 从回收站找回只支持 Windows 与 Linux（freedesktop）；macOS 的废纸篓没有可读的原路径记录。回收站被清空后就无法撤销清理。
 - 没有代码签名的 exe 可能被杀毒软件误报。
+- 修图：RAW 用内嵌预览（不是 RAW 解码）；8 位精度（没有 16 位 / 32 位通道）；没有图层组、路径 / 矢量形状、图层样式（描边 / 投影只对文字图层）；`.pcedit` 不是 PSD，Photoshop 打不开（可以解压取出每层 PNG）；内容识别填充用的是 OpenCV 修复，大块复杂纹理的效果不如 Photoshop 的 PatchMatch。
 - 场景识别与文字搜图用的是 ViT-B/16 量化模型：常见场景、物体、氛围很准，细分品类（具体的花名、菜名）、文字内容、人名店名不认识；搜索分数只能在同一次搜索里比较。
 - 人物分组依赖正脸：侧脸、遮挡、很小的脸会漏；同一个人跨很多年（小孩长大）可能分成几组，起同一个名字即可合并。人脸特征只保存在本机。
 - 旅行分段需要地点：没有 GPS 的照片要先在「时间与地点」补全地点，否则只能按时间间隔分段；在常住地附近的一日游（半径 50 km 内）不算旅行，可调小半径。

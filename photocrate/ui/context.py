@@ -46,6 +46,7 @@ class AppContext(QObject):
     status = Signal(str)                # 状态栏消息
     navigate = Signal(str)              # 请求跳转页面（页面 id）
     ratings_changed = Signal()          # 星级 / 色标 / 留弃标记变化（只需重绘）
+    rescan_requested = Signal()         # 修图导出了新文件，请资源接入页重新扫描
 
     def __init__(self, settings: Settings, library: Library, journal: Journal):
         super().__init__()
@@ -97,6 +98,11 @@ class AppContext(QObject):
         v.raise_()
         v.activateWindow()
         return v
+
+    def open_editor(self, group, parent=None):
+        """修图窗口（图层、蒙版、调整图层、修复画笔…）。原片只读，保存写新文件。"""
+        from .editor import open_editor
+        return open_editor(self, parent, group=group)
 
     def set_setting(self, key: str, value: Any) -> None:
         self.settings.set(key, value)

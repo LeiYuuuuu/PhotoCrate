@@ -285,6 +285,8 @@ class MainWindow(QMainWindow):
         from .widgets.thumbgrid import HOOKS
         HOOKS.rate = ctx.rate
         HOOKS.open = lambda groups, i, w: ctx.open_viewer(groups, i, self)
+        HOOKS.edit = lambda g: ctx.open_editor(g, self)
+        ctx.rescan_requested.connect(self._rescan)
         ctx.ratings_changed.connect(HOOKS.repaint.emit)
         ctx.status.connect(self.status.set_message)
         ctx.library_changed.connect(self._update_readouts)
@@ -384,6 +386,11 @@ class MainWindow(QMainWindow):
         self.page_ids.append(pid)
         self.stack.addWidget(w)
         self.nav.add(idx, title, en)
+
+    def _rescan(self) -> None:
+        src = self.page("source")
+        if src is not None and not self.ctx.busy:
+            QTimer.singleShot(0, src.start_scan)
 
     def page(self, pid: str):
         return self.pages[self.page_ids.index(pid)] if pid in self.page_ids else None
