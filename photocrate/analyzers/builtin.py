@@ -7,6 +7,7 @@ from typing import Any
 
 from ..core.dates import resolve_date
 from .base import Analyzer, AnalysisContext, PixelInput, register_analyzer
+from ..i18n import t as _t
 
 
 # ---------------------------------------------------------------------------
@@ -15,11 +16,11 @@ from .base import Analyzer, AnalysisContext, PixelInput, register_analyzer
 
 class DateAnalyzer(Analyzer):
     id = "date"
-    label = "拍摄日期"
+    label = _t("拍摄日期")
     order = 10
 
-    """结果字段：dt（已应用时间校正的本地拍摄时间）、source、detail、tz（时区，如 +09:00）。
-    有时间校正时另有：corrected=True、shift（秒）、orig_dt（文件里记录的原始时间）、orig_tz。"""
+    _t("""结果字段：dt（已应用时间校正的本地拍摄时间）、source、detail、tz（时区，如 +09:00）。
+    有时间校正时另有：corrected=True、shift（秒）、orig_dt（文件里记录的原始时间）、orig_tz。""")
 
     def analyze(self, group, ctx: AnalysisContext):
         s = ctx.settings
@@ -67,15 +68,15 @@ def _date_rank(src):
 
 class GeoAnalyzer(Analyzer):
     id = "geo"
-    label = "地区"
+    label = _t("地区")
     order = 20
 
-    """结果字段：
+    _t("""结果字段：
     has_gps  文件里是否有真实 GPS
     located  是否知道地点（GPS / 手动指定 / 轨迹匹配 / 按时间推测 任一来源）
     source   "gps" / "manual" / "track"（GPS 轨迹或参考照片按时间匹配）/ "inferred" / None
     country province city district cc in_china   地点
-    """
+    """)
 
     def analyze(self, group, ctx: AnalysisContext):
         lat, lon = group.meta.get("lat"), group.meta.get("lon")
@@ -106,7 +107,7 @@ def place_label(geo: dict | None, sep: str = " / ") -> str | None:
         v = geo.get(k)
         if v and (not parts or parts[-1] != v):
             parts.append(v)
-    return sep.join(parts)
+    return sep.join(_t(p) for p in parts)           # 地名内部是中文，显示时按界面语言
 
 
 def infer_missing_locations(groups, minutes: int) -> int:
@@ -150,9 +151,12 @@ def infer_missing_locations(groups, minutes: int) -> int:
 # 星级 / 色标 / 留弃标记
 # ---------------------------------------------------------------------------
 
-LABEL_NAMES = {"Red": "红", "Yellow": "黄", "Green": "绿", "Blue": "蓝", "Purple": "紫"}
+LABEL_NAMES = {"Red": _t("红"), "Yellow": _t("黄"), "Green": _t("绿"), "Blue": _t("蓝"), "Purple": _t("紫")}
 LABEL_COLORS = {"Red": "#E2453A", "Yellow": "#F2C230", "Green": "#3FAE5A", "Blue": "#3C7BD9", "Purple": "#8E5AC9"}
-FLAG_NAMES = {"pick": "留用", "reject": "弃用"}
+FLAG_NAMES = {"pick": _t("留用"), "reject": _t("弃用")}
+
+
+_LABEL_ZH = {"Red": "红", "Yellow": "黄", "Green": "绿", "Blue": "蓝", "Purple": "紫"}   # 解析文件里的中文色标用，不翻译
 
 
 def normalize_label(v: str | None) -> str | None:
@@ -160,7 +164,7 @@ def normalize_label(v: str | None) -> str | None:
     if not v:
         return None
     t = str(v).strip()
-    for en, zh in LABEL_NAMES.items():
+    for en, zh in _LABEL_ZH.items():
         if t.lower() == en.lower() or t == zh or t == zh + "色":
             return en
     return t
@@ -169,7 +173,7 @@ def normalize_label(v: str | None) -> str | None:
 class RatingAnalyzer(Analyzer):
     """在本软件里打的星 / 色标 / 留弃（保存在 annotations.db）优先；否则读取照片或 .xmp 里已有的评级。"""
     id = "rating"
-    label = "星级与标记"
+    label = _t("星级与标记")
     order = 16
 
     def analyze(self, group, ctx: AnalysisContext):
@@ -196,7 +200,7 @@ class HashAnalyzer(Analyzer):
     """pHash：32×32 灰度图做 DCT，取左上 8×8 低频系数与中位数比较，得到 64 位指纹。
     同一场景连拍的几张照片指纹只差几位；构图明显不同的照片相差 20 位以上。"""
     id = "phash"
-    label = "感知哈希"
+    label = _t("感知哈希")
     stage = "pixel"
     version = 1
 
@@ -305,7 +309,7 @@ def normalize_model(make: str | None, model: str | None) -> str | None:
 
 class CameraAnalyzer(Analyzer):
     id = "camera"
-    label = "相机与来源"
+    label = _t("相机与来源")
     order = 30
 
     def analyze(self, group, ctx: AnalysisContext):
@@ -332,7 +336,7 @@ class CameraAnalyzer(Analyzer):
         return {"make": make, "model": model, "lens": lens, "source": source}
 
 
-SOURCE_LABELS = {"camera": "相机", "phone": "手机", "drone": "无人机", "screenshot": "截图", "other": "其他（无相机信息）"}
+SOURCE_LABELS = {"camera": _t("相机"), "phone": _t("手机"), "drone": _t("无人机"), "screenshot": _t("截图"), "other": _t("其他（无相机信息）")}
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +345,7 @@ SOURCE_LABELS = {"camera": "相机", "phone": "手机", "drone": "无人机", "s
 
 class ShapeAnalyzer(Analyzer):
     id = "shape"
-    label = "画幅"
+    label = _t("画幅")
     order = 40
 
     def analyze(self, group, ctx: AnalysisContext):
@@ -370,7 +374,7 @@ class ShapeAnalyzer(Analyzer):
         return {"orientation": ori, "w": w, "h": h, "mp": mp, "ratio": round(ratio, 3), "from": src}
 
 
-ORIENTATION_LABELS = {"landscape": "横幅", "portrait": "竖幅", "square": "方形", "pano": "全景"}
+ORIENTATION_LABELS = {"landscape": _t("横幅"), "portrait": _t("竖幅"), "square": _t("方形"), "pano": _t("全景")}
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +383,7 @@ ORIENTATION_LABELS = {"landscape": "横幅", "portrait": "竖幅", "square": "�
 
 class ColorAnalyzer(Analyzer):
     id = "color"
-    label = "色调"
+    label = _t("色调")
     stage = "pixel"
     version = 3     # v3：黑白判定只看画面中足够亮的部分（很暗的彩色夜景不再被当成黑白）
 
@@ -447,8 +451,8 @@ def _rgb_hue(rgb) -> float:
 
 
 # 色相分类：(名称, 起始角度)，按 HSV 色相
-HUE_BUCKETS = [("红", 345), ("橙", 15), ("黄", 42), ("黄绿", 65), ("绿", 90), ("青", 155),
-               ("蓝", 195), ("紫", 255), ("粉紫", 290)]
+HUE_BUCKETS = [(_t("红"), 345), (_t("橙"), 15), (_t("黄"), 42), (_t("黄绿"), 65), (_t("绿"), 90), (_t("青"), 155),
+               (_t("蓝"), 195), (_t("紫"), 255), (_t("粉紫"), 290)]
 
 
 def hue_name(h: float) -> str:
@@ -475,22 +479,22 @@ def classify_color(feat: dict[str, Any] | None, s: dict[str, Any]) -> dict[str, 
     low_sat = feat["chroma_mean"] < float(s.get("color_low_sat_chroma", 9.0))
     margin = float(s.get("color_warm_margin", 0.12))
     if mono:
-        warmth = "黑白"
+        warmth = _t("黑白")
     elif low_sat:
-        warmth = "中性"
+        warmth = _t("中性")
     elif feat["warm_ratio"] - feat["cool_ratio"] > margin:
-        warmth = "暖色调"
+        warmth = _t("暖色调")
     elif feat["cool_ratio"] - feat["warm_ratio"] > margin:
-        warmth = "冷色调"
+        warmth = _t("冷色调")
     else:
-        warmth = "中性"
+        warmth = _t("中性")
     L = feat.get("median_l", feat["mean_l"])
     if L < float(s.get("color_dark_l", 35)):
-        tone = "暗调"
+        tone = _t("暗调")
     elif L > float(s.get("color_bright_l", 65)):
-        tone = "亮调"
+        tone = _t("亮调")
     else:
-        tone = "中间调"
+        tone = _t("中间调")
     # 主色：占比够大的最鲜艳簇
     main = None
     if not mono:
@@ -505,9 +509,9 @@ def classify_color(feat: dict[str, Any] | None, s: dict[str, Any]) -> dict[str, 
             p = best[1]
             main = hue_name(p["hue"])
             if main in ("橙", "红") and p["L"] < 45 and p["chroma"] < 40:
-                main = "棕"
+                main = _t("棕")
     if main is None:
-        main = "黑白灰" if mono else "低饱和"
+        main = _t("黑白灰") if mono else _t("低饱和")
     return {"warmth": warmth, "tone": tone, "main": main}
 
 
@@ -519,7 +523,7 @@ class BlurAnalyzer(Analyzer):
     """拉普拉斯方差。分 4×4 小块计算、取最清晰的两块平均，
     这样"主体清晰、背景虚化"的照片不会被误判为模糊。"""
     id = "blur"
-    label = "清晰度"
+    label = _t("清晰度")
     stage = "pixel"
     version = 2
 
@@ -556,7 +560,7 @@ def blur_state(group, threshold: float) -> str:
     return "blurry" if sc < threshold else "sharp"
 
 
-BLUR_LABELS = {"sharp": "清晰", "blurry": "模糊", "unknown": "无法判断"}
+BLUR_LABELS = {"sharp": _t("清晰"), "blurry": _t("模糊"), "unknown": _t("无法判断")}
 
 
 def register_builtin() -> None:

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QToolTip, QWidget
 
 from .. import theme
 from ..theme import font
+from ...i18n import t as _t
 
 TILE = 256
 MIN_Z, MAX_Z = 1, 18
@@ -29,9 +30,9 @@ PROVIDERS = {
     # (显示名, URL 模板, 子域名, 版权说明, 是否 GCJ-02 坐标)
     "osm": ("OpenStreetMap", ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], "",
             "© OpenStreetMap contributors", False),
-    "amap": ("高德地图（中国）", ["https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8"
-                               "&x={x}&y={y}&z={z}"], "1234", "© 高德地图", True),
-    "none": ("不显示底图（离线）", [], "", "", False),
+    "amap": (_t("高德地图（中国）"), ["https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8"
+                               "&x={x}&y={y}&z={z}"], "1234", _t("© 高德地图"), True),
+    "none": (_t("不显示底图（离线）"), [], "", "", False),
 }
 USER_AGENT = b"PhotoCrate/1.4 (local photo organizer; desktop app)"
 
@@ -390,9 +391,9 @@ class MapView(QWidget):
         attr = info[3] if info else ""
         note = ""
         if info and info[1] and self.tiles.offline:
-            note = "底图加载失败（没有网络？）· 显示经纬网格"
+            note = _t("底图加载失败（没有网络？）· 显示经纬网格")
         elif not (info and info[1]):
-            note = "离线模式 · 经纬网格"
+            note = _t("离线模式 · 经纬网格")
         txt = "   ".join(x for x in (note, attr, f"Z{self.zoom}") if x)
         fm = QFontMetrics(qp.font())
         tw = fm.horizontalAdvance(txt) + 12
@@ -405,7 +406,7 @@ class MapView(QWidget):
         if not self.points:
             qp.setFont(font("cn", 10))
             qp.setPen(QColor(p.ink3 if not have_tiles else p.ink2))
-            qp.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "没有带位置的照片")
+            qp.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, _t("没有带位置的照片"))
         qp.end()
 
     def _graticule(self, qp: QPainter, left: float, top: float, dark: bool) -> None:
@@ -505,7 +506,7 @@ class MapView(QWidget):
                 items = self.clusters[i][1]
                 labels = sorted({m.label for m in items if m.label})
                 QToolTip.showText(e.globalPosition().toPoint(),
-                                  f"{len(items)} 张照片" + ("<br>" + "、".join(labels[:4]) if labels else ""), self)
+                                  _t('{0} 张照片', len(items)) + ("<br>" + _t("、").join(labels[:4]) if labels else ""), self)
 
     def mouseReleaseEvent(self, e):
         if self._drag is not None and not self._moved:

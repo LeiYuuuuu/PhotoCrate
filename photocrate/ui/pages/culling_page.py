@@ -15,9 +15,10 @@ from ..dialogs import PlanDialog, info, run_with_progress
 from ..widgets.deco import Panel, StatCard, TacButton, caption
 from ..widgets.thumbgrid import ThumbGrid
 from .base import Page
+from ...i18n import t as _t
 
-VIEWS = [("all", "全部"), ("similar", "相似组"), ("unrated", "未标记"), ("rated", "已打星"), ("pick", "留用"),
-         ("reject", "弃用")]
+VIEWS = [("all", _t("全部")), ("similar", _t("相似组")), ("unrated", _t("未标记")), ("rated", _t("已打星")), ("pick", _t("留用")),
+         ("reject", _t("弃用"))]
 
 
 def _rt(g) -> dict:
@@ -46,10 +47,10 @@ def similar_extras(groups) -> list:
 class CullingPage(Page):
     page_id = "culling"
     index = "05"
-    title = "挑片"
+    title = _t("挑片")
     en = "Culling // rate · compare · bursts"
-    sub = ("双击或按空格看大图（Z 放大到 100%，C 两张并排对比）。1–5 打星、0 清除，P 留用、X 弃用、U 取消，6–9 色标；"
-           "可多选后一起打。连拍 / 相似照片自动分组，并标出最清晰的一张。")
+    sub = (_t("双击或按空格看大图（Z 放大到 100%，C 两张并排对比）。1–5 打星、0 清除，P 留用、X 弃用、U 取消，6–9 色标；"
+           "可多选后一起打。连拍 / 相似照片自动分组，并标出最清晰的一张。"))
 
     def __init__(self, ctx, parent=None):
         super().__init__(ctx, parent)
@@ -60,83 +61,83 @@ class CullingPage(Page):
         top.setSpacing(12)
 
         # ---- 相似照片 ----
-        sp = Panel("连拍 / 相似照片", "Bursts // perceptual hash")
+        sp = Panel(_t("连拍 / 相似照片"), "Bursts // perceptual hash")
         sp.setFixedWidth(500)
         r = QHBoxLayout()
-        r.addWidget(QLabel("相邻间隔 ≤"))
+        r.addWidget(QLabel(_t("相邻间隔 ≤")))
         self.gap = QSpinBox()
         self.gap.setRange(1, 600)
-        self.gap.setSuffix(" 秒")
+        self.gap.setSuffix(_t(" 秒"))
         self.gap.setValue(int(ctx.settings.get("similar_gap_seconds", 10)))
         r.addWidget(self.gap)
         r.addSpacing(8)
-        r.addWidget(QLabel("相似度"))
+        r.addWidget(QLabel(_t("相似度")))
         self.thr = QSpinBox()
         self.thr.setRange(0, 32)
         self.thr.setValue(int(ctx.settings.get("similar_threshold", 12)))
-        self.thr.setToolTip("两张照片的“指纹”最多相差几位（0–32）。越小越严格：6 只认几乎一样的连拍，16 会把同一场景换了角度的也归到一组。")
+        self.thr.setToolTip(_t("两张照片的“指纹”最多相差几位（0–32）。越小越严格：6 只认几乎一样的连拍，16 会把同一场景换了角度的也归到一组。"))
         r.addWidget(self.thr)
         r.addStretch(1)
         sp.body.addLayout(r)
         cr = QHBoxLayout()
-        self.c_sets = StatCard("相似组", "SETS")
-        self.c_in = StatCard("组内照片", "PHOTOS", accent=p.ink2)
-        self.c_extra = StatCard("建议待确认", "EXTRAS", accent=p.warn)
+        self.c_sets = StatCard(_t("相似组"), "SETS")
+        self.c_in = StatCard(_t("组内照片"), "PHOTOS", accent=p.ink2)
+        self.c_extra = StatCard(_t("建议待确认"), "EXTRAS", accent=p.warn)
         for c in (self.c_sets, self.c_in, self.c_extra):
             cr.addWidget(c)
         sp.body.addLayout(cr)
         ar = QHBoxLayout()
-        ar.addWidget(QLabel("文件夹名："))
-        self.folder = QLineEdit(ctx.settings.get("similar_folder") or "待确认_相似")
+        ar.addWidget(QLabel(_t("文件夹名：")))
+        self.folder = QLineEdit(_t(ctx.settings.get("similar_folder") or "待确认_相似"))
         self.folder.setFixedWidth(130)
         ar.addWidget(self.folder)
         ar.addStretch(1)
-        self.b_isolate = TacButton("非最佳移入文件夹…", "primary", en="ISOLATE", height=34)
+        self.b_isolate = TacButton(_t("非最佳移入文件夹…"), "primary", en="ISOLATE", height=34)
         self.b_isolate.clicked.connect(self.isolate)
         ar.addWidget(self.b_isolate)
         sp.body.addLayout(ar)
-        sp.body.addWidget(caption("拍摄时间相近、画面指纹相似的照片归为一组，清晰度最高的标“最佳”。"
-                                  "移出时跳过每组最佳、已打星和标记“留用”的照片。", "faint", 8))
+        sp.body.addWidget(caption(_t("拍摄时间相近、画面指纹相似的照片归为一组，清晰度最高的标“最佳”。"
+                                  "移出时跳过每组最佳、已打星和标记“留用”的照片。"), "faint", 8))
         top.addWidget(sp)
 
         # ---- 标记与批量操作 ----
-        mp = Panel("标记与批量操作", "Marks // batch")
+        mp = Panel(_t("标记与批量操作"), "Marks // batch")
         mr = QHBoxLayout()
-        self.c_rated = StatCard("已打星", "RATED", accent=p.accent)
-        self.c_pick = StatCard("留用", "PICK", accent=p.ok)
-        self.c_reject = StatCard("弃用", "REJECT", accent=p.danger)
-        self.c_none = StatCard("未标记", "UNMARKED", accent=p.ink3)
+        self.c_rated = StatCard(_t("已打星"), "RATED", accent=p.accent)
+        self.c_pick = StatCard(_t("留用"), "PICK", accent=p.ok)
+        self.c_reject = StatCard(_t("弃用"), "REJECT", accent=p.danger)
+        self.c_none = StatCard(_t("未标记"), "UNMARKED", accent=p.ink3)
         for c in (self.c_rated, self.c_pick, self.c_reject, self.c_none):
             mr.addWidget(c)
         mp.body.addLayout(mr)
         self.scope_lab = caption("", "dim", 8.5)
         mp.body.addWidget(self.scope_lab)
         br = QHBoxLayout()
-        self.b_view = TacButton("大图查看", "secondary", en="VIEW", height=32)
-        self.b_edit = TacButton("修图…", "secondary", en="EDIT", height=32)
-        self.b_edit.setToolTip("用图层、调整图层、修复画笔、文字等修这张照片（类似 Photoshop）。原片不动，保存为新文件。")
-        self.b_export = TacButton("导出分享…", "primary", en="EXPORT", height=32)
-        self.b_xmp = TacButton("写入 XMP…", "secondary", en="XMP", height=32)
-        self.b_rename = TacButton("批量重命名…", "secondary", en="RENAME", height=32)
+        self.b_view = TacButton(_t("大图查看"), "secondary", en="VIEW", height=32)
+        self.b_edit = TacButton(_t("修图…"), "secondary", en="EDIT", height=32)
+        self.b_edit.setToolTip(_t("用图层、调整图层、修复画笔、文字等修这张照片（类似 Photoshop）。原片不动，保存为新文件。"))
+        self.b_export = TacButton(_t("导出分享…"), "primary", en="EXPORT", height=32)
+        self.b_xmp = TacButton(_t("写入 XMP…"), "secondary", en="XMP", height=32)
+        self.b_rename = TacButton(_t("批量重命名…"), "secondary", en="RENAME", height=32)
         for b in (self.b_view, self.b_edit, self.b_export, self.b_xmp, self.b_rename):
             br.addWidget(b)
         br.addStretch(1)
         mp.body.addLayout(br)
         br = QHBoxLayout()
-        self.b_clean = TacButton("清理 RAW…", "danger", en="CLEANUP", height=32)
-        self.b_dupe = TacButton("查找重复照片…", "danger", en="DUPES", height=32)
-        self.b_clear = TacButton("清除标记", "secondary", height=32)
+        self.b_clean = TacButton(_t("清理 RAW…"), "danger", en="CLEANUP", height=32)
+        self.b_dupe = TacButton(_t("查找重复照片…"), "danger", en="DUPES", height=32)
+        self.b_clear = TacButton(_t("清除标记"), "secondary", height=32)
         for b in (self.b_clean, self.b_dupe, self.b_clear):
             br.addWidget(b)
         br.addStretch(1)
         mp.body.addLayout(br)
-        mp.body.addWidget(caption("操作范围：有选中时只处理选中的照片，否则处理下方当前列表。星级只保存在本软件里，"
-                                  "写入 XMP 后 Lightroom / Bridge 才能看到（JPG 不写）。", "faint", 8))
+        mp.body.addWidget(caption(_t("操作范围：有选中时只处理选中的照片，否则处理下方当前列表。星级只保存在本软件里，"
+                                  "写入 XMP 后 Lightroom / Bridge 才能看到（JPG 不写）。"), "faint", 8))
         top.addWidget(mp, 1)
         self.root.addLayout(top)
 
         # ---- 照片 ----
-        gp = Panel("照片", "Gallery", "")
+        gp = Panel(_t("照片"), "Gallery", "")
         self.gpanel = gp
         fr = QHBoxLayout()
         self.view_btns: dict[str, QRadioButton] = {}
@@ -215,24 +216,24 @@ class CullingPage(Page):
         sims = [g for g in gs if g.feats.get("similar")]
         sets = len({g.feats["similar"]["cid"] for g in sims})
         extra = len(similar_extras(gs))
-        self.c_sets.set(str(sets), unit="组")
-        self.c_in.set(str(len(sims)), len(sims) / n, "张")
-        self.c_extra.set(str(extra), extra / n, "张")
+        self.c_sets.set(str(sets), unit=_t("组"))
+        self.c_in.set(str(len(sims)), len(sims) / n, _t("张"))
+        self.c_extra.set(str(extra), extra / n, _t("张"))
         rated = sum(1 for g in gs if int(_rt(g).get("rating") or 0) > 0)
         pick = sum(1 for g in gs if _rt(g).get("flag") == "pick")
         rej = sum(1 for g in gs if _rt(g).get("flag") == "reject")
         none = sum(1 for g in gs if not is_marked(g))
-        self.c_rated.set(str(rated), rated / n, "张")
-        self.c_pick.set(str(pick), pick / n, "张")
-        self.c_reject.set(str(rej), rej / n, "张")
-        self.c_none.set(str(none), none / n, "张")
+        self.c_rated.set(str(rated), rated / n, _t("张"))
+        self.c_pick.set(str(pick), pick / n, _t("张"))
+        self.c_reject.set(str(rej), rej / n, _t("张"))
+        self.c_none.set(str(none), none / n, _t("张"))
         self.b_isolate.setEnabled(extra > 0)
 
     def _ratings_changed(self) -> None:
         self._stats()
         if self.view_mode() in ("unrated", "rated", "pick", "reject"):
             # 不立刻从列表里拿走刚打完分的照片（否则连续打分时位置会乱跳），切换视图或回到本页时再筛选
-            self.gpanel.set_meta(f"{len(self.shown)} ITEMS · {dict(VIEWS)[self.view_mode()]} · 标记已变化，切换视图刷新")
+            self.gpanel.set_meta(_t('{0} ITEMS · {1} · 标记已变化，切换视图刷新', len(self.shown), dict(VIEWS)[self.view_mode()]))
 
     def _sel(self, gids: list[int]) -> None:
         self.sel = gids
@@ -240,22 +241,22 @@ class CullingPage(Page):
 
     def _update_scope(self) -> None:
         if self.sel:
-            self.scope_lab.setText(f"范围：选中的 {len(self.sel)} 张照片")
+            self.scope_lab.setText(_t('范围：选中的 {0} 张照片', len(self.sel)))
         else:
-            self.scope_lab.setText(f"范围：当前列表「{dict(VIEWS)[self.view_mode()]}」{len(self.shown)} 张照片")
+            self.scope_lab.setText(_t('范围：当前列表「{0}」{1} 张照片', dict(VIEWS)[self.view_mode()], len(self.shown)))
 
     def scope(self) -> tuple[list, str]:
         lib = self.ctx.library
         if self.sel:
             gs = [g for gid in self.sel if (g := lib.by_gid(gid)) is not None and g.files]
-            return gs, f"选中的 {len(gs)} 张照片"
-        return list(self.shown), f"当前列表「{dict(VIEWS)[self.view_mode()]}」{len(self.shown)} 张照片"
+            return gs, _t('选中的 {0} 张照片', len(gs))
+        return list(self.shown), _t('当前列表「{0}」{1} 张照片', dict(VIEWS)[self.view_mode()], len(self.shown))
 
     def _apply_similar(self) -> None:
         self.ctx.set_setting("similar_gap_seconds", int(self.gap.value()))
         self.ctx.set_setting("similar_threshold", int(self.thr.value()))
         n = self.ctx.library.regroup_similar()
-        self.ctx.status.emit(f"相似照片重新分组：{n} 组")
+        self.ctx.status.emit(_t('相似照片重新分组：{0} 组', n))
         self.refresh()
 
     # ---- 操作 ----
@@ -273,7 +274,7 @@ class CullingPage(Page):
         lib = self.ctx.library
         g = lib.by_gid(self.sel[0]) if self.sel else next((x for x in self.shown if not x.is_video), None)
         if g is None:
-            info(self, "没有可以修的照片", "先在下方选中一张照片。")
+            info(self, _t("没有可以修的照片"), _t("先在下方选中一张照片。"))
             return
         self.ctx.open_editor(g, self.window())
 
@@ -281,12 +282,11 @@ class CullingPage(Page):
         gs, text = self.scope()
         marked = [g.gid for g in gs if _rt(g).get("manual")]
         if not marked:
-            info(self, "没有可清除的标记", f"{text}里没有在本软件里打过的星级 / 色标 / 留弃标记。")
+            info(self, _t("没有可清除的标记"), _t('{0}里没有在本软件里打过的星级 / 色标 / 留弃标记。', text))
             return
         from ..dialogs import ask
-        if ask(self, "清除标记", f"清除{text}中 {len(marked)} 张照片在本软件里打的星级、色标和留弃标记？"
-               "<br>（照片 / .xmp 里原有的评级不受影响；已写入 .xmp 的需要在「操作记录」页撤销那次写入。）",
-               ok="清除", danger=True):
+        if ask(self, _t("清除标记"), _t('清除{0}中 {1} 张照片在本软件里打的星级、色标和留弃标记？<br>（照片 / .xmp 里原有的评级不受影响；已写入 .xmp 的需要在「操作记录」页撤销那次写入。）', text, len(marked)),
+               ok=_t("清除"), danger=True):
             self.ctx.rate(marked, None)
             self.refresh()
 
@@ -302,10 +302,10 @@ class CullingPage(Page):
         if not groups:
             return
         start = self.ctx.settings.get("target_dir") or groups[0].folder
-        d = QFileDialog.getExistingDirectory(self, "「待确认」文件夹放在哪里？", start)
+        d = QFileDialog.getExistingDirectory(self, _t("「待确认」文件夹放在哪里？"), start)
         if not d:
             return
-        name = self.folder.text().strip() or "待确认_相似"
+        name = self.folder.text().strip() or _t("待确认_相似")
         self.ctx.set_setting("similar_folder", name)
         spec = PartitionSpec("rules", [Rule("fixed", {"name": name})])
         plan = build_plan(groups, spec, PartitionContext(self.ctx.settings.snapshot()), os.path.normpath(d),
@@ -332,25 +332,25 @@ class CullingPage(Page):
             return self.ctx.mover.delete(plan, lambda d, t, c: prog((d, t, c)), cancel)
 
         try:
-            res, tb = run_with_progress(self.ctx, self, "正在放入回收站", "TRASHING", job)
+            res, tb = run_with_progress(self.ctx, self, _t("正在放入回收站"), "TRASHING", job)
         finally:
             self.ctx.busy = False
         if tb or res is None:
             self.ctx.files_changed.emit()
-            info(self, "清理出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
+            info(self, _t("清理出错"), f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
             return
         from ...ops.pathsafe import human_size
         self.ctx.library.remove_files(res.deleted)
         self.sel = []
         self.ctx.files_changed.emit()
-        msg = [f"已把 <b>{len(res.deleted)}</b> 个文件（{human_size(res.freed)}）放入回收站，涉及 {res.done_groups} 张照片。"]
+        msg = [_t('已把 <b>{0}</b> 个文件（{1}）放入回收站，涉及 {2} 张照片。', len(res.deleted), human_size(res.freed), res.done_groups)]
         if res.cancelled:
-            msg.append("已取消，剩余照片未处理。")
+            msg.append(_t("已取消，剩余照片未处理。"))
         if res.failed_groups:
-            msg.append(f"{res.failed_groups} 张失败（已放回原处）：<br>" + "<br>".join(res.errors[:8]))
-        msg.append(f"批次 #{res.batch_id}，可在「操作记录」页撤销（从回收站放回）。")
-        self.ctx.status.emit(f"清理完成：{len(res.deleted)} 个文件放入回收站，释放 {human_size(res.freed)}")
-        info(self, "清理完成", "<br><br>".join(msg), "COMPLETE")
+            msg.append(_t('{0} 张失败（已放回原处）：<br>', res.failed_groups) + "<br>".join(res.errors[:8]))
+        msg.append(_t('批次 #{0}，可在「操作记录」页撤销（从回收站放回）。', res.batch_id))
+        self.ctx.status.emit(_t('清理完成：{0} 个文件放入回收站，释放 {1}', len(res.deleted), human_size(res.freed)))
+        info(self, _t("清理完成"), "<br><br>".join(msg), "COMPLETE")
 
     def export(self) -> None:
         from ..workflow_dialogs import ExportDialog, run_export
@@ -376,24 +376,23 @@ class CullingPage(Page):
             return self.ctx.mover.delete(plan, lambda d, t, c: prog((d, t, c)), cancel)
 
         try:
-            res, tb = run_with_progress(self.ctx, self, "正在删除副本", "TRASHING", job)
+            res, tb = run_with_progress(self.ctx, self, _t("正在删除副本"), "TRASHING", job)
         finally:
             self.ctx.busy = False
         if tb or res is None:
             self.ctx.files_changed.emit()
-            info(self, "删除出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
+            info(self, _t("删除出错"), f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
             return
         from ...ops.pathsafe import human_size
         self.ctx.library.remove_files(res.deleted)
         self.sel = []
         self.ctx.files_changed.emit()
-        msg = (f"已把 <b>{res.done_groups}</b> 张重复照片的副本（{len(res.deleted)} 个文件，{human_size(res.freed)}）"
-               "放入回收站。")
+        msg = (_t('已把 <b>{0}</b> 张重复照片的副本（{1} 个文件，{2}）放入回收站。', res.done_groups, len(res.deleted), human_size(res.freed)))
         if res.failed_groups:
-            msg += f"<br><br>{res.failed_groups} 张失败（已放回）：<br>" + "<br>".join(res.errors[:6])
-        msg += f"<br><br>批次 #{res.batch_id}，可在「操作记录」页撤销（从回收站放回）。"
-        self.ctx.status.emit(f"删除重复：{len(res.deleted)} 个文件，释放 {human_size(res.freed)}")
-        info(self, "完成", msg, "COMPLETE")
+            msg += _t('<br><br>{0} 张失败（已放回）：<br>', res.failed_groups) + "<br>".join(res.errors[:6])
+        msg += _t('<br><br>批次 #{0}，可在「操作记录」页撤销（从回收站放回）。', res.batch_id)
+        self.ctx.status.emit(_t('删除重复：{0} 个文件，释放 {1}', len(res.deleted), human_size(res.freed)))
+        info(self, _t("完成"), msg, "COMPLETE")
 
     def rename(self) -> None:
         from ..culling_dialogs import RenameDialog
@@ -410,20 +409,20 @@ class CullingPage(Page):
             return self.ctx.mover.execute(plan, lambda d, t, c: prog((d, t, c)), cancel, {"spec": plan.spec_text})
 
         try:
-            res, tb = run_with_progress(self.ctx, self, "正在重命名", "RENAMING", job)
+            res, tb = run_with_progress(self.ctx, self, _t("正在重命名"), "RENAMING", job)
         finally:
             self.ctx.busy = False
         if tb or res is None:
             self.ctx.files_changed.emit()
-            info(self, "改名出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
+            info(self, _t("改名出错"), f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
             return
         self.ctx.library.apply_moves(res.mapping)
         self.ctx.files_changed.emit()
-        msg = [f"已重命名 <b>{res.done_groups}</b> 张照片（{res.done_files} 个文件）。"]
+        msg = [_t('已重命名 <b>{0}</b> 张照片（{1} 个文件）。', res.done_groups, res.done_files)]
         if res.cancelled:
-            msg.append("已取消，剩余照片未处理。")
+            msg.append(_t("已取消，剩余照片未处理。"))
         if res.failed_groups:
-            msg.append(f"{res.failed_groups} 张失败（已改回原名）：<br>" + "<br>".join(res.errors[:8]))
-        msg.append(f"批次 #{res.batch_id}，可在「操作记录」页撤销（改回原名）。")
-        self.ctx.status.emit(f"重命名完成：{res.done_files} 个文件（批次 #{res.batch_id}）")
-        info(self, "改名完成", "<br><br>".join(msg), "COMPLETE")
+            msg.append(_t('{0} 张失败（已改回原名）：<br>', res.failed_groups) + "<br>".join(res.errors[:8]))
+        msg.append(_t('批次 #{0}，可在「操作记录」页撤销（改回原名）。', res.batch_id))
+        self.ctx.status.emit(_t('重命名完成：{0} 个文件（批次 #{1}）', res.done_files, res.batch_id))
+        info(self, _t("改名完成"), "<br><br>".join(msg), "COMPLETE")

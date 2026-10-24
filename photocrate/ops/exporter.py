@@ -19,10 +19,11 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable
+from ..i18n import is_en, t as _t
 
-SIZES = [(1080, "1080 px（朋友圈 / 小红书够用）"), (1440, "1440 px"), (2048, "2048 px（高清）"),
-         (3840, "3840 px（4K）"), (0, "原始尺寸")]
-POSITIONS = {"br": "右下", "bl": "左下", "tr": "右上", "tl": "左上", "c": "居中"}
+SIZES = [(1080, _t("1080 px（朋友圈 / 小红书够用）")), (1440, "1440 px"), (2048, _t("2048 px（高清）")),
+         (3840, _t("3840 px（4K）")), (0, _t("原始尺寸"))]
+POSITIONS = {"br": _t("右下"), "bl": _t("左下"), "tr": _t("右上"), "tl": _t("左上"), "c": _t("居中")}
 
 
 @dataclass
@@ -66,7 +67,7 @@ def load_full(g, exiftool: str | None = None):
 
     f = source_file(g)
     if f is None:
-        raise ValueError("没有可导出的图片文件")
+        raise ValueError(_t("没有可导出的图片文件"))
     if f.role == "raw":
         from ..core.imaging import load_raw_preview
         im, _ = load_raw_preview(f.path, 100000, exiftool)
@@ -247,7 +248,7 @@ def export_jpegs(groups, dst_dir: str, opts: ExportOptions, ctx=None, exiftool: 
             res.bytes += os.path.getsize(path)
         except Exception as e:
             res.failed += 1
-            res.errors.append(f"{g.name}：{e}")
+            res.errors.append(_t('{0}：{1}', g.name, e))
         if progress:
             progress(i, len(items), g.name)
     return res
@@ -270,7 +271,7 @@ def export_album(groups, dst_dir: str, title: str, opts: ExportOptions, subtitle
     from ..core.trips import photo_coords
 
     res = ExportResult()
-    safe = "".join(c for c in title if c not in '\\/:*?"<>|').strip() or "相册"
+    safe = "".join(c for c in title if c not in '\\/:*?"<>|').strip() or _t("相册")
     root = dst_dir if os.path.basename(os.path.normpath(dst_dir)) == safe else os.path.join(dst_dir, safe)
     if os.path.exists(os.path.join(root, "index.html")):
         n = 2
@@ -305,22 +306,22 @@ def export_album(groups, dst_dir: str, title: str, opts: ExportOptions, subtitle
             th.save(os.path.join(tdir, name), "JPEG", quality=82, optimize=True)
             res.written.append(os.path.join(pdir, name))
             res.bytes += os.path.getsize(os.path.join(pdir, name)) + os.path.getsize(os.path.join(tdir, name))
-            key = g.date.strftime("%Y-%m-%d") if g.date else "日期未知"
+            key = g.date.strftime("%Y-%m-%d") if g.date else _t("日期未知")
             day = days.setdefault(key, {"date": key, "photos": [], "places": [], "pts": []})
             geo = g.feats.get("geo") or {}
-            place = geo.get("city") or geo.get("province") or geo.get("country")
+            place = _t(geo.get("city") or geo.get("province") or geo.get("country"))
             if place and place not in day["places"]:
                 day["places"].append(place)
             c = photo_coords(g)
             if c is not None:
                 day["pts"].append(c)
-            sc = (g.feats.get("scene") or {}).get("scene")
+            sc = _t((g.feats.get("scene") or {}).get("scene"))
             day["photos"].append({"f": name, "w": im.width, "h": im.height,
                                   "t": g.date.strftime("%H:%M") if g.date else "",
                                   "p": place or "", "s": sc or ""})
         except Exception as e:
             res.failed += 1
-            res.errors.append(f"{g.name}：{e}")
+            res.errors.append(_t('{0}：{1}', g.name, e))
         if progress:
             progress(i, len(items), g.name)
     day_list = []
@@ -335,9 +336,23 @@ def export_album(groups, dst_dir: str, title: str, opts: ExportOptions, subtitle
             "made": datetime.now().strftime("%Y-%m-%d"), "map": bool(show_map and any("lat" in d for d in day_list))}
     index = os.path.join(root, "index.html")
     with open(index, "w", encoding="utf-8") as f:
-        f.write(_ALBUM_HTML.replace("__TITLE__", html.escape(title))
+        f.write(_album_html().replace("__TITLE__", html.escape(title))
                 .replace("__DATA__", json.dumps(data, ensure_ascii=False).replace("</", "<\\/")))
     return index, res
+
+
+def _album_html() -> str:
+    """网页相册模板；英文界面下把模板里的几处中文换成英文。"""
+    if not is_en():
+        return _ALBUM_HTML
+    out = _ALBUM_HTML
+    for zh, en in (('lang="zh-CN"', 'lang="en"'), ('aria-label="关闭"', 'aria-label="Close"'),
+                   ('aria-label="上一张"', 'aria-label="Previous"'), ('aria-label="下一张"', 'aria-label="Next"'),
+                   ("用 影匣 PhotoCrate 导出", "Made with PhotoCrate"), ('" 天 · "', '" days · "'),
+                   ('" 张"', '" photos"'), ('"第" + d.n + "天 " + d.date.slice(5)', '"Day " + d.n + " " + d.date.slice(5)'),
+                   ('"第" + d.n + "天 " + (d.places', '"Day " + d.n + " " + (d.places')):
+        out = out.replace(zh, en)
+    return out
 
 
 _ALBUM_HTML = r"""<!doctype html>

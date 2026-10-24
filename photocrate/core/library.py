@@ -30,6 +30,7 @@ from .models import MemberFile, PhotoGroup, file_signature
 from .pairing import pair_across_folders, renumber
 from .pixelwork import init_worker, process_task, thumb_path_for
 from .scanner import scan
+from ..i18n import t as _t
 
 
 def _is_xmp(f: MemberFile) -> bool:
@@ -129,7 +130,7 @@ class Library:
         t0 = time.time()
         cancel = cancel or threading.Event()
         rep = ScanReport()
-        pg = Progress("enumerate", "正在枚举文件…")
+        pg = Progress("enumerate", _t("正在枚举文件…"))
 
         def emit():
             if progress:
@@ -166,7 +167,7 @@ class Library:
         self.selected = set()
         rep.seconds = time.time() - t0
         pg.stage = "done"
-        pg.message = "完成"
+        pg.message = _t("完成")
         emit()
         return rep
 
@@ -211,7 +212,7 @@ class Library:
         rep.meta_cached = len(files) - len(todo)
         pg.stage = "meta"
         pg.meta_total = len(todo)
-        pg.message = "正在读取元数据…"
+        pg.message = _t("正在读取元数据…")
         emit()
         results: dict[str, dict[str, Any]] = {}
         if todo:
@@ -246,7 +247,7 @@ class Library:
 
         # 3) 等像素任务全部完成
         pg.stage = "pixel"
-        pg.message = "正在分析画面（缩略图 / 色调 / 清晰度）…"
+        pg.message = _t("正在分析画面（缩略图 / 色调 / 清晰度）…")
         emit()
         while futures and not cancel.is_set():
             self._drain(futures, groups, pg, rep, block=True)
@@ -265,7 +266,7 @@ class Library:
 
         # 5) GPS 补全的参考数据（轨迹文件 + 参考照片文件夹，元数据有缓存）
         pg.stage = "analyze"
-        pg.message = "正在读取参考轨迹 / 参考照片…"
+        pg.message = _t("正在读取参考轨迹 / 参考照片…")
         emit()
         try:
             self.load_references(cancel=cancel)
@@ -273,7 +274,7 @@ class Library:
             log.warning("读取参考数据失败：%s", e)
 
         # 6) 元数据分析器（日期 / 地区 / 相机 / 画幅 …）
-        pg.message = "正在整理日期与地点…"
+        pg.message = _t("正在整理日期与地点…")
         emit()
         self.run_meta_analyzers(groups)
 
@@ -293,7 +294,7 @@ class Library:
             if ai.clip_ready() and (force or self.settings.get("ai_enabled", True)):
                 if pg is not None:
                     pg.stage = "ai"
-                    pg.message = "AI：场景识别 / 文字搜图索引…"
+                    pg.message = _t("AI：场景识别 / 文字搜图索引…")
                     pg.ai_done, pg.ai_total = 0, 0
                     if emit:
                         emit()
@@ -459,7 +460,7 @@ class Library:
             info: dict[str, Any] = {"kind": "track", "path": path, "points": 0}
             try:
                 if not os.path.isfile(path):
-                    raise FileNotFoundError("文件不存在")
+                    raise FileNotFoundError(_t("文件不存在"))
                 pts = load_track_file(path)
                 points += pts
                 info.update(points=len(pts), span=describe_span(pts))
@@ -471,11 +472,11 @@ class Library:
                 break
             info = {"kind": "photos", "path": d, "points": 0, "photos": 0}
             if not os.path.isdir(d):
-                info["error"] = "文件夹不存在"
+                info["error"] = _t("文件夹不存在")
                 sources.append(info)
                 continue
             if progress:
-                progress(f"正在读取参考照片：{d}")
+                progress(_t('正在读取参考照片：{0}', d))
             try:
                 ref_groups = scan([d], True, False, cancel)
                 metas = self._read_meta([f for g in ref_groups for f in g.image_files], cancel)

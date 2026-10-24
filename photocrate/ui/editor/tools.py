@@ -13,8 +13,9 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import QApplication
 
 from ...edit import paint as P
+from ...i18n import t as _t
 
-SEL_MODES = [("new", "新选区"), ("add", "添加"), ("sub", "减去"), ("and", "交叉")]
+SEL_MODES = [("new", _t("新选区")), ("add", _t("添加")), ("sub", _t("减去")), ("and", _t("交叉"))]
 
 
 def _mods(e) -> tuple[bool, bool, bool]:
@@ -115,8 +116,8 @@ class Tool:
 # ---------------------------------------------------------------------------
 
 class MoveTool(Tool):
-    id, name, shortcut, icon = "move", "移动", "V", "move"
-    tip = "移动工具（V）：拖动当前图层；方向键微移 1 像素（Shift 10 像素）"
+    id, name, shortcut, icon = "move", _t("移动"), "V", "move"
+    tip = _t("移动工具（V）：拖动当前图层；方向键微移 1 像素（Shift 10 像素）")
     cursor = Qt.CursorShape.SizeAllCursor
 
     def __init__(self, win):
@@ -124,8 +125,8 @@ class MoveTool(Tool):
         self.drag = None
 
     def options(self, bar):
-        bar.check("自动选择图层", "move_auto", False)
-        bar.label("勾选后点哪里就选中那里最上面的图层")
+        bar.check(_t("自动选择图层"), "move_auto", False)
+        bar.label(_t("勾选后点哪里就选中那里最上面的图层"))
 
     def busy(self):
         return self.drag is not None
@@ -142,7 +143,7 @@ class MoveTool(Tool):
                         break
         l = d.active
         if l is None or l.kind == "adjust":
-            self.win.status_msg("调整图层不能移动；选中一个像素 / 文字图层再拖")
+            self.win.status_msg(_t("调整图层不能移动；选中一个像素 / 文字图层再拖"))
             return
         self.drag = (x, y, l.x, l.y, d.state(), l)
 
@@ -195,14 +196,14 @@ class MoveTool(Tool):
 
 
 class HandTool(Tool):
-    id, name, shortcut, icon = "hand", "抓手", "H", "hand"
-    tip = "抓手工具（H）：拖动画面。任何工具下按住空格也可以拖动"
+    id, name, shortcut, icon = "hand", _t("抓手"), "H", "hand"
+    tip = _t("抓手工具（H）：拖动画面。任何工具下按住空格也可以拖动")
     cursor = Qt.CursorShape.OpenHandCursor
 
 
 class ZoomTool(Tool):
-    id, name, shortcut, icon = "zoom", "缩放", "Z", "zoom"
-    tip = "缩放工具（Z）：单击放大，Alt + 单击缩小。滚轮也能缩放"
+    id, name, shortcut, icon = "zoom", _t("缩放"), "Z", "zoom"
+    tip = _t("缩放工具（Z）：单击放大，Alt + 单击缩小。滚轮也能缩放")
     cursor = Qt.CursorShape.CrossCursor
 
     def press(self, x, y, e):
@@ -215,8 +216,8 @@ class ZoomTool(Tool):
 # ---------------------------------------------------------------------------
 
 class MarqueeTool(Tool):
-    id, name, shortcut, icon = "marquee", "选框", "M", "marquee"
-    tip = "选框工具（M）：拖出矩形 / 椭圆选区；拖动中按 Shift 为正方形 / 正圆；单击空白处取消选择"
+    id, name, shortcut, icon = "marquee", _t("选框"), "M", "marquee"
+    tip = _t("选框工具（M）：拖出矩形 / 椭圆选区；拖动中按 Shift 为正方形 / 正圆；单击空白处取消选择")
 
     def __init__(self, win):
         super().__init__(win)
@@ -226,8 +227,8 @@ class MarqueeTool(Tool):
 
     def options(self, bar):
         bar.seg("sel_mode", SEL_MODES, "new")
-        bar.combo("形状", "marquee_shape", [("rect", "矩形"), ("ellipse", "椭圆")], "rect")
-        bar.spin("羽化", "feather", 0, 250, 0, " px")
+        bar.combo(_t("形状"), "marquee_shape", [("rect", _t("矩形")), ("ellipse", _t("椭圆"))], "rect")
+        bar.spin(_t("羽化"), "feather", 0, 250, 0, " px")
 
     def busy(self):
         return self.a is not None
@@ -258,7 +259,7 @@ class MarqueeTool(Tool):
         d = self.doc
         ell = self.opt("marquee_shape", "rect") == "ellipse"
         m = P.rect_mask(d.width, d.height, a[0], a[1], b[0], b[1], ell, float(self.opt("feather", 0)))
-        self._apply_selection(m, self.mode, "椭圆选框" if ell else "矩形选框")
+        self._apply_selection(m, self.mode, _t("椭圆选框") if ell else _t("矩形选框"))
 
     def paint(self, qp):
         if self.a is None:
@@ -271,8 +272,8 @@ class MarqueeTool(Tool):
 
 
 class LassoTool(Tool):
-    id, name, shortcut, icon = "lasso", "套索", "L", "lasso"
-    tip = "套索工具（L）：按住拖动圈出选区；多边形模式下逐点单击，双击或回车闭合，Esc 取消，Backspace 撤一个点"
+    id, name, shortcut, icon = "lasso", _t("套索"), "L", "lasso"
+    tip = _t("套索工具（L）：按住拖动圈出选区；多边形模式下逐点单击，双击或回车闭合，Esc 取消，Backspace 撤一个点")
 
     def __init__(self, win):
         super().__init__(win)
@@ -282,8 +283,8 @@ class LassoTool(Tool):
 
     def options(self, bar):
         bar.seg("sel_mode", SEL_MODES, "new")
-        bar.combo("方式", "lasso_kind", [("free", "自由"), ("poly", "多边形")], "free")
-        bar.spin("羽化", "feather", 0, 250, 0, " px")
+        bar.combo(_t("方式"), "lasso_kind", [("free", _t("自由")), ("poly", _t("多边形"))], "free")
+        bar.spin(_t("羽化"), "feather", 0, 250, 0, " px")
 
     def busy(self):
         return bool(self.pts)
@@ -336,7 +337,7 @@ class LassoTool(Tool):
                 d.deselect()
             return
         m = P.polygon_mask(d.width, d.height, pts, float(self.opt("feather", 0)))
-        self._apply_selection(m, self.mode, "多边形套索" if self._poly() else "套索")
+        self._apply_selection(m, self.mode, _t("多边形套索") if self._poly() else _t("套索"))
 
     def key(self, e):
         if not self.pts:
@@ -364,30 +365,30 @@ class LassoTool(Tool):
 
 
 class WandTool(Tool):
-    id, name, shortcut, icon = "wand", "魔棒", "W", "wand"
-    tip = "魔棒工具（W）：单击选中颜色相近的区域。容差越大选得越多；取消“连续”会选中全图所有相近颜色"
+    id, name, shortcut, icon = "wand", _t("魔棒"), "W", "wand"
+    tip = _t("魔棒工具（W）：单击选中颜色相近的区域。容差越大选得越多；取消“连续”会选中全图所有相近颜色")
 
     def options(self, bar):
         bar.seg("sel_mode", SEL_MODES, "new")
-        bar.spin("容差", "wand_tol", 0, 255, 32)
-        bar.check("连续", "wand_contig", True)
-        bar.check("对所有图层取样", "wand_all", False)
+        bar.spin(_t("容差"), "wand_tol", 0, 255, 32)
+        bar.check(_t("连续"), "wand_contig", True)
+        bar.check(_t("对所有图层取样"), "wand_all", False)
 
     def press(self, x, y, e):
         d = self.doc
         if not (0 <= x < d.width and 0 <= y < d.height):
             return
         mode = self._sel_mode(e)
-        with _Busy(self.win, "魔棒…"):
+        with _Busy(self.win, _t("魔棒…")):
             src = d.flat_rgba() if self.opt("wand_all", False) or d.active is None else d.sample_layer_rgba(d.active)
             m = P.wand(src, int(x), int(y), float(self.opt("wand_tol", 32)), bool(self.opt("wand_contig", True)))
-        self._apply_selection(m, mode, "魔棒")
+        self._apply_selection(m, mode, _t("魔棒"))
         self.win.status_msg("")
 
 
 class ObjectTool(Tool):
-    id, name, shortcut, icon = "object", "对象选择", "Q", "object"
-    tip = "对象选择工具（Q）：框住一个物体 / 人，自动沿边缘选出来（GrabCut，几秒钟）。之后可以用 Shift / Alt 补选或减选"
+    id, name, shortcut, icon = "object", _t("对象选择"), "Q", "object"
+    tip = _t("对象选择工具（Q）：框住一个物体 / 人，自动沿边缘选出来（GrabCut，几秒钟）。之后可以用 Shift / Alt 补选或减选")
 
     def __init__(self, win):
         super().__init__(win)
@@ -396,7 +397,7 @@ class ObjectTool(Tool):
 
     def options(self, bar):
         bar.seg("sel_mode", SEL_MODES, "new")
-        bar.label("框选时留一点余量，主体边缘不要被框线切到")
+        bar.label(_t("框选时留一点余量，主体边缘不要被框线切到"))
 
     def busy(self):
         return self.a is not None
@@ -416,13 +417,13 @@ class ObjectTool(Tool):
         self.a = self.b = None
         if abs(b[0] - a[0]) * self.cv.zoom < 6 or abs(b[1] - a[1]) * self.cv.zoom < 6:
             return
-        with _Busy(self.win, "正在识别主体…"):
+        with _Busy(self.win, _t("正在识别主体…")):
             m = P.object_select_doc(self.doc, (a[0], a[1], b[0], b[1]))
         if not m.any():
-            self.win.status_msg("没有识别出主体：框得再贴近一些试试")
+            self.win.status_msg(_t("没有识别出主体：框得再贴近一些试试"))
             return
-        self._apply_selection(m, self.mode, "对象选择")
-        self.win.status_msg("已选出主体：可以 Ctrl+J 抠出来，或新建调整图层只调它")
+        self._apply_selection(m, self.mode, _t("对象选择"))
+        self.win.status_msg(_t("已选出主体：可以 Ctrl+J 抠出来，或新建调整图层只调它"))
 
     def paint(self, qp):
         if self.a is None:
@@ -436,16 +437,16 @@ class ObjectTool(Tool):
 # 裁剪（含拉直）
 # ---------------------------------------------------------------------------
 
-RATIOS = [("free", "自由"), ("orig", "原始比例"), ("1:1", "1 : 1"), ("4:3", "4 : 3"), ("3:2", "3 : 2"),
+RATIOS = [("free", _t("自由")), ("orig", _t("原始比例")), ("1:1", "1 : 1"), ("4:3", "4 : 3"), ("3:2", "3 : 2"),
           ("16:9", "16 : 9"), ("5:4", "5 : 4"), ("3:4", "3 : 4"), ("2:3", "2 : 3"), ("9:16", "9 : 16"),
           ("4:5", "4 : 5")]
 _HANDLES = [(-1, -1), (0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0)]
 
 
 class CropTool(Tool):
-    id, name, shortcut, icon = "crop", "裁剪", "C", "crop"
-    tip = ("裁剪工具（C）：拖动边框或角调整，框内拖动移动；在框外拖出新的裁剪框；"
-           "按住 Ctrl 沿地平线拖一条线自动拉直。回车或双击应用，Esc 复位")
+    id, name, shortcut, icon = "crop", _t("裁剪"), "C", "crop"
+    tip = (_t("裁剪工具（C）：拖动边框或角调整，框内拖动移动；在框外拖出新的裁剪框；"
+           "按住 Ctrl 沿地平线拖一条线自动拉直。回车或双击应用，Esc 复位"))
 
     def __init__(self, win):
         super().__init__(win)
@@ -456,10 +457,10 @@ class CropTool(Tool):
         self.line = None
 
     def options(self, bar):
-        bar.combo("比例", "crop_ratio", RATIOS, "free", on_change=lambda _: self._ratio_changed())
-        bar.spin("拉直", "crop_angle", -45, 45, 0, "°", decimals=1, on_change=self._angle_changed)
-        bar.button("复位", self.reset)
-        bar.button("应用裁剪", self.apply, "primary")
+        bar.combo(_t("比例"), "crop_ratio", RATIOS, "free", on_change=lambda _: self._ratio_changed())
+        bar.spin(_t("拉直"), "crop_angle", -45, 45, 0, "°", decimals=1, on_change=self._angle_changed)
+        bar.button(_t("复位"), self.reset)
+        bar.button(_t("应用裁剪"), self.apply, "primary")
 
     def activate(self):
         self.reset()
@@ -651,11 +652,11 @@ class CropTool(Tool):
             return
         if abs(self.angle) < 1e-3 and abs(cx - d.width / 2) < 0.5 and abs(cy - d.height / 2) < 0.5 \
                 and abs(w - d.width) < 0.5 and abs(h - d.height) < 0.5:
-            self.win.status_msg("裁剪框和画布一样大，没有需要裁掉的")
+            self.win.status_msg(_t("裁剪框和画布一样大，没有需要裁掉的"))
             return
-        with _Busy(self.win, "正在裁剪…"):
+        with _Busy(self.win, _t("正在裁剪…")):
             d.crop(cx - w / 2, cy - h / 2, w, h, self.angle)
-        self.win.status_msg(f"已裁剪为 {d.width} × {d.height}")
+        self.win.status_msg(_t('已裁剪为 {0} × {1}', d.width, d.height))
         self.reset()
 
     def paint(self, qp):
@@ -699,8 +700,8 @@ class CropTool(Tool):
 # ---------------------------------------------------------------------------
 
 class EyedropperTool(Tool):
-    id, name, shortcut, icon = "eyedropper", "吸管", "I", "eyedropper"
-    tip = "吸管工具（I）：单击取前景色，Alt + 单击取背景色。用画笔时按住 Alt 也能临时吸色"
+    id, name, shortcut, icon = "eyedropper", _t("吸管"), "I", "eyedropper"
+    tip = _t("吸管工具（I）：单击取前景色，Alt + 单击取背景色。用画笔时按住 Alt 也能临时吸色")
 
     def press(self, x, y, e):
         c = self.cv.sample(x, y)
@@ -719,8 +720,8 @@ class EyedropperTool(Tool):
 # ---------------------------------------------------------------------------
 
 class PaintTool(Tool):
-    id, name, shortcut, icon = "brush", "画笔", "B", "brush"
-    tip = "画笔工具（B）：用前景色画。[ ] 调大小，Shift + 单击画直线，Alt 临时吸色。选中蒙版时黑色隐藏、白色显示"
+    id, name, shortcut, icon = "brush", _t("画笔"), "B", "brush"
+    tip = _t("画笔工具（B）：用前景色画。[ ] 调大小，Shift + 单击画直线，Alt 临时吸色。选中蒙版时黑色隐藏、白色显示")
     mode = "paint"
 
     def __init__(self, win):
@@ -730,9 +731,9 @@ class PaintTool(Tool):
         self.pos = None
 
     def options(self, bar):
-        bar.spin("大小", "brush_size", 1, 2000, 40, " px")
-        bar.spin("硬度", "brush_hard", 0, 100, 80, "%")
-        bar.spin("不透明度", "brush_opacity", 1, 100, 100, "%")
+        bar.spin(_t("大小"), "brush_size", 1, 2000, 40, " px")
+        bar.spin(_t("硬度"), "brush_hard", 0, 100, 80, "%")
+        bar.spin(_t("不透明度"), "brush_opacity", 1, 100, 100, "%")
 
     def busy(self):
         return self.stroke is not None
@@ -750,10 +751,10 @@ class PaintTool(Tool):
             return None
         to_mask = d.mask_edit and l.mask is not None
         if not to_mask and l.kind == "adjust":
-            self.win.status_msg("调整图层没有像素：先给它加蒙版，再在蒙版上画（黑色隐藏、白色显示）")
+            self.win.status_msg(_t("调整图层没有像素：先给它加蒙版，再在蒙版上画（黑色隐藏、白色显示）"))
             return None
         if not l.visible:
-            self.win.status_msg("当前图层是隐藏的，先点眼睛图标显示它")
+            self.win.status_msg(_t("当前图层是隐藏的，先点眼睛图标显示它"))
             return None
         return l, to_mask
 
@@ -804,7 +805,7 @@ class PaintTool(Tool):
         if self.stroke is None:
             return
         s, self.stroke = self.stroke, None
-        with _Busy(self.win, "正在修复…" if self.mode == "heal" else ""):
+        with _Busy(self.win, _t("正在修复…") if self.mode == "heal" else ""):
             r = s.finish()
         self.last_end = (x, y)
         if r:
@@ -836,19 +837,19 @@ class PaintTool(Tool):
 
 
 class EraserTool(PaintTool):
-    id, name, shortcut, icon = "eraser", "橡皮擦", "E", "eraser"
-    tip = "橡皮擦工具（E）：把当前图层擦成透明（在蒙版上擦 = 涂黑隐藏）"
+    id, name, shortcut, icon = "eraser", _t("橡皮擦"), "E", "eraser"
+    tip = _t("橡皮擦工具（E）：把当前图层擦成透明（在蒙版上擦 = 涂黑隐藏）")
     mode = "erase"
 
 
 class HealTool(PaintTool):
-    id, name, shortcut, icon = "heal", "污点修复画笔", "J", "heal"
-    tip = "污点修复画笔（J）：涂抹痘痘、灰尘、电线等，松开后用周围的画面自动补上。大面积去除可以先选区再用「编辑 → 内容识别填充」"
+    id, name, shortcut, icon = "heal", _t("污点修复画笔"), "J", "heal"
+    tip = _t("污点修复画笔（J）：涂抹痘痘、灰尘、电线等，松开后用周围的画面自动补上。大面积去除可以先选区再用「编辑 → 内容识别填充」")
     mode = "heal"
 
     def options(self, bar):
-        bar.spin("大小", "heal_size", 2, 1000, 30, " px")
-        bar.label("涂抹要去掉的地方，比瑕疵稍大一点；一次修不干净可以再涂一遍")
+        bar.spin(_t("大小"), "heal_size", 2, 1000, 30, " px")
+        bar.label(_t("涂抹要去掉的地方，比瑕疵稍大一点；一次修不干净可以再涂一遍"))
 
     def _size(self) -> float:
         return float(self.opt("heal_size", 30))
@@ -859,14 +860,14 @@ class HealTool(PaintTool):
     def _target(self):
         tg = super()._target()
         if tg is not None and tg[1]:
-            self.win.status_msg("修复画笔只能用在像素上：先在图层面板里点图层缩略图（不是蒙版）")
+            self.win.status_msg(_t("修复画笔只能用在像素上：先在图层面板里点图层缩略图（不是蒙版）"))
             return None
         return tg
 
 
 class CloneTool(PaintTool):
-    id, name, shortcut, icon = "clone", "仿制图章", "S", "clone"
-    tip = "仿制图章（S）：先按住 Alt 单击要复制的地方（取样点），再在别处涂抹，把取样点的画面画过来"
+    id, name, shortcut, icon = "clone", _t("仿制图章"), "S", "clone"
+    tip = _t("仿制图章（S）：先按住 Alt 单击要复制的地方（取样点），再在别处涂抹，把取样点的画面画过来")
     mode = "clone"
 
     def __init__(self, win):
@@ -876,16 +877,16 @@ class CloneTool(PaintTool):
 
     def options(self, bar):
         super().options(bar)
-        bar.check("对齐", "clone_aligned", True)
+        bar.check(_t("对齐"), "clone_aligned", True)
 
     def _begin(self, x, y, e):
         if _mods(e)[1]:
             self.src = (x, y)
             self.offset = None
-            self.win.status_msg(f"取样点：{int(x)}, {int(y)}。在要修补的地方涂抹")
+            self.win.status_msg(_t('取样点：{0}, {1}。在要修补的地方涂抹', int(x), int(y)))
             return False
         if self.src is None:
-            self.win.status_msg("先按住 Alt 单击，设置取样点")
+            self.win.status_msg(_t("先按住 Alt 单击，设置取样点"))
             return False
         if self.offset is None or not self.opt("clone_aligned", True):
             self.offset = (int(round(self.src[0] - x)), int(round(self.src[1] - y)))
@@ -922,19 +923,19 @@ class CloneTool(PaintTool):
 
 
 class BucketTool(Tool):
-    id, name, shortcut, icon = "bucket", "油漆桶", "K", "bucket"
-    tip = "油漆桶工具（K）：用前景色填充颜色相近的区域"
+    id, name, shortcut, icon = "bucket", _t("油漆桶"), "K", "bucket"
+    tip = _t("油漆桶工具（K）：用前景色填充颜色相近的区域")
 
     def options(self, bar):
-        bar.spin("容差", "bucket_tol", 0, 255, 32)
-        bar.check("连续", "bucket_contig", True)
-        bar.check("对所有图层取样", "bucket_all", False)
-        bar.spin("不透明度", "bucket_opacity", 1, 100, 100, "%")
+        bar.spin(_t("容差"), "bucket_tol", 0, 255, 32)
+        bar.check(_t("连续"), "bucket_contig", True)
+        bar.check(_t("对所有图层取样"), "bucket_all", False)
+        bar.spin(_t("不透明度"), "bucket_opacity", 1, 100, 100, "%")
 
     def press(self, x, y, e):
         l = self.doc.active
         if l is None or not l.has_pixels:
-            self.win.status_msg("选中一个像素图层再填充")
+            self.win.status_msg(_t("选中一个像素图层再填充"))
             return
         fg = self.win.fg
         with _Busy(self.win):
@@ -942,21 +943,21 @@ class BucketTool(Tool):
                                 float(self.opt("bucket_tol", 32)), bool(self.opt("bucket_contig", True)),
                                 float(self.opt("bucket_opacity", 100)) / 100, bool(self.opt("bucket_all", False)))
         if not ok:
-            self.win.status_msg("这里不在当前图层上，或没有可填充的区域")
+            self.win.status_msg(_t("这里不在当前图层上，或没有可填充的区域"))
 
 
 class GradientTool(Tool):
-    id, name, shortcut, icon = "gradient", "渐变", "G", "gradient"
-    tip = "渐变工具（G）：拖一条线，在当前图层（或选区）里画前景色 → 背景色 / 透明的渐变。常配合蒙版做渐隐"
+    id, name, shortcut, icon = "gradient", _t("渐变"), "G", "gradient"
+    tip = _t("渐变工具（G）：拖一条线，在当前图层（或选区）里画前景色 → 背景色 / 透明的渐变。常配合蒙版做渐隐")
 
     def __init__(self, win):
         super().__init__(win)
         self.a = self.b = None
 
     def options(self, bar):
-        bar.combo("类型", "grad_kind", [("linear", "线性"), ("radial", "径向")], "linear")
-        bar.combo("颜色", "grad_colors", [("fgbg", "前景色 → 背景色"), ("fgclear", "前景色 → 透明")], "fgbg")
-        bar.spin("不透明度", "grad_opacity", 1, 100, 100, "%")
+        bar.combo(_t("类型"), "grad_kind", [("linear", _t("线性")), ("radial", _t("径向"))], "linear")
+        bar.combo(_t("颜色"), "grad_colors", [("fgbg", _t("前景色 → 背景色")), ("fgclear", _t("前景色 → 透明"))], "fgbg")
+        bar.spin(_t("不透明度"), "grad_opacity", 1, 100, 100, "%")
 
     def busy(self):
         return self.a is not None
@@ -990,7 +991,7 @@ class GradientTool(Tool):
             self._mask_gradient(l, a, b, c0, c1)
             return
         if l is None or not l.has_pixels:
-            self.win.status_msg("选中一个像素图层（或图层蒙版）再画渐变")
+            self.win.status_msg(_t("选中一个像素图层（或图层蒙版）再画渐变"))
             return
         with _Busy(self.win):
             P.apply_gradient(d, l, a, b, c0, c1, self.opt("grad_kind") == "radial",
@@ -1006,7 +1007,7 @@ class GradientTool(Tool):
         sel = d.sel_local(l)
         k = op if sel is None else op * sel
         new = np.clip(l.mask * (1 - k) + gray * k + 0.5, 0, 255).astype(np.uint8)
-        with d.edit("蒙版渐变"):
+        with d.edit(_t("蒙版渐变")):
             l.mask = new
             l.touch_mask()
 
@@ -1024,16 +1025,16 @@ class GradientTool(Tool):
 
 
 class TextTool(Tool):
-    id, name, shortcut, icon = "text", "文字", "T", "text"
-    tip = "文字工具（T）：单击放置文字；点已有的文字可以修改。文字图层随时可以改内容、字体、颜色"
+    id, name, shortcut, icon = "text", _t("文字"), "T", "text"
+    tip = _t("文字工具（T）：单击放置文字；点已有的文字可以修改。文字图层随时可以改内容、字体、颜色")
     cursor = Qt.CursorShape.IBeamCursor
 
     def options(self, bar):
         from ...edit.text import available_fonts
         fonts = available_fonts()
-        bar.combo("字体", "text_font", [(f, f) for f in fonts], fonts[0])
-        bar.spin("字号", "text_size", 4, 2000, max(24, int(self.doc.height / 18) if self.doc else 96), " px")
-        bar.label("颜色用前景色")
+        bar.combo(_t("字体"), "text_font", [(f, _t(f)) for f in fonts], fonts[0])
+        bar.spin(_t("字号"), "text_size", 4, 2000, max(24, int(self.doc.height / 18) if self.doc else 96), " px")
+        bar.label(_t("颜色用前景色"))
 
     def press(self, x, y, e):
         d = self.doc
@@ -1050,8 +1051,8 @@ class TextTool(Tool):
 # ---------------------------------------------------------------------------
 
 class TransformTool(Tool):
-    id, name, shortcut, icon = "transform", "自由变换", "", "transform"
-    tip = "自由变换（Ctrl+T）：拖角缩放（等比，按住 Shift 不等比），拖边单向缩放，框内拖动移动，框外拖动旋转（Shift 每 15°）。回车应用，Esc 取消"
+    id, name, shortcut, icon = "transform", _t("自由变换"), "", "transform"
+    tip = _t("自由变换（Ctrl+T）：拖角缩放（等比，按住 Shift 不等比），拖边单向缩放，框内拖动移动，框外拖动旋转（Shift 每 15°）。回车应用，Esc 取消")
     cursor = Qt.CursorShape.ArrowCursor
 
     def __init__(self, win):
@@ -1061,8 +1062,8 @@ class TransformTool(Tool):
 
     def options(self, bar):
         self.info = bar.label("")
-        bar.button("取消", self.cancel)
-        bar.button("应用变换", self.commit, "primary")
+        bar.button(_t("取消"), self.cancel)
+        bar.button(_t("应用变换"), self.commit, "primary")
         self._update_info()
 
     def activate(self):
@@ -1070,7 +1071,7 @@ class TransformTool(Tool):
         l = self.doc.active
         if l is None or not l.has_pixels:
             self.layer = None
-            self.win.status_msg("自由变换需要一个像素 / 文字图层")
+            self.win.status_msg(_t("自由变换需要一个像素 / 文字图层"))
             return
         self.layer = l
         self.w, self.h = l.w, l.h
@@ -1108,7 +1109,7 @@ class TransformTool(Tool):
 
     def _update_info(self):
         if getattr(self, "info", None) is not None and self.layer is not None:
-            self.info.setText(f"宽 {self.sx * 100:.1f}%   高 {self.sy * 100:.1f}%   角度 {self.angle:+.1f}°")
+            self.info.setText(_t('宽 {0:.1f}%   高 {1:.1f}%   角度 {2:+.1f}°', self.sx * 100, self.sy * 100, self.angle))
 
     def _handles(self):
         w, h = self.w, self.h
@@ -1186,7 +1187,7 @@ class TransformTool(Tool):
         l.version += 1
         ident = np.allclose(M, [[1, 0, l.x], [0, 1, l.y]], atol=1e-3)
         if not ident:
-            with _Busy(self.win, "正在变换…"):
+            with _Busy(self.win, _t("正在变换…")):
                 self.doc.transform_layer(l.id, M)
         else:
             self.doc.version += 1

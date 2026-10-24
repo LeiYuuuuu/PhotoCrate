@@ -12,6 +12,7 @@ from typing import Any
 
 from ..analyzers.base import Analyzer, PixelInput
 from . import models
+from ..i18n import t as _t
 
 log = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ def engine() -> FaceEngine | None:
 
 class FaceAnalyzer(Analyzer):
     id = "faces"
-    label = "人脸"
+    label = _t("人脸")
     stage = "pixel"
     version = 1
     order = 60

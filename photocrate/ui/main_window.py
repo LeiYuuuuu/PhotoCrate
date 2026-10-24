@@ -29,6 +29,7 @@ from .pages.timeplace_page import TimePlacePage
 from .pages.travel_page import TravelPage
 from .theme import font
 from .widgets.deco import Barcode, LogoMark
+from ..i18n import is_en, t as _t
 
 
 class TopBar(QWidget):
@@ -106,7 +107,7 @@ class NavRail(QWidget):
         self.marker = motion.Motion(self, 0, 220)
         self._hover = -1
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setAccessibleName("页面导航")
+        self.setAccessibleName(_t("页面导航"))
         self.row_h = 58
         self.top = 18
         self.setMouseTracking(True)
@@ -242,7 +243,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.ctx = ctx
         motion.set_enabled(bool(ctx.settings.get("ui_motion")))
-        self.setWindowTitle(f"{APP_NAME} {APP_NAME_EN.title()}")
+        self.setWindowTitle("PhotoCrate" if is_en() else f"{APP_NAME} {APP_NAME_EN.title()}")
         icon = find_resource("assets", "app.png")
         if icon:
             self.setWindowIcon(QIcon(str(icon)))
@@ -279,7 +280,7 @@ class MainWindow(QMainWindow):
                 w = spec.factory(ctx)
                 self._add_page(w, f"plugin_{i}", f"{12 + i:02d}", spec.title, spec.en)
             except Exception as e:
-                ctx.status.emit(f"插件页面加载失败：{spec.title}：{e}")
+                ctx.status.emit(_t('插件页面加载失败：{0}：{1}', spec.title, e))
         self.nav.changed.connect(self.go)
         # 缩略图上打分 / 双击看大图（所有页面的缩略图网格共用）
         from .widgets.thumbgrid import HOOKS
@@ -376,9 +377,9 @@ class MainWindow(QMainWindow):
         if pm is None or pm.isNull():
             pm = self.grab()
         if not pm.save(path, "PNG"):
-            self.ctx.status.emit("截图保存失败")
+            self.ctx.status.emit(_t("截图保存失败"))
             return None
-        self.ctx.status.emit(f"截图已保存：{path}")
+        self.ctx.status.emit(_t('截图已保存：{0}', path))
         return path
 
     def _add_page(self, w, pid, idx, title, en):
@@ -425,22 +426,18 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self):
         from .dialogs import ask
-        if ask(self, "切换主题", "主题已保存，重启软件后生效。现在重启吗？<br>（扫描结果有缓存，重启后再次扫描很快）",
-               ok="立即重启", cancel="稍后", en="THEME"):
+        if ask(self, _t("切换主题"), _t("主题已保存，重启软件后生效。现在重启吗？<br>（扫描结果有缓存，重启后再次扫描很快）"),
+               ok=_t("立即重启"), cancel=_t("稍后"), en="THEME"):
             self.restart_requested = True
             self.close()
 
     def _check_recovery(self):
         inc = self.ctx.journal.incomplete()
         for b in inc:
-            choice = choose(self, "发现未完成的操作",
-                            f"批次 #{b['id']}（{(b['created'] or '').replace('T', ' ')}，{b['total']} 个文件）上次没有正常结束，"
-                            "可能是程序意外关闭。<br><br>"
-                            "· <b>继续完成</b>：把剩下的文件按原计划处理完<br>"
-                            "· <b>全部回滚</b>：把这一批已处理的文件移回原处<br>"
-                            "· <b>稍后</b>：暂不处理（可在「记录」页查看）",
-                            [("later", "稍后", "secondary"), ("rollback", "全部回滚", "danger"),
-                             ("resume", "继续完成", "primary")], en="RECOVERY")
+            choice = choose(self, _t("发现未完成的操作"),
+                            _t('批次 #{0}（{1}，{2} 个文件）上次没有正常结束，可能是程序意外关闭。<br><br>· <b>继续完成</b>：把剩下的文件按原计划处理完<br>· <b>全部回滚</b>：把这一批已处理的文件移回原处<br>· <b>稍后</b>：暂不处理（可在「记录」页查看）', b['id'], (b['created'] or '').replace('T', ' '), b['total']),
+                            [("later", _t("稍后"), "secondary"), ("rollback", _t("全部回滚"), "danger"),
+                             ("resume", _t("继续完成"), "primary")], en="RECOVERY")
             if choice in ("resume", "rollback"):
                 mover = self.ctx.mover
                 bid = b["id"]
@@ -449,19 +446,19 @@ class MainWindow(QMainWindow):
                 def job(prog, cancel, fn=fn, bid=bid):
                     return fn(bid, lambda d, t, c: prog((d, t, c)), cancel)
 
-                res, tb = run_with_progress(self.ctx, self, "正在恢复", "RECOVERY", job)
+                res, tb = run_with_progress(self.ctx, self, _t("正在恢复"), "RECOVERY", job)
                 self.ctx.files_changed.emit()
                 if tb or res is None:
-                    info(self, "恢复出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
+                    info(self, _t("恢复出错"), f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
                 else:
-                    info(self, "恢复完成", f"已处理 {res.done_files} 个文件。"
+                    info(self, _t("恢复完成"), _t('已处理 {0} 个文件。', res.done_files)
                          + ("<br>" + "<br>".join(res.errors[:8]) if res.errors else ""))
 
     def closeEvent(self, e):
         if self.ctx.busy:
             from .dialogs import ask
-            if not ask(self, "任务进行中", "还有任务在运行，确定要退出吗？移动操作会在当前一组完成后停止，下次启动可继续或回滚。",
-                       ok="退出", danger=True):
+            if not ask(self, _t("任务进行中"), _t("还有任务在运行，确定要退出吗？移动操作会在当前一组完成后停止，下次启动可继续或回滚。"),
+                       ok=_t("退出"), danger=True):
                 e.ignore()
                 return
         QApplication.instance().removeEventFilter(self)

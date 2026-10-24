@@ -6,6 +6,7 @@ from typing import Any
 
 from ..analyzers.builtin import (BLUR_LABELS, ORIENTATION_LABELS, SOURCE_LABELS, blur_state,
                                  classify_color)
+from ..i18n import t as _t
 
 MAIN_COLOR_SWATCH = {
     "红": "#D9443B", "橙": "#EE8A2E", "黄": "#E9C83A", "黄绿": "#A5C23A", "绿": "#4BA35A", "青": "#2FB3B0",
@@ -58,11 +59,11 @@ def compute_stats(groups, settings: dict[str, Any]) -> dict[str, Any]:
     s["main_color"] = main.most_common()
     s["tone"] = [(k, tone[k]) for k in ("暗调", "中间调", "亮调") if tone[k]]
 
-    s["camera"] = Counter(g.feat("camera", "model") or "未知相机" for g in groups).most_common()
-    s["lens"] = Counter(g.feat("camera", "lens") or "未知镜头" for g in groups).most_common()
+    s["camera"] = Counter(g.feat("camera", "model") or _t("未知相机") for g in groups).most_common()
+    s["lens"] = Counter(g.feat("camera", "lens") or _t("未知镜头") for g in groups).most_common()
     s["kind"] = Counter(g.kind_label for g in groups).most_common()
-    s["source"] = Counter(SOURCE_LABELS.get(g.feat("camera", "source"), "其他") for g in groups).most_common()
-    s["orientation"] = Counter(ORIENTATION_LABELS.get(g.feat("shape", "orientation"), "未知") for g in groups).most_common()
+    s["source"] = Counter(SOURCE_LABELS.get(g.feat("camera", "source"), _t("其他")) for g in groups).most_common()
+    s["orientation"] = Counter(ORIENTATION_LABELS.get(g.feat("shape", "orientation"), _t("未知")) for g in groups).most_common()
     thr = float(settings.get("blur_threshold", 60))
     s["blur"] = Counter(BLUR_LABELS[blur_state(g, thr)] for g in groups).most_common()
     return s

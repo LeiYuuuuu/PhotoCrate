@@ -21,8 +21,9 @@ from ..partition.base import PartitionContext, all_tokens
 from ..partition.engine import render_template
 from .pathsafe import sanitize_component
 from .planner import Plan, PlanItem, PlanOp, _NameBook
+from ..i18n import t as _t
 
-_SEQ_RE = re.compile(r"\{序号(?::(\d))?\}")
+_SEQ_RE = re.compile(r"\{(?:序号|seq)(?::(\d))?\}")
 
 
 def _suffix(member_name: str, old_stem: str) -> str:
@@ -33,13 +34,16 @@ def _suffix(member_name: str, old_stem: str) -> str:
 
 def render_name(template: str, g, ctx: PartitionContext, seq: int, day_seq: int, tokens=None) -> str:
     t = _SEQ_RE.sub(lambda m: str(seq).zfill(int(m.group(1) or 3)), template)
-    t = t.replace("{当日序号}", str(day_seq).zfill(2)).replace("{原名}", g.stem)
+    for k in ("{当日序号}", "{dayseq}"):
+        t = t.replace(k, str(day_seq).zfill(2))
+    for k in ("{原名}", "{orig}"):
+        t = t.replace(k, g.stem)
     segs = render_template(t.replace("/", "_").replace("\\", "_"), g, ctx, tokens)
     return sanitize_component("_".join(segs)).strip(" .")
 
 
 def build_rename_plan(groups, template: str, ctx: PartitionContext, start: int = 1) -> Plan:
-    plan = Plan(spec_text=f"批量重命名：{template}", target_root="", operation="rename")
+    plan = Plan(spec_text=_t('批量重命名：{0}', template), target_root="", operation="rename")
     tokens = all_tokens()
     book = _NameBook()
     ordered = sorted((g for g in groups if g.files), key=lambda g: (g.date is None, g.date or 0, g.name.lower()))
@@ -51,7 +55,7 @@ def build_rename_plan(groups, template: str, ctx: PartitionContext, start: int =
         day_counter[day] = day_counter.get(day, 0) + 1
         stem = render_name(template, g, ctx, start + i, day_counter[day], tokens)
         if not stem:
-            plan.warnings.append(f"{g.name}：模板生成的名字为空，已跳过")
+            plan.warnings.append(_t('{0}：模板生成的名字为空，已跳过', g.name))
             continue
         if stem.lower() == g.stem.lower():
             unchanged += 1
@@ -85,9 +89,9 @@ def build_rename_plan(groups, template: str, ctx: PartitionContext, start: int =
         except ValueError:
             plan.target_root = sorted(dirs)[0]
     if unchanged:
-        plan.warnings.append(f"{unchanged} 张照片的新名字与原名相同，跳过。")
+        plan.warnings.append(_t('{0} 张照片的新名字与原名相同，跳过。', unchanged))
     if plan.renamed:
-        plan.warnings.append(f"{plan.renamed} 张照片的新名字与已有文件重名，已自动加编号（不会覆盖）。")
+        plan.warnings.append(_t('{0} 张照片的新名字与已有文件重名，已自动加编号（不会覆盖）。', plan.renamed))
     if not plan.items:
-        plan.warnings.append("没有需要改名的照片。")
+        plan.warnings.append(_t("没有需要改名的照片。"))
     return plan

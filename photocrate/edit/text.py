@@ -8,6 +8,7 @@ import os
 import sys
 
 import numpy as np
+from ..i18n import t as _t
 
 # (显示名, 候选文件名)
 FONT_FILES: list[tuple[str, list[str]]] = [
@@ -67,12 +68,12 @@ def font_path(name: str) -> str | None:
 
 def available_fonts() -> list[str]:
     names = [n for n, _ in FONT_FILES if font_path(n)]
-    return names or ["默认"]
+    return names or [_t("默认")]
 
 
 def default_params() -> dict:
     fonts = available_fonts()
-    return {"text": "输入文字", "font": fonts[0], "size": 96, "color": "#FFFFFF", "align": "left",
+    return {"text": _t("输入文字"), "font": fonts[0], "size": 96, "color": "#FFFFFF", "align": "left",
             "spacing": 1.2, "stroke": 0, "stroke_color": "#000000", "shadow": False}
 
 

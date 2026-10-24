@@ -28,6 +28,7 @@ from datetime import datetime
 from typing import Callable
 
 from .planner import PlanItem, PlanOp
+from ..i18n import t as _t
 
 log = logging.getLogger(__name__)
 
@@ -92,15 +93,15 @@ def ai_keywords(g, min_prob: float = 0.3) -> tuple[list[str], list[str]]:
     hier: list[str] = []
     sc = g.feats.get("scene") or {}
     if sc.get("scene") and float(sc.get("prob") or 0) >= min_prob:
-        flat.append(sc["scene"])
-        hier.append(f"场景|{sc['group']}|{sc['scene']}" if sc.get("group") else f"场景|{sc['scene']}")
+        flat.append(_t(sc["scene"]))
+        hier.append(_t('场景|{0}|{1}', _t(sc['group']), _t(sc['scene'])) if sc.get("group") else _t('场景|{0}', _t(sc['scene'])))
     for name in (g.feats.get("people") or {}).get("names") or []:
         flat.append(name)
-        hier.append(f"人物|{name}")
+        hier.append(_t('人物|{0}', name))
     tr = g.feats.get("trip") or {}
     if tr.get("name"):
         flat.append(tr["name"])
-        hier.append(f"旅行|{tr['name']}")
+        hier.append(_t('旅行|{0}', tr['name']))
     return flat, hier
 
 
@@ -116,33 +117,33 @@ def tags_for(g, write_gps: bool, write_place: bool, write_time: bool,
             tags["XMP-exif:GPSMapDatum"] = "WGS-84"
             what.append("GPS")
         if write_place and geo.get("source") in ("track", "manual") and geo.get("country"):
-            tags["XMP-photoshop:Country"] = geo["country"]
+            tags["XMP-photoshop:Country"] = _t(geo["country"])
             if geo.get("cc"):
                 tags["XMP-iptcCore:CountryCode"] = geo["cc"]
             if geo.get("province"):
-                tags["XMP-photoshop:State"] = geo["province"]
+                tags["XMP-photoshop:State"] = _t(geo["province"])
             city = geo.get("city") or geo.get("district")
             if city:
-                tags["XMP-photoshop:City"] = city
-            what.append("地点")
+                tags["XMP-photoshop:City"] = _t(city)
+            what.append(_t("地点"))
     d = g.feats.get("date") or {}
     if write_time and d.get("corrected") and d.get("dt"):
         v = _fmt_dt(datetime.fromisoformat(d["dt"]), d.get("tz"))
         tags["XMP-exif:DateTimeOriginal"] = v
         tags["XMP-photoshop:DateCreated"] = v
-        what.append("时间")
+        what.append(_t("时间"))
     r = g.feats.get("rating") or {}
     if write_rating and r.get("manual"):
         # 只写在本软件里改过的评级；照片原本就有的评级不重复写
         tags["XMP-xmp:Rating"] = "-1" if r.get("flag") == "reject" else str(int(r.get("rating") or 0))
         tags["XMP-xmp:Label"] = r.get("label") or ""
-        what.append("星级/色标")
+        what.append(_t("星级/色标"))
     if write_keywords:
         flat, hier = ai_keywords(g)
         if flat:
             tags["XMP-dc:Subject"] = flat
             tags["XMP-lr:HierarchicalSubject"] = hier
-            what.append("关键词")
+            what.append(_t("关键词"))
     return tags, what
 
 
@@ -178,9 +179,9 @@ def build_xmp_plan(groups, write_gps: bool = True, write_place: bool = True, wri
                    write_rating: bool = False, update_existing: bool = False,
                    write_keywords: bool = False) -> XmpPlan:
     plan = XmpPlan()
-    parts = [n for n, on in (("GPS", write_gps), ("地点", write_place), ("校正时间", write_time),
-                             ("星级/色标", write_rating), ("AI 关键词", write_keywords)) if on]
-    plan.spec_text = "写入 XMP：" + "、".join(parts)
+    parts = [n for n, on in (("GPS", write_gps), (_t("地点"), write_place), (_t("校正时间"), write_time),
+                             (_t("星级/色标"), write_rating), (_t("AI 关键词"), write_keywords)) if on]
+    plan.spec_text = _t("写入 XMP：") + _t("、").join(parts)
     dirs = set()
     for g in groups:
         if not g.files:
@@ -231,7 +232,7 @@ def backup_dir() -> str:
 def write_xmp(plan: XmpPlan, exiftool_path: str, journal, progress: Callable[[int, int, str], None] | None = None,
               cancel: threading.Event | None = None) -> XmpResult:
     if not exiftool_path:
-        raise RuntimeError("写入 XMP 需要 ExifTool")
+        raise RuntimeError(_t("写入 XMP 需要 ExifTool"))
     import exiftool
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -256,31 +257,31 @@ def write_xmp(plan: XmpPlan, exiftool_path: str, journal, progress: Callable[[in
             op = ops.get(t.gid)
             try:
                 if not os.path.exists(t.raw):
-                    raise FileNotFoundError("照片已不在原位置，请重新扫描")
+                    raise FileNotFoundError(_t("照片已不在原位置，请重新扫描"))
                 args = exiftool_args(t.tags)
                 if t.mode == "edit":
                     if not os.path.exists(t.xmp):
-                        raise FileNotFoundError("原有的 .xmp 已不存在，请重新扫描")
+                        raise FileNotFoundError(_t("原有的 .xmp 已不存在，请重新扫描"))
                     shutil.copy2(t.xmp, t.backup)                     # 先完整备份
                     if os.path.getsize(t.backup) != os.path.getsize(t.xmp):
-                        raise IOError("备份 .xmp 失败")
+                        raise IOError(_t("备份 .xmp 失败"))
                     out = et.execute(*args, "-overwrite_original", t.xmp) or ""
                     if "1 image files updated" not in out and "1 image files unchanged" not in out:
                         if os.path.exists(t.backup):
                             shutil.copy2(t.backup, t.xmp)                # 失败时换回原样
-                        raise IOError((et.last_stderr or out or "ExifTool 没有更新文件").strip()[:200])
+                        raise IOError((et.last_stderr or out or _t("ExifTool 没有更新文件")).strip()[:200])
                     res.edited += 1
                 else:
                     if os.path.lexists(t.xmp):
-                        raise FileExistsError("已存在同名 .xmp，未改动")
+                        raise FileExistsError(_t("已存在同名 .xmp，未改动"))
                     et.execute(*args, t.xmp)
                     if not os.path.exists(t.xmp):
-                        raise IOError((et.last_stderr or "ExifTool 没有生成文件").strip()[:200])
+                        raise IOError((et.last_stderr or _t("ExifTool 没有生成文件")).strip()[:200])
                     res.written.setdefault(t.gid, []).append(t.xmp)
                 journal.set_op(op["id"], "done")
             except Exception as e:
                 res.failed += 1
-                res.errors.append(f"{os.path.basename(t.raw)}：{e}")
+                res.errors.append(_t('{0}：{1}', os.path.basename(t.raw), e))
                 if op:
                     journal.set_op(op["id"], "failed", str(e))
             if i % 20 == 0:

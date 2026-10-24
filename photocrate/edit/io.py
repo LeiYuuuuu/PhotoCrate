@@ -15,10 +15,11 @@ import zipfile
 import numpy as np
 
 from .document import Document, Layer, SourceInfo
+from ..i18n import t as _t
 
 PROJECT_EXT = ".pcedit"
 EXPORT_FORMATS = {"jpg": "JPEG", "jpeg": "JPEG", "png": "PNG", "tif": "TIFF", "tiff": "TIFF", "webp": "WEBP"}
-OPEN_FILTER = "图片 (*.jpg *.jpeg *.png *.tif *.tiff *.webp *.bmp *.heic *.heif *.gif);;修图工程 (*.pcedit);;所有文件 (*.*)"
+OPEN_FILTER = _t("图片 (*.jpg *.jpeg *.png *.tif *.tiff *.webp *.bmp *.heic *.heif *.gif);;修图工程 (*.pcedit);;所有文件 (*.*)")
 
 
 def _rgba(im) -> np.ndarray:
@@ -27,7 +28,7 @@ def _rgba(im) -> np.ndarray:
     return np.array(im, dtype=np.uint8)          # 可写的副本（asarray 得到的是只读视图）
 
 
-def _new_doc(rgba: np.ndarray, name: str = "背景") -> Document:
+def _new_doc(rgba: np.ndarray, name: str = _t("背景")) -> Document:
     h, w = rgba.shape[:2]
     doc = Document(w, h)
     bg = doc._register(Layer("pixel", name, rgba))
@@ -91,10 +92,10 @@ def suggest_export_path(doc: Document, ext: str = ".jpg") -> str:
     """原片旁边的「原名_修图.jpg」，重名加编号。"""
     src = doc.source.path or doc.source.project
     folder = os.path.dirname(src) if src else os.path.expanduser("~")
-    stem = os.path.splitext(os.path.basename(src))[0] if src else "未命名"
+    stem = os.path.splitext(os.path.basename(src))[0] if src else _t("未命名")
     n = 0
     while True:
-        p = os.path.join(folder, f"{stem}_修图{'' if n == 0 else f' ({n})'}{ext}")
+        p = os.path.join(folder, f"{stem}{_t('_修图')}{'' if n == 0 else f' ({n})'}{ext}")
         if not os.path.exists(p):
             return p
         n += 1
@@ -110,11 +111,11 @@ def export_image(doc: Document, path: str, quality: int = 92, keep_exif: bool = 
     from PIL import Image
 
     if _same(path, doc.source.path):
-        raise ValueError("不能覆盖原片：请另存为一个新文件。")
+        raise ValueError(_t("不能覆盖原片：请另存为一个新文件。"))
     ext = os.path.splitext(path)[1].lower().lstrip(".")
     fmt = EXPORT_FORMATS.get(ext)
     if fmt is None:
-        raise ValueError(f"不支持的格式：.{ext}（可以用 .jpg / .png / .tif / .webp）")
+        raise ValueError(_t('不支持的格式：.{0}（可以用 .jpg / .png / .tif / .webp）', ext))
     rgba = doc.render_full() if rgba is None else rgba
     transparent = int(rgba[..., 3].min()) < 255
     if fmt == "JPEG" or not transparent:
@@ -181,7 +182,7 @@ def _unpng(data: bytes, mode: str) -> np.ndarray:
 
 def save_project(doc: Document, path: str) -> int:
     if _same(path, doc.source.path):
-        raise ValueError("不能覆盖原片。")
+        raise ValueError(_t("不能覆盖原片。"))
     layers = []
     files: dict[str, bytes] = {}
     for i, l in enumerate(doc.layers):
@@ -217,11 +218,11 @@ def load_project(path: str) -> Document:
     with zipfile.ZipFile(path) as z:
         meta = json.loads(z.read("document.json").decode("utf-8"))
         if meta.get("format") != "photocrate-edit":
-            raise ValueError("不是影匣的修图工程文件")
+            raise ValueError(_t("不是影匣的修图工程文件"))
         names = set(z.namelist())
         doc = Document(int(meta["width"]), int(meta["height"]))
         for d in meta["layers"]:
-            l = Layer(d["kind"], d.get("name") or "图层", x=int(d.get("x", 0)), y=int(d.get("y", 0)),
+            l = Layer(d["kind"], d.get("name") or _t("图层"), x=int(d.get("x", 0)), y=int(d.get("y", 0)),
                       params=d.get("params") or {})
             if d.get("pixels") in names:
                 l.pixels = _unpng(z.read(d["pixels"]), "RGBA")
@@ -240,7 +241,7 @@ def load_project(path: str) -> Document:
                 continue
             doc.layers.append(doc._register(l))
         if not doc.layers:
-            raise ValueError("工程文件里没有图层")
+            raise ValueError(_t("工程文件里没有图层"))
         a = int(meta.get("active", -1))
         doc.active_id = doc.layers[a if 0 <= a < len(doc.layers) else -1].id
         src = meta.get("source") or {}

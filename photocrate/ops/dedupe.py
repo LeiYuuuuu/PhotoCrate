@@ -19,11 +19,12 @@ from typing import Callable
 from ..core.formats import MEDIA_ROLES
 from .cleanup import TRASH_DST
 from .planner import Plan, PlanItem, PlanOp
+from ..i18n import t as _t
 
 KEEP_RULES = {
-    "shortest": "保留排在前面的文件夹里的（按「资源接入」的文件夹顺序，主照片库优先）",
-    "oldest": "保留最早的文件（修改时间最早）",
-    "in_target": "优先保留“目标文件夹”里的",
+    "shortest": _t("保留排在前面的文件夹里的（按「资源接入」的文件夹顺序，主照片库优先）"),
+    "oldest": _t("保留最早的文件（修改时间最早）"),
+    "in_target": _t("优先保留“目标文件夹”里的"),
 }
 
 CHUNK = 1 << 20
@@ -111,7 +112,7 @@ def find_duplicates(groups, keep_rule: str = "shortest", target_dir: str = "",
                 except OSError:
                     pass
     if progress:
-        progress(todo, todo, "比较完成")
+        progress(todo, todo, _t("比较完成"))
     # 每组的“内容集合”
     content: dict[int, set[str]] = {}
     for gid, g in gs.items():
@@ -183,7 +184,7 @@ def find_duplicates(groups, keep_rule: str = "shortest", target_dir: str = "",
 
 def build_dedupe_plan(groups, result: DupResult) -> Plan:
     gs = {g.gid: g for g in groups}
-    plan = Plan(spec_text="删除重复照片（每组保留一份）", target_root="", operation="delete")
+    plan = Plan(spec_text=_t("删除重复照片（每组保留一份）"), target_root="", operation="delete")
     dirs = set()
     for s in result.sets:
         for gid in s.remove:
@@ -198,7 +199,7 @@ def build_dedupe_plan(groups, result: DupResult) -> Plan:
         except ValueError:
             plan.target_root = sorted(dirs)[0]
     if result.skipped_sidecar:
-        plan.warnings.append(f"{len(result.skipped_sidecar)} 组副本带有原件没有的修图记录（.xmp 等），没有删除。")
+        plan.warnings.append(_t('{0} 组副本带有原件没有的修图记录（.xmp 等），没有删除。', len(result.skipped_sidecar)))
     if not plan.items:
-        plan.warnings.append("没有找到重复的照片。")
+        plan.warnings.append(_t("没有找到重复的照片。"))
     return plan

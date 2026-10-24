@@ -18,13 +18,14 @@ from dataclasses import dataclass, field
 from ..partition.base import PartitionContext
 from ..partition.engine import PartitionSpec, Rule
 from .planner import Plan, PlanOp, _NameBook, build_plan
+from ..i18n import t as _t
 
 TEMPLATES = [
-    ("{年}/{年月日}", "年 / 年-月-日（2026/2026-01-05）"),
-    ("{年}/{年月}", "年 / 年-月（2026/2026-01）"),
-    ("{年月日}", "年-月-日（2026-01-05）"),
-    ("{年}/{年月日} {市|省|国家}", "年 / 日期 + 地点（有 GPS 时）"),
-    ("{相机}/{年}/{年月日}", "相机 / 年 / 日期"),
+    (_t("{年}/{年月日}"), _t("年 / 年-月-日（2026/2026-01-05）")),
+    (_t("{年}/{年月}"), _t("年 / 年-月（2026/2026-01）")),
+    (_t("{年月日}"), _t("年-月-日（2026-01-05）")),
+    (_t("{年}/{年月日} {市|省|国家}"), _t("年 / 日期 + 地点（有 GPS 时）")),
+    (_t("{相机}/{年}/{年月日}"), _t("相机 / 年 / 日期")),
 ]
 
 
@@ -63,7 +64,7 @@ def detect_sources() -> list[Source]:
                         name = buf.value
                 except Exception:
                     pass
-                label = f"{letter}:  {name or ('可移动磁盘' if dtype == 2 else '本地磁盘')}" + ("（相机存储卡）" if has_dcim else "")
+                label = f"{letter}:  {name or (_t('可移动磁盘') if dtype == 2 else _t('本地磁盘'))}" + (_t("（相机存储卡）") if has_dcim else "")
                 out.append(Source(root, label, dtype == 2))
     else:
         for base in ("/media", "/run/media", "/Volumes"):
@@ -71,7 +72,7 @@ def detect_sources() -> list[Source]:
                 continue
             for dirpath, dirs, _ in os.walk(base):
                 if "DCIM" in dirs:
-                    out.append(Source(dirpath, f"{os.path.basename(dirpath)}（相机存储卡）", True))
+                    out.append(Source(dirpath, _t('{0}（相机存储卡）', os.path.basename(dirpath)), True))
                 if dirpath.count(os.sep) - base.count(os.sep) >= 2:
                     dirs[:] = []
     return out
@@ -183,7 +184,7 @@ def build_import_plan(groups, target_root: str, template: str, ctx: PartitionCon
     spec = PartitionSpec("template", template=template) if template.strip() else PartitionSpec("rules", [])
     # 先剔除目标位置已有同名同大小文件的组
     pre = build_plan(groups, spec, ctx, target_root, "copy", "rename", "none")
-    plan = Plan(spec_text=f"导入：{template or '（不建子文件夹）'}" + (f"；改名 {rename_template}" if rename_template else ""),
+    plan = Plan(spec_text=_t('导入：{0}', template or _t('（不建子文件夹）')) + (_t('；改名 {0}', rename_template) if rename_template else ""),
                 target_root=pre.target_root, operation="copy", errors=list(pre.errors))
     by_gid = {g.gid: g for g in groups}
     same_existing = 0
@@ -237,10 +238,10 @@ def build_import_plan(groups, target_root: str, template: str, ctx: PartitionCon
     plan.new_dirs = pre.new_dirs
     plan.free_bytes = pre.free_bytes
     if same_existing:
-        plan.warnings.append(f"{same_existing} 张照片在目标文件夹里已有同名、同大小的文件，视为已导入，跳过。")
-    plan.warnings += [w for w in pre.warnings if "移动" not in w and "已在目标位置" not in w]
+        plan.warnings.append(_t('{0} 张照片在目标文件夹里已有同名、同大小的文件，视为已导入，跳过。', same_existing))
+    plan.warnings += [w for w in pre.warnings if w != _t("没有需要移动的照片（可能都已经在目标位置）。")]
     if not plan.items and not plan.errors:
-        plan.warnings.append("没有需要导入的照片。")
+        plan.warnings.append(_t("没有需要导入的照片。"))
     return plan
 
 

@@ -13,6 +13,7 @@ from ..partition.base import (FORMAT_TOKEN, PartitionContext, all_tokens, expand
                               is_unknown_label, member_format)
 from ..partition.engine import PartitionSpec, group_segments
 from .pathsafe import device_of, existing_ancestor, same_path
+from ..i18n import t as _t
 
 
 @dataclass
@@ -142,7 +143,7 @@ def build_plan(groups, spec: PartitionSpec, ctx: PartitionContext, target_root: 
                verify_free_space: bool = True) -> Plan:
     plan = Plan(spec_text=spec.describe(), target_root=target_root, operation=operation)
     if not target_root:
-        plan.errors.append("请先选择目标文件夹。")
+        plan.errors.append(_t("请先选择目标文件夹。"))
         return plan
     target_root = os.path.abspath(target_root)
     book = _NameBook()
@@ -233,25 +234,25 @@ def build_plan(groups, spec: PartitionSpec, ctx: PartitionContext, target_root: 
         try:
             plan.free_bytes = shutil.disk_usage(existing_ancestor(target_root)).free
             if plan.free_bytes < plan.cross_bytes * 1.02 + 50 * 1024 * 1024:
-                plan.errors.append("目标磁盘剩余空间不足。")
+                plan.errors.append(_t("目标磁盘剩余空间不足。"))
         except OSError:
             pass
     for label, n in unknown.items():
-        plan.warnings.append(f"{n} 组照片无法判断，将放入「{label}」文件夹。")
+        plan.warnings.append(_t('{0} 组照片无法判断，将放入「{1}」文件夹。', n, label))
     if plan.guess_dates:
-        plan.warnings.append(f"{plan.guess_dates} 张照片的日期来自文件名或修改时间推测，请在预览中确认。")
+        plan.warnings.append(_t('{0} 张照片的日期来自文件名或修改时间推测，请在预览中确认。', plan.guess_dates))
     if plan.inferred_places:
-        plan.warnings.append(f"{plan.inferred_places} 张照片的地点由相邻时间的照片推测。")
+        plan.warnings.append(_t('{0} 张照片的地点由相邻时间的照片推测。', plan.inferred_places))
     if plan.matched_places:
-        plan.warnings.append(f"{plan.matched_places} 张照片的地点来自 GPS 轨迹 / 参考照片的时间匹配。")
+        plan.warnings.append(_t('{0} 张照片的地点来自 GPS 轨迹 / 参考照片的时间匹配。', plan.matched_places))
     if plan.manual_places:
-        plan.warnings.append(f"{plan.manual_places} 张照片使用手动指定的地点。")
+        plan.warnings.append(_t('{0} 张照片使用手动指定的地点。', plan.manual_places))
     if plan.corrected_times:
-        plan.warnings.append(f"{plan.corrected_times} 张照片使用校正后的拍摄时间（照片文件本身未修改）。")
+        plan.warnings.append(_t('{0} 张照片使用校正后的拍摄时间（照片文件本身未修改）。', plan.corrected_times))
     if plan.skipped_conflict:
-        plan.warnings.append(f"{len(plan.skipped_conflict)} 组因目标位置已有同名文件而跳过。")
+        plan.warnings.append(_t('{0} 组因目标位置已有同名文件而跳过。', len(plan.skipped_conflict)))
     if plan.renamed:
-        plan.warnings.append(f"{plan.renamed} 组与已有文件重名，将自动加编号（不会覆盖）。")
+        plan.warnings.append(_t('{0} 组与已有文件重名，将自动加编号（不会覆盖）。', plan.renamed))
     if not plan.items and not plan.errors:
-        plan.warnings.append("没有需要移动的照片（可能都已经在目标位置）。")
+        plan.warnings.append(_t("没有需要移动的照片（可能都已经在目标位置）。"))
     return plan

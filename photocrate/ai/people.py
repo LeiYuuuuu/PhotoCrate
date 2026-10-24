@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .faces import decode_emb, encode_emb
+from ..i18n import t as _t
 
 
 @dataclass
@@ -73,7 +74,7 @@ def _norm(v):
 
 
 def cluster_people(groups, persons: dict[str, dict], fixes: dict[str, dict], threshold: float = 0.42,
-                   other_name: str = "其他人", excluded: set[str] | None = None) -> tuple[list[Cluster], list[FaceRef]]:
+                   other_name: str = _t("其他人"), excluded: set[str] | None = None) -> tuple[list[Cluster], list[FaceRef]]:
     """返回 (人物列表（已命名在前，其余按人数排序）, 落单的人脸)。同时写入 g.feats["people"]。
 
     excluded：不是真人的脸（键 = 主图指纹#序号），整个跳过。
@@ -91,7 +92,7 @@ def cluster_people(groups, persons: dict[str, dict], fixes: dict[str, dict], thr
             c = _norm(decode_emb(p["centroid"]))
         except Exception:
             continue
-        clusters[pid] = Cluster(pid, p.get("name") or "未命名", True, [], c)
+        clusters[pid] = Cluster(pid, p.get("name") or _t("未命名"), True, [], c)
         named.append(pid)
     rest: list[FaceRef] = []
     if named:
@@ -153,7 +154,7 @@ def cluster_people(groups, persons: dict[str, dict], fixes: dict[str, dict], thr
     unnamed.sort(key=lambda t: -len(t[1]))
     for k, (sv, mem) in enumerate(unnamed, 1):
         cid = f"c{k}"
-        clusters[cid] = Cluster(cid, f"人物 {k}", False, mem, _norm(sv))
+        clusters[cid] = Cluster(cid, _t('人物 {0}', k), False, mem, _norm(sv))
     for cl in clusters.values():
         if cl.named and cl.faces:
             cl.faces.sort(key=lambda f: -f.size)

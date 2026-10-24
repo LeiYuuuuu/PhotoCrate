@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
+from ..i18n import t as _t
 
 if TYPE_CHECKING:  # pragma: no cover
     import numpy as np
@@ -93,7 +94,7 @@ ANALYZERS: dict[str, Analyzer] = {}
 
 def register_analyzer(a: Analyzer) -> Analyzer:
     if not a.id:
-        raise ValueError("分析器必须有 id")
+        raise ValueError(_t("分析器必须有 id"))
     ANALYZERS[a.id] = a
     return a
 

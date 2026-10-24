@@ -14,10 +14,11 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from ..analyzers.builtin import place_label
+from ..i18n import is_en, t as _t
 
 WEEKDAYS = "一二三四五六日"
 SOURCE_ORDER = ("gps", "track", "manual", "inferred", "none")
-SOURCE_LABELS = {"gps": "GPS", "track": "轨迹", "manual": "手动", "inferred": "推测", "none": "无"}
+SOURCE_LABELS = {"gps": "GPS", "track": _t("轨迹"), "manual": _t("手动"), "inferred": _t("推测"), "none": _t("无")}
 
 
 @dataclass
@@ -41,7 +42,9 @@ class DayRow:
     @property
     def label(self) -> str:
         if self.day is None:
-            return "无日期"
+            return _t("无日期")
+        if is_en():
+            return f"{self.key}  {self.day:%a}"
         return f"{self.key}  周{WEEKDAYS[self.day.weekday()]}"
 
     @property
@@ -53,8 +56,8 @@ class DayRow:
         if not self.places:
             return ""
         top = self.places.most_common()
-        s = top[0][0]
-        return s + (f"  等 {len(top)} 处" if len(top) > 1 else "")
+        s = _t(top[0][0])
+        return s + (_t("  等 {0} 处", len(top)) if len(top) > 1 else "")
 
     @property
     def source_text(self) -> str:
@@ -143,7 +146,7 @@ def parse_itinerary(text: str, default_year: int | None = None) -> list[Itinerar
         if not m and _DATE_ONLY.match(s):
             continue          # 只有日期、地点留空：跳过
         if not m:
-            it.error = "看不懂这一行：应为“日期 地点”，例如 2026-03-08 东京"
+            it.error = _t("看不懂这一行：应为“日期 地点”，例如 2026-03-08 东京")
             out.append(it)
             continue
         try:
@@ -153,22 +156,22 @@ def parse_itinerary(text: str, default_year: int | None = None) -> list[Itinerar
                 yb = int(m.group("by") or ya)
                 it.end = date(yb, int(m.group("bm")), int(m.group("bd")))
                 if it.end < it.start:
-                    it.error = "结束日期早于开始日期"
+                    it.error = _t("结束日期早于开始日期")
             else:
                 it.end = it.start
         except ValueError:
-            it.error = "日期无效"
+            it.error = _t("日期无效")
         it.place = m.group("place").strip()
         if not it.place:
-            it.error = it.error or "缺少地点"
+            it.error = it.error or _t("缺少地点")
         out.append(it)
     return out
 
 
 def itinerary_template(rows: list[DayRow]) -> str:
     """把当前的天列表变成可编辑的行程文本：已有地点的天填上地点，其余留空待填。"""
-    lines = ["# 每行：日期 地点（如 2026-03-08 日本/东京）。日期可写成范围：2026-03-09 ~ 2026-03-11 京都",
-             "# 以 # 开头的行会被忽略；地点留空的行不会被应用。"]
+    lines = [_t("# 每行：日期 地点（如 2026-03-08 日本/东京）。日期可写成范围：2026-03-09 ~ 2026-03-11 京都"),
+             _t("# 以 # 开头的行会被忽略；地点留空的行不会被应用。")]
     for r in rows:
         if r.day is None:
             continue

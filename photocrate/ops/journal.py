@@ -13,6 +13,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from ..i18n import t as _t
 
 
 class Journal:
@@ -184,7 +185,7 @@ class Journal:
         rows = self.ops(batch_id)
         with open(path, "w", encoding="utf-8-sig", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["序号", "源路径", "目标路径", "大小(字节)", "状态", "错误"])
+            w.writerow([_t("序号"), _t("源路径"), _t("目标路径"), _t("大小(字节)"), _t("状态"), _t("错误")])
             for r in rows:
                 w.writerow([r["seq"] + 1, r["src"], r["dst"], r["size"], r["status"], r["error"] or ""])
 
@@ -197,12 +198,12 @@ class Journal:
                 pass
 
 
-OPERATION_LABELS = {"move": "移动", "copy": "复制", "xmp": "写入 XMP", "delete": "删除到回收站", "rename": "重命名"}
+OPERATION_LABELS = {"move": _t("移动"), "copy": _t("复制"), "xmp": _t("写入 XMP"), "delete": _t("删除到回收站"), "rename": _t("重命名")}
 
 STATUS_LABELS = {
-    "running": "进行中（未完成）", "done": "已完成", "cancelled": "已取消", "failed": "有失败",
-    "undone": "已撤销", "partially_undone": "部分撤销", "undoing": "撤销中（未完成）",
-    "pending": "等待", "skipped": "跳过", "undo_failed": "撤销失败",
+    "running": _t("进行中（未完成）"), "done": _t("已完成"), "cancelled": _t("已取消"), "failed": _t("有失败"),
+    "undone": _t("已撤销"), "partially_undone": _t("部分撤销"), "undoing": _t("撤销中（未完成）"),
+    "pending": _t("等待"), "skipped": _t("跳过"), "undo_failed": _t("撤销失败"),
 }
 
 

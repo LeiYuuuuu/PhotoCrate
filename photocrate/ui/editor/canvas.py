@@ -15,6 +15,7 @@ from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPainterPath, QPen, 
 from PySide6.QtWidgets import QWidget
 
 from ...edit.document import to_uint8
+from ...i18n import t as _t
 
 BG = QColor("#1E2023")
 
@@ -190,7 +191,7 @@ class CanvasView(QWidget):
         try:
             rgb, a = self.doc.render(lvl, rect, hot=self.hot, layers=layers)
         except MemoryError:
-            self.win.status_msg("内存不足：画面太大，请缩小后再看")
+            self.win.status_msg(_t("内存不足：画面太大，请缩小后再看"))
             return
         buf = np.ascontiguousarray(to_uint8(rgb, a))
         if not self._coarse:
@@ -455,5 +456,5 @@ class CanvasView(QWidget):
             qp.setFont(self.font())
             qp.fillRect(QRectF(12, 12, 96, 24), QColor(0, 0, 0, 170))
             qp.setPen(QColor("#FFFFFF"))
-            qp.drawText(QRectF(12, 12, 96, 24), Qt.AlignmentFlag.AlignCenter, "原图（背景层）")
+            qp.drawText(QRectF(12, 12, 96, 24), Qt.AlignmentFlag.AlignCenter, _t("原图（背景层）"))
         qp.end()

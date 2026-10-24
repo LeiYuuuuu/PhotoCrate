@@ -8,6 +8,7 @@ from typing import Any
 from ..ops.pathsafe import sanitize_component
 from .base import (DIMENSIONS, FORMAT_TOKEN, PartitionContext, all_tokens, group_formats, is_unknown_label,
                    member_format)
+from ..i18n import t as _t
 
 
 @dataclass
@@ -31,13 +32,13 @@ class PartitionSpec:
 
     def describe(self) -> str:
         if self.mode == "template":
-            return f"模板：{self.template}"
+            return _t('模板：{0}', self.template)
         parts = []
         for r in self.rules:
             d = DIMENSIONS.get(r.dim)
             if d:
                 parts.append(d.describe(d.resolve_opts(r.opts)))
-        return " → ".join(parts) or "（无条件）"
+        return " → ".join(parts) or _t("（无条件）")
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +70,8 @@ def render_template(template: str, g, ctx: PartitionContext, tokens: dict | None
                 except Exception:
                     v = None
                 if v not in (None, ""):
-                    return str(v)
-            return "未知"
+                    return _t(str(v))           # 地名、色调、场景等内部是中文，英文界面下翻译
+            return _t("未知")
 
         seg = _TOKEN_RE.sub(sub, raw_seg).strip()
         if seg:
@@ -104,7 +105,7 @@ def segments_with_order(g, spec: PartitionSpec, ctx: PartitionContext,
                 segs = d.segments(g, d.resolve_opts(r.opts), ctx)
             except Exception:
                 segs = [d.unknown]
-            pairs.extend((s, d.order_by) for s in segs)
+            pairs.extend((_t(s), d.order_by) for s in segs)     # 同上：文件夹名按界面语言
     out = []
     for s, ob in pairs:
         s = sanitize_component(s)
@@ -143,7 +144,7 @@ class TreeNode:
         kids = list(self.children.values())
 
         def key(n: TreeNode):
-            unk = is_unknown_label(n.name) or n.name in ("日期待确认",)
+            unk = is_unknown_label(n.name)
             if n.order_by == "name":
                 return (unk, n.name)
             return (unk, -n.count, n.name)
@@ -194,22 +195,22 @@ def build_tree(groups, spec: PartitionSpec, ctx: PartitionContext) -> tuple[Tree
 # ---------------------------------------------------------------------------
 
 BUILTIN_PRESETS: list[dict[str, Any]] = [
-    {"name": "按日期：年 / 年-月", "rules": [{"dim": "date", "opts": {"granularity": "y/ym"}}]},
-    {"name": "按日期：年 / 年-月 / 日", "rules": [{"dim": "date", "opts": {"granularity": "y/ym/ymd"}}]},
-    {"name": "按地区：国家 / 省 / 市", "rules": [{"dim": "region", "opts": {"level": "country/province/city"}}]},
-    {"name": "旅行整理：年 / 地区（市）", "rules": [{"dim": "date", "opts": {"granularity": "y"}},
+    {"name": _t("按日期：年 / 年-月"), "rules": [{"dim": "date", "opts": {"granularity": "y/ym"}}]},
+    {"name": _t("按日期：年 / 年-月 / 日"), "rules": [{"dim": "date", "opts": {"granularity": "y/ym/ymd"}}]},
+    {"name": _t("按地区：国家 / 省 / 市"), "rules": [{"dim": "region", "opts": {"level": "country/province/city"}}]},
+    {"name": _t("旅行整理：年 / 地区（市）"), "rules": [{"dim": "date", "opts": {"granularity": "y"}},
                                          {"dim": "region", "opts": {"level": "city"}}]},
-    {"name": "按旅行：旅行 / 第几天", "rules": [{"dim": "trip", "opts": {"mode": "trip/daydate"}}]},
-    {"name": "按旅行：年 / 旅行", "rules": [{"dim": "date", "opts": {"granularity": "y"}},
+    {"name": _t("按旅行：旅行 / 第几天"), "rules": [{"dim": "trip", "opts": {"mode": "trip/daydate"}}]},
+    {"name": _t("按旅行：年 / 旅行"), "rules": [{"dim": "date", "opts": {"granularity": "y"}},
                                      {"dim": "trip", "opts": {"mode": "trip"}}]},
-    {"name": "按色调：冷暖", "rules": [{"dim": "color", "opts": {"mode": "warmth"}}]},
-    {"name": "按色调：主色", "rules": [{"dim": "color", "opts": {"mode": "main"}}]},
-    {"name": "摄影师：相机 / 年-月 / 类型", "rules": [{"dim": "camera", "opts": {"level": "model"}},
+    {"name": _t("按色调：冷暖"), "rules": [{"dim": "color", "opts": {"mode": "warmth"}}]},
+    {"name": _t("按色调：主色"), "rules": [{"dim": "color", "opts": {"mode": "main"}}]},
+    {"name": _t("摄影师：相机 / 年-月 / 类型"), "rules": [{"dim": "camera", "opts": {"level": "model"}},
                                            {"dim": "date", "opts": {"granularity": "ym"}},
                                            {"dim": "filetype", "opts": {"mode": "kind"}}]},
-    {"name": "组合：年 / 省 / 冷暖", "rules": [{"dim": "date", "opts": {"granularity": "y"}},
+    {"name": _t("组合：年 / 省 / 冷暖"), "rules": [{"dim": "date", "opts": {"granularity": "y"}},
                                        {"dim": "region", "opts": {"level": "province/city"}},
                                        {"dim": "color", "opts": {"mode": "warmth"}}]},
-    {"name": "清理：来源（相机 / 手机 / 截图）", "rules": [{"dim": "source", "opts": {}}]},
-    {"name": "模板：年 / 年-月 城市", "template": "{年}/{年}-{月} {市|省|国家|未知地点}"},
+    {"name": _t("清理：来源（相机 / 手机 / 截图）"), "rules": [{"dim": "source", "opts": {}}]},
+    {"name": _t("模板：年 / 年-月 城市"), "template": _t("{年}/{年}-{月} {市|省|国家|未知地点}")},
 ]

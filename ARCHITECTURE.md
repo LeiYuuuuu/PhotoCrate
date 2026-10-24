@@ -239,6 +239,15 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 - **轻量动效**（`ui/motion.py`）：原生 `QVariantAnimation` 驱动导航定位条（220ms）、按钮反馈（150ms）与旧页面快照淡出（160ms）；不在照片画面上叠加特效。隐藏时动画直接结束；`ui_motion` 偏好由设置页即时应用并持久化。分段进度条只在显示、动效开启且任务进行中响应现有计时器，完成后不扫光。
 - **原生预览与回归**：`scripts/preview_ui.py` 使用临时 `PHOTOCRATE_HOME` 和合成测试照片；`tests/test_ui_design.py` 验证快速切页、键盘导航、隐藏后停止、开关持久化及两套主题在 1480×920 / 1180×720 下的页面切换。
 
+## 11.5 界面语言（i18n.py + locale_en.py）
+
+- **写法**：界面文字在代码里写中文原文，用 `t()`（各模块里导入为 `_t`）包起来；带变量的写成 `_t("已选 {0} 张", n)`。英文在 `locale_en.EN` 表里，以中文原文为键；查不到就显示原文，所以漏翻只会露出中文，不会出错。
+- **启动时确定**：`app.run()` 在导入界面 / 分析器模块之前调用 `i18n.set_language(i18n.resolve(settings))`（模块级常量在导入时就翻译了），所以切换语言要重启。优先级：环境变量 `PHOTOCRATE_LANG` → 设置 `ui_language` → 新用户跟随 Windows 显示语言，老用户保持中文。
+- **数据与语言无关**：缓存、标注库、分析结果、地名、场景名一律存中文，只在显示和生成文件夹名 / XMP / 相册时翻译。判断“未知 / 其余”这类兜底条目用 `i18n.is_unknown()`，比对按模板生成的文字用 `i18n.matches()`，不要直接比较中文字面量。
+- **地名**：国家用 Qt 的英文国家名；海外州 / 城市由 `data/place_names_zh.json` 反查英文原名；中国省级行政区在 `locale_en.PROVINCES`；中国的市、区县没有英文数据，保持中文。
+- **模板占位符**：`partition/base.TOKEN_ALIASES` 把 `{year}` `{city}` `{seq}` 等英文写法映射到中文占位符，两种写法等价。
+- **测试**：`tests/test_i18n.py`；界面脚本可设 `PHOTOCRATE_LANG=en` 跑英文界面。
+
 ## 12. 扩展：插件接口（保留给未来的新功能）
 
 ### 12.1 插件文件
@@ -288,7 +297,7 @@ PhotoCrate/
 ├─ launcher.py                 打包入口（含 multiprocessing.freeze_support）
 ├─ requirements.txt  installer.iss
 ├─ photocrate/
-│  ├─ app.py  bootstrap.py  config.py  plugins.py
+│  ├─ app.py  bootstrap.py  config.py  plugins.py  i18n.py  locale_en.py（英文界面文字）
 │  ├─ core/        models formats scanner metadata imaging pixelwork geo dates cache library stats
 │  │               pairing geotime places daybook trips videos
 │  ├─ ai/          models clip scenes faces people service visual
@@ -304,7 +313,7 @@ PhotoCrate/
 ├─ plugins/        用户插件放这里        plugins_examples/  示例插件
 ├─ tools/          get_exiftool.ps1  make_icon.py  （exiftool/ 运行后自动下载到这里）
 └─ tests/          test_core.py  test_timeplace.py  test_culling.py  test_trips.py  test_ai.py
-                   test_workflow.py  test_repartition.py  test_search_rank.py  test_faces_screen.py
+                   test_workflow.py  test_repartition.py  test_search_rank.py  test_faces_screen.py  test_i18n.py
                    make_samples.py  ui_smoke.py  ui_timeplace.py
                    ui_culling.py  ui_tier3.py  ui_workflow.py  ui_repartition.py
 ```

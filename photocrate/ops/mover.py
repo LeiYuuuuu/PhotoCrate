@@ -20,6 +20,7 @@ from typing import Callable
 
 from .journal import Journal
 from .pathsafe import long_path
+from ..i18n import t as _t
 
 log = logging.getLogger(__name__)
 TMP_SUFFIX = ".pctmp"
@@ -77,16 +78,16 @@ def trash(p: str) -> None:
 
 def _rename_no_overwrite(a: str, b: str) -> None:
     if os.path.lexists(long_path(b)):
-        raise FileExistsError(f"目标已存在：{b}")
+        raise FileExistsError(_t('目标已存在：{0}', b))
     os.rename(long_path(a), long_path(b))   # Windows 下 rename 遇到已存在目标会报错，不会覆盖
 
 
 def transfer(src: str, dst: str, copy_only: bool = False, verify_hash: bool = False) -> str:
     """把 src 移动（或复制）到 dst。dst 必须不存在。返回 'renamed' 或 'copied'。"""
     if os.path.lexists(long_path(dst)):
-        raise FileExistsError(f"目标已存在：{dst}")
+        raise FileExistsError(_t('目标已存在：{0}', dst))
     if not os.path.exists(long_path(src)):
-        raise FileNotFoundError(f"源文件不存在：{src}")
+        raise FileNotFoundError(_t('源文件不存在：{0}', src))
     if not copy_only:
         try:
             _rename_no_overwrite(src, dst)
@@ -100,9 +101,9 @@ def transfer(src: str, dst: str, copy_only: bool = False, verify_hash: bool = Fa
     try:
         shutil.copy2(long_path(src), long_path(tmp))     # copy2 保留修改时间
         if os.path.getsize(long_path(tmp)) != os.path.getsize(long_path(src)):
-            raise IOError("复制后文件大小不一致")
+            raise IOError(_t("复制后文件大小不一致"))
         if verify_hash and _sha256(tmp) != _sha256(src):
-            raise IOError("复制后校验值不一致")
+            raise IOError(_t("复制后校验值不一致"))
         _rename_no_overwrite(tmp, dst)
     except BaseException:
         try:
@@ -120,7 +121,7 @@ def transfer(src: str, dst: str, copy_only: bool = False, verify_hash: bool = Fa
                 _remove(dst)
             except OSError:
                 pass
-            raise IOError(f"源文件被占用，无法移动（已撤回复制）：{e}") from e
+            raise IOError(_t('源文件被占用，无法移动（已撤回复制）：{0}', e)) from e
     return "copied"
 
 
@@ -181,7 +182,7 @@ class Mover:
     def _run_batch(self, bid: int, operation: str, progress: ProgressFn | None,
                    cancel: threading.Event | None) -> ExecResult:
         if operation not in ("move", "copy", "rename"):
-            raise ValueError(f"不能按移动方式执行“{operation}”批次")
+            raise ValueError(_t('不能按移动方式执行“{0}”批次', operation))
         res = ExecResult(bid)
         ops = [o for o in self.journal.ops(bid) if o["status"] == "pending"]
         total = len(ops)
@@ -201,7 +202,7 @@ class Mover:
                     if os.path.exists(long_path(o["src"])):
                         st = os.stat(long_path(o["src"]))
                         if st.st_size != o["size"]:
-                            raise IOError("源文件在预览后发生了变化，请重新扫描")
+                            raise IOError(_t("源文件在预览后发生了变化，请重新扫描"))
                     d = os.path.dirname(o["dst"])
                     self._makedirs(bid, d, created_dirs)
                     transfer(o["src"], o["dst"], copy_only, self.verify_hash)
@@ -220,7 +221,7 @@ class Mover:
                     res.done_files += 1
             except Exception as e:
                 log.warning("移动失败：%s", e)
-                res.errors.append(f"{os.path.basename(item_ops[0]['src'])}：{e}")
+                res.errors.append(_t('{0}：{1}', os.path.basename(item_ops[0]['src']), e))
                 res.failed_groups += 1
                 # 整组退回
                 for o in reversed(done_here):
@@ -229,10 +230,10 @@ class Mover:
                             _remove(o["dst"])
                         else:
                             transfer(o["dst"], o["src"])
-                        self.journal.set_op(o["id"], "failed", "已回退（同组文件失败）")
+                        self.journal.set_op(o["id"], "failed", _t("已回退（同组文件失败）"))
                     except Exception as e2:
-                        self.journal.set_op(o["id"], "done", f"回退失败：{e2}")
-                        res.errors.append(f"回退失败 {o['dst']}：{e2}")
+                        self.journal.set_op(o["id"], "done", _t('回退失败：{0}', e2))
+                        res.errors.append(_t('回退失败 {0}：{1}', o['dst'], e2))
                 for o in item_ops:
                     if o not in done_here:
                         self.journal.set_op(o["id"], "failed", str(e))
@@ -273,9 +274,9 @@ class Mover:
             try:
                 for o in item_ops:
                     if not os.path.exists(long_path(o["src"])):
-                        raise FileNotFoundError("文件已不在原位置，请重新扫描")
+                        raise FileNotFoundError(_t("文件已不在原位置，请重新扫描"))
                     if os.path.getsize(long_path(o["src"])) != o["size"]:
-                        raise IOError("文件在预览后发生了变化，请重新扫描")
+                        raise IOError(_t("文件在预览后发生了变化，请重新扫描"))
                     send_to_trash(o["src"])
                     self.journal.set_op(o["id"], "done")
                     done_here.append(o)
@@ -289,15 +290,15 @@ class Mover:
                     res.freed += o["size"] or 0
             except Exception as e:
                 res.failed_groups += 1
-                res.errors.append(f"{os.path.basename(item_ops[0]['src'])}：{e}")
+                res.errors.append(_t('{0}：{1}', os.path.basename(item_ops[0]['src']), e))
                 for o in reversed(done_here):
                     try:
                         restore_from_trash(o["src"], t0)
-                        self.journal.set_op(o["id"], "failed", "已从回收站放回（同组文件失败）")
+                        self.journal.set_op(o["id"], "failed", _t("已从回收站放回（同组文件失败）"))
                     except Exception as e2:
-                        self.journal.set_op(o["id"], "done", f"放回失败：{e2}")
+                        self.journal.set_op(o["id"], "done", _t('放回失败：{0}', e2))
                         res.deleted.append(o["src"])
-                        res.errors.append(f"放回失败 {o['src']}：{e2}")
+                        res.errors.append(_t('放回失败 {0}：{1}', o['src'], e2))
                 for o in item_ops:
                     if o not in done_here:
                         self.journal.set_op(o["id"], "failed", str(e))
@@ -332,7 +333,7 @@ class Mover:
         batch = self.journal.batch(bid)
         res = ExecResult(bid)
         if not batch:
-            res.errors.append("找不到该批次")
+            res.errors.append(_t("找不到该批次"))
             return res
         # “复制”与“写入 XMP”的撤销都是：把本批次新建的文件放入回收站
         copy_only = batch["operation"] in ("copy", "xmp")
@@ -367,7 +368,7 @@ class Mover:
                     if not os.path.exists(long_path(target)):
                         target = self.journal.find_moved(o["dst"], bid) or target
                     if not os.path.exists(long_path(o["src"])):
-                        raise FileNotFoundError("找不到当时的备份，无法恢复")
+                        raise FileNotFoundError(_t("找不到当时的备份，无法恢复"))
                     if os.path.exists(long_path(target)):
                         trash(target)
                     os.makedirs(long_path(os.path.dirname(target)), exist_ok=True)
@@ -390,22 +391,22 @@ class Mover:
                             continue
                         if o["role"] == "sidecar" and self.journal.removed_by_xmp_undo(o["src"]):
                             # 这个 .xmp 是本软件写入的，已经随“写入 XMP”批次撤销而放入回收站
-                            self.journal.set_op(o["id"], "undone", "已随“写入 XMP”撤销放入回收站")
+                            self.journal.set_op(o["id"], "undone", _t("已随“写入 XMP”撤销放入回收站"))
                             res.done_files += 1
                             continue
-                        raise FileNotFoundError("文件已不在目标位置（可能被手动移动或删除）")
+                        raise FileNotFoundError(_t("文件已不在目标位置（可能被手动移动或删除）"))
                     back = o["src"]
                     os.makedirs(long_path(os.path.dirname(back)), exist_ok=True)
                     if os.path.lexists(long_path(back)):
                         back = _unique_name(back)
-                        res.errors.append(f"原位置已有同名文件，已恢复为：{os.path.basename(back)}")
+                        res.errors.append(_t('原位置已有同名文件，已恢复为：{0}', os.path.basename(back)))
                     transfer(o["dst"], back)
                     res.mapping[_norm(o["dst"])] = back
                     self.journal.set_op(o["id"], "undone", src=back if back != o["src"] else None)
                 res.done_files += 1
             except Exception as e:
                 failed += 1
-                res.errors.append(f"{os.path.basename(o['src'] if is_delete else o['dst'])}：{e}")
+                res.errors.append(_t('{0}：{1}', os.path.basename(o['src'] if is_delete else o['dst']), e))
                 self.journal.set_op(o["id"], "undo_failed", str(e))
             if i % 20 == 0:
                 self.journal.commit()

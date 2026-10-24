@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from ..i18n import t as _t
 
 # 各厂商相机原图（RAW）扩展名
 RAW_EXTS = {
@@ -29,8 +30,8 @@ KIND_LABELS = {
     "jpeg": "JPG",
     "heif": "HEIC",
     "png": "PNG",
-    "image": "其他图片",
-    "video": "视频",
+    "image": _t("其他图片"),
+    "video": _t("视频"),
 }
 
 

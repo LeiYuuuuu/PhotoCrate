@@ -11,6 +11,7 @@ import threading
 from typing import Any, Callable
 
 from . import models
+from ..i18n import t as _t
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class AIService:
                 from .clip import ClipEngine
                 path, vocab = models.file_path("chinese_clip_vitb16_q8.onnx"), models.vocab_path()
                 if path is None or vocab is None:
-                    raise RuntimeError("中文 CLIP 模型尚未下载")
+                    raise RuntimeError(_t("中文 CLIP 模型尚未下载"))
                 try:
                     self._clip = ClipEngine(path, vocab)
                     self._clip_error = None
@@ -199,7 +200,7 @@ class AIService:
         ids, M = self._candidates(gids)
         if not ids:
             return []
-        variants = [text] if len(text) > 12 else [text, f"一张{text}的照片"]
+        variants = [text] if len(text) > 12 else [text, f"一张{text}的照片"]    # 给中文 CLIP 的提示词，不翻译
         q = self.clip().encode_texts(variants).mean(axis=0)
         q /= max(1e-8, float(np.linalg.norm(q)))
         s = M @ q
@@ -329,7 +330,7 @@ class AIService:
         self.nonfaces = [f for f in collect_faces(groups) if f.key in excluded]
         self.people, self.loners = cluster_people(groups, ann.all("people"), fixes,
                                                   float(s.get("face_threshold", 0.42)),
-                                                  s.get("people_other_name") or "其他人", excluded)
+                                                  _t(s.get("people_other_name") or "其他人"), excluded)
         return self.people
 
     def mark_faces(self, keys: list[str], human: bool) -> None:
@@ -360,7 +361,7 @@ class AIService:
         cl = self.cluster(cid)
         name = name.strip()
         if cl is None or not name:
-            raise ValueError("没有这个人物或名字为空")
+            raise ValueError(_t("没有这个人物或名字为空"))
         persons = ann.all("people")
         same = next((pid for pid, p in persons.items() if p.get("name") == name), None)
         if cl.named and cl.cid in persons:

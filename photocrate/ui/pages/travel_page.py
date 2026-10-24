@@ -14,6 +14,7 @@ from ..widgets.deco import Panel, TacButton, caption
 from ..widgets.mapview import PROVIDERS, MapPoint, MapView, provider_for
 from ..widgets.thumbgrid import PIXMAPS, ThumbGrid
 from .base import Page
+from ...i18n import is_en, t as _t
 
 ALL_ROW = "__all__"
 
@@ -21,10 +22,10 @@ ALL_ROW = "__all__"
 class TravelPage(Page):
     page_id = "travel"
     index = "06"
-    title = "旅行与地图"
+    title = _t("旅行与地图")
     en = "Trips & map // auto segmentation"
-    sub = ("按“离开常住地 + 时间连续”自动切出每次旅行并命名；地图上按位置聚合显示照片，选中旅行时连出路线。"
-           "分区编排里可用「旅行」条件（或模板 {旅行}/{第几天}）按旅行归档。")
+    sub = (_t("按“离开常住地 + 时间连续”自动切出每次旅行并命名；地图上按位置聚合显示照片，选中旅行时连出路线。"
+           "分区编排里可用「旅行」条件（或模板 {旅行}/{第几天}）按旅行归档。"))
 
     def __init__(self, ctx, parent=None):
         super().__init__(ctx, parent)
@@ -38,45 +39,45 @@ class TravelPage(Page):
         lv = QVBoxLayout(left)
         lv.setContentsMargins(0, 0, 0, 0)
         lv.setSpacing(10)
-        hp = Panel("常住地", "Home // not a trip", "")
+        hp = Panel(_t("常住地"), "Home // not a trip", "")
         self.home_panel = hp
         self.homes = QListWidget()
         self.homes.setFixedHeight(64)
         hp.body.addWidget(self.homes)
         r = QHBoxLayout()
         self.home_edit = QLineEdit()
-        self.home_edit.setPlaceholderText("如 Boca Raton, US · 湖南/邵阳 · 26.36,-80.10")
+        self.home_edit.setPlaceholderText(_t("如 Boca Raton, US · 湖南/邵阳 · 26.36,-80.10"))
         self.home_edit.returnPressed.connect(self.add_home)
         r.addWidget(self.home_edit, 1)
-        self.b_add = TacButton("添加", "secondary", height=30)
-        self.b_del = TacButton("删除", "secondary", height=30)
-        self.b_guess = TacButton("从照片识别", "secondary", height=30)
+        self.b_add = TacButton(_t("添加"), "secondary", height=30)
+        self.b_del = TacButton(_t("删除"), "secondary", height=30)
+        self.b_guess = TacButton(_t("从照片识别"), "secondary", height=30)
         for b in (self.b_add, self.b_del, self.b_guess):
             r.addWidget(b)
         hp.body.addLayout(r)
         r2 = QHBoxLayout()
-        r2.addWidget(QLabel("间隔超过"))
+        r2.addWidget(QLabel(_t("间隔超过")))
         self.gap = QSpinBox()
         self.gap.setRange(6, 240)
-        self.gap.setSuffix(" 小时")
+        self.gap.setSuffix(_t(" 小时"))
         self.gap.setValue(int(ctx.settings.get("trip_gap_hours", 36)))
         r2.addWidget(self.gap)
-        r2.addWidget(QLabel("算新旅行；至少"))
+        r2.addWidget(QLabel(_t("算新旅行；至少")))
         self.minp = QSpinBox()
         self.minp.setRange(1, 50)
-        self.minp.setSuffix(" 张")
+        self.minp.setSuffix(_t(" 张"))
         self.minp.setValue(int(ctx.settings.get("trip_min_photos", 3)))
         r2.addWidget(self.minp)
         r2.addStretch(1)
         hp.body.addLayout(r2)
-        hp.body.addWidget(caption("在常住地（半径 50 km）拍的照片不算旅行；不设常住地时，按时间间隔把所有有地点的照片分成一次次出行。"
-                                  "没有地点的照片若在旅途中拍摄，也会归入这次旅行。", "faint", 8))
+        hp.body.addWidget(caption(_t("在常住地（半径 50 km）拍的照片不算旅行；不设常住地时，按时间间隔把所有有地点的照片分成一次次出行。"
+                                  "没有地点的照片若在旅途中拍摄，也会归入这次旅行。"), "faint", 8))
         lv.addWidget(hp)
 
-        tp = Panel("旅行", "Trips", "")
+        tp = Panel(_t("旅行"), "Trips", "")
         self.trip_panel = tp
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["旅行（双击改名）", "日期", "天", "照片"])
+        self.table.setHorizontalHeaderLabels([_t("旅行（双击改名）"), _t("日期"), _t("天"), _t("照片")])
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(26)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -85,21 +86,22 @@ class TravelPage(Page):
                                    | QAbstractItemView.EditTrigger.EditKeyPressed)
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for c, w in ((1, 136), (2, 34), (3, 50)):
+        wide = 1 if is_en() else 0          # 英文表头更长
+        for c, w in ((1, 136), (2, 34 + 12 * wide), (3, 50 + 10 * wide)):
             h.setSectionResizeMode(c, QHeaderView.ResizeMode.Fixed)
             h.resizeSection(c, w)
         self.table.itemSelectionChanged.connect(self._trip_selected)
         self.table.itemChanged.connect(self._renamed)
         tp.body.addWidget(self.table, 1)
         tr = QHBoxLayout()
-        self.b_reset = TacButton("恢复自动名", "secondary", height=28)
+        self.b_reset = TacButton(_t("恢复自动名"), "secondary", height=28)
         self.b_reset.clicked.connect(self.reset_name)
         tr.addWidget(self.b_reset)
         tr.addStretch(1)
-        self.b_export = TacButton("导出相册…", "secondary", en="ALBUM", height=28)
+        self.b_export = TacButton(_t("导出相册…"), "secondary", en="ALBUM", height=28)
         self.b_export.clicked.connect(self.export_trip)
         tr.addWidget(self.b_export)
-        self.b_part = TacButton("按旅行分区…", "primary", en="PARTITION", height=28)
+        self.b_part = TacButton(_t("按旅行分区…"), "primary", en="PARTITION", height=28)
         self.b_part.clicked.connect(self.to_partition)
         tr.addWidget(self.b_part)
         tp.body.addLayout(tr)
@@ -111,12 +113,12 @@ class TravelPage(Page):
         # ======== 右：地图 + 照片 ========
         vs = QSplitter(Qt.Orientation.Vertical)
         vs.setChildrenCollapsible(False)
-        mp = Panel("地图", "Map", "")
+        mp = Panel(_t("地图"), "Map", "")
         self.map_panel = mp
         self.tiles = QComboBox()
-        self.tiles.addItem("底图：随主题", "auto")
+        self.tiles.addItem(_t("底图：随主题"), "auto")
         for k, v in PROVIDERS.items():
-            self.tiles.addItem("底图：" + v[0], k)
+            self.tiles.addItem(_t("底图：") + v[0], k)
         self.tiles.setCurrentIndex(max(0, self.tiles.findData(ctx.settings.get("map_tiles", "auto"))))
         self.tiles.currentIndexChanged.connect(self._tiles_changed)
         mp.add_header_widget(self.tiles)
@@ -125,7 +127,7 @@ class TravelPage(Page):
         self.map.cluster_clicked.connect(self._cluster_clicked)
         mp.body.addWidget(self.map, 1)
         vs.addWidget(mp)
-        gp = Panel("照片", "Photos", "")
+        gp = Panel(_t("照片"), "Photos", "")
         self.gpanel = gp
         self.grid = ThumbGrid(selectable=True)
         self.grid.set_cell_width(130)
@@ -162,11 +164,11 @@ class TravelPage(Page):
         hs = self._home_dicts()
         for h in hs:
             hm = Home.from_dict(h)
-            where = f"{hm.lat:.3f}, {hm.lon:.3f} · 半径 {hm.radius_km:.0f} km" if hm.lat is not None else "按地名判断"
-            it = QListWidgetItem(f"{hm.label}    （{where}）")
+            where = _t('{0:.3f}, {1:.3f} · 半径 {2:.0f} km', hm.lat, hm.lon, hm.radius_km) if hm.lat is not None else _t("按地名判断")
+            it = QListWidgetItem(_t('{0}    （{1}）', hm.label, where))
             self.homes.addItem(it)
         if not hs:
-            it = QListWidgetItem("（未设置：所有有地点的照片都按时间分段）")
+            it = QListWidgetItem(_t("（未设置：所有有地点的照片都按时间分段）"))
             it.setFlags(Qt.ItemFlag.NoItemFlags)
             self.homes.addItem(it)
         self.home_panel.set_meta(f"{len(hs)} SET")
@@ -192,14 +194,12 @@ class TravelPage(Page):
             if h is None:
                 return
             if h.lat is None and not h.country:
-                info(self, "没有找到这个地点", f"“{text}”没有找到坐标，将按地名判断（照片地点的省 / 市 / 区名与它相同即算在家）。"
-                     "<br>更准确的写法：中文“省/市”（如 湖南/邵阳），英文城市名加国家代码（如 Boca Raton, US），"
-                     "或直接填“纬度,经度”。")
+                info(self, _t("没有找到这个地点"), _t('“{0}”没有找到坐标，将按地名判断（照片地点的省 / 市 / 区名与它相同即算在家）。<br>更准确的写法：中文“省/市”（如 湖南/邵阳），英文城市名加国家代码（如 Boca Raton, US），或直接填“纬度,经度”。', text))
             self.home_edit.clear()
             self._save_homes(self._home_dicts() + [h.to_dict()])
 
         self.ctx.run(job, None, done, lambda tb: (self.b_add.setEnabled(True),
-                                                  info(self, "出错", f"<pre>{tb[-800:]}</pre>")))
+                                                  info(self, _t("出错"), f"<pre>{tb[-800:]}</pre>")))
 
     def del_home(self):
         i = self.homes.currentRow()
@@ -211,15 +211,15 @@ class TravelPage(Page):
     def guess_home(self):
         s = suggest_home([g for g in self.ctx.library.groups if g.files])
         if not s:
-            info(self, "无法识别常住地", "照片里没有一个地方占到拍摄天数的三分之一以上（或照片少于 20 天），"
-                 "看起来这批照片大多在旅途中拍的。请手动添加常住地，或者不设常住地。")
+            info(self, _t("无法识别常住地"), _t("照片里没有一个地方占到拍摄天数的三分之一以上（或照片少于 20 天），"
+                 "看起来这批照片大多在旅途中拍的。请手动添加常住地，或者不设常住地。"))
             return
         if any(abs((h.get("lat") or 999) - s["lat"]) < 0.3 and abs((h.get("lon") or 999) - s["lon"]) < 0.3
                for h in self._home_dicts()):
-            info(self, "已经设置过", f"识别到的常住地 {s['label']} 已在列表中。")
+            info(self, _t("已经设置过"), _t('识别到的常住地 {0} 已在列表中。', s['label']))
             return
         self._save_homes(self._home_dicts() + [{k: v for k, v in s.items() if k != "share"}])
-        self.ctx.status.emit(f"识别到常住地：{s['label']}（占拍摄天数 {s['share']:.0%}）")
+        self.ctx.status.emit(_t('识别到常住地：{0}（占拍摄天数 {1:.0%}）', s['label'], s['share']))
 
     def _apply_params(self):
         self.ctx.set_setting("trip_gap_hours", int(self.gap.value()))
@@ -228,7 +228,7 @@ class TravelPage(Page):
 
     def _retrip(self):
         trips = self.ctx.library.retrip()
-        self.ctx.status.emit(f"旅行分段：{len(trips)} 次旅行")
+        self.ctx.status.emit(_t('旅行分段：{0} 次旅行', len(trips)))
         self.refresh()
 
     # ---- 旅行列表 --------------------------------------------------------
@@ -239,7 +239,7 @@ class TravelPage(Page):
         self.table.setRowCount(len(trips) + 1)
         n_loc = sum(1 for g in lib.groups if g.files and photo_coords(g))
         p = theme.current()
-        rows = [(ALL_ROW, f"全部照片（{n_loc} 张有位置）", "", "", "")] + \
+        rows = [(ALL_ROW, _t('全部照片（{0} 张有位置）', n_loc), "", "", "")] + \
                [(t.key, t.name, t.span_text, str(t.days), str(t.photos)) for t in trips]
         sel_row = 0
         for i, (key, name, span, days, n) in enumerate(rows):
@@ -252,10 +252,10 @@ class TravelPage(Page):
                     flags |= Qt.ItemFlag.ItemIsEditable
                     t = next(t for t in trips if t.key == key)
                     if t.name != t.auto_name:
-                        it.setToolTip(f"自动名：{t.auto_name}")
+                        it.setToolTip(_t('自动名：{0}', t.auto_name))
                         it.setForeground(theme.current().c("accent2"))
                     else:
-                        it.setToolTip("双击改名")
+                        it.setToolTip(_t("双击改名"))
                 if key == ALL_ROW:
                     it.setForeground(theme.current().c("ink2"))
                 it.setFlags(flags)
@@ -283,7 +283,7 @@ class TravelPage(Page):
         t = self.current_trip()
         if t is None:
             groups = [g for g in lib.groups if g.files]
-            title = "全部照片"
+            title = _t("全部照片")
         else:
             groups = [g for gid in t.gids if (g := lib.by_gid(gid)) is not None and g.files]
             title = t.name
@@ -312,7 +312,7 @@ class TravelPage(Page):
         groups = sorted((g for gid in gids if (g := lib.by_gid(gid)) is not None),
                         key=lambda g: (g.date is None, g.date or 0))
         geo = (groups[0].feats.get("geo") or {}) if groups else {}
-        self._show(groups, f"地图上选中 · {geo.get('city') or geo.get('province') or ''}")
+        self._show(groups, _t('地图上选中 · {0}', geo.get('city') or geo.get('province') or ''))
 
     def _renamed(self, item: QTableWidgetItem):
         if self._filling or item.column() != 0:
@@ -346,10 +346,10 @@ class TravelPage(Page):
         t = self.current_trip()
         if t is None:
             groups = [g for g in lib.groups if g.files]
-            scope, title = f"全部 {len(groups)} 张照片", "我的相册"
+            scope, title = _t('全部 {0} 张照片', len(groups)), _t("我的相册")
         else:
             groups = [g for gid in t.gids if (g := lib.by_gid(gid)) is not None and g.files]
-            scope, title = f"旅行「{t.name}」{len(groups)} 张", t.name
+            scope, title = _t('旅行「{0}」{1} 张', t.name, len(groups)), t.name
         if not groups:
             return
         dlg = ExportDialog(self, self.ctx, groups, scope, album=True, title=title)

@@ -12,61 +12,62 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from .. import theme
 from ..theme import font
 from ..widgets.deco import TacButton
+from ...i18n import t as _t
 
 # (目标, 标题, 说明)。目标是 EditorWindow 上的区域名，None = 不照亮任何区域。
 STEPS: list[tuple[str | None, str, str]] = [
-    (None, "欢迎使用修图",
-     "这里可以像 Photoshop 一样修照片：调色、去瑕疵、抠图、加字、裁剪……<br><br>"
+    (None, _t("欢迎使用修图"),
+     _t("这里可以像 Photoshop 一样修照片：调色、去瑕疵、抠图、加字、裁剪……<br><br>"
      "<b>放心大胆地试</b>：原片永远不会被修改，改坏了按 <b>Ctrl+Z</b> 撤销就行。<br>"
-     "花一分钟看看各个功能在哪里吧。"),
-    ("toolbar", "① 工具栏",
-     "左边是所有工具，鼠标停在图标上会显示名字和用法。最常用的几个：<br>"
+     "花一分钟看看各个功能在哪里吧。")),
+    ("toolbar", _t("① 工具栏"),
+     _t("左边是所有工具，鼠标停在图标上会显示名字和用法。最常用的几个：<br>"
      "• <b>移动 V</b>：拖动图层<br>"
      "• <b>选框 M / 套索 L / 对象选择 Q</b>：圈出要单独处理的地方<br>"
      "• <b>裁剪 C</b>：裁掉多余部分、拉直歪掉的地平线<br>"
      "• <b>污点修复 J</b>：涂一下就能去掉痘痘、灰尘、电线<br>"
      "• <b>画笔 B / 文字 T</b>：画画、加字<br>"
-     "最下面的两个方块是<b>前景色 / 背景色</b>，单击修改，按 X 交换。"),
-    ("options", "② 选项栏",
-     "选中一个工具后，它的设置都在这一条里：画笔的<b>大小、硬度、不透明度</b>，"
+     "最下面的两个方块是<b>前景色 / 背景色</b>，单击修改，按 X 交换。")),
+    ("options", _t("② 选项栏"),
+     _t("选中一个工具后，它的设置都在这一条里：画笔的<b>大小、硬度、不透明度</b>，"
      "裁剪的<b>比例</b>和<b>拉直角度</b>，魔棒的<b>容差</b>……<br><br>"
-     "小技巧：用画笔时按 <b>[</b> 和 <b>]</b> 可以直接调大小。"),
-    ("canvas", "③ 画布",
-     "中间是你的照片。<br>"
+     "小技巧：用画笔时按 <b>[</b> 和 <b>]</b> 可以直接调大小。")),
+    ("canvas", _t("③ 画布"),
+     _t("中间是你的照片。<br>"
      "• <b>滚轮</b>：以鼠标为中心放大缩小<br>"
      "• <b>按住空格拖动</b>：移动画面<br>"
      "• <b>Ctrl+0</b> 适合窗口，<b>Ctrl+1</b> 看 100% 细节<br>"
-     "• <b>按住 \\ 键</b>（或右下角的按钮）：临时看原图，对比修了多少"),
-    ("props", "④ 属性：调色在这里",
-     "最常用的调色方法：点图层面板里的 <b>◐ 调整</b>（或菜单「图像 → 调整」）新建一个<b>调整图层</b>，"
+     "• <b>按住 \\ 键</b>（或右下角的按钮）：临时看原图，对比修了多少")),
+    ("props", _t("④ 属性：调色在这里"),
+     _t("最常用的调色方法：点图层面板里的 <b>◐ 调整</b>（或菜单「图像 → 调整」）新建一个<b>调整图层</b>，"
      "然后在这里拖<b>曝光、对比度、高光、阴影、色温、曲线、HSL</b>……<br><br>"
      "顶部的<b>「套用预设」</b>可以一键套用胶片、日系、电影感等效果，再慢慢微调。<br>"
-     "调整图层不改像素，随时可以回来改、隐藏或删掉。"),
-    ("layers", "⑤ 图层",
-     "每一次修改最好放在单独的图层上，互不影响：<br>"
+     "调整图层不改像素，随时可以回来改、隐藏或删掉。")),
+    ("layers", _t("⑤ 图层"),
+     _t("每一次修改最好放在单独的图层上，互不影响：<br>"
      "• <b>眼睛</b>：显示 / 隐藏这一层，方便对比<br>"
      "• 上方的<b>混合模式</b>和<b>不透明度</b>：控制这一层的强弱<br>"
      "• <b>▣ 蒙版</b>：只让一部分生效（在蒙版上用黑色画笔擦掉不要的地方）<br>"
-     "• 双击图层可以改名，用 ↑ ↓ 调整上下顺序"),
-    ("history", "⑥ 历史记录",
-     "做过的每一步都记在这里。<b>Ctrl+Z</b> 撤销、<b>Ctrl+Shift+Z</b> 重做，"
-     "也可以直接点某一行，回到那一步时的样子。"),
-    ("menu_image", "⑦ 菜单",
-     "更多功能在顶部菜单里：<br>"
+     "• 双击图层可以改名，用 ↑ ↓ 调整上下顺序")),
+    ("history", _t("⑥ 历史记录"),
+     _t("做过的每一步都记在这里。<b>Ctrl+Z</b> 撤销、<b>Ctrl+Shift+Z</b> 重做，"
+     "也可以直接点某一行，回到那一步时的样子。")),
+    ("menu_image", _t("⑦ 菜单"),
+     _t("更多功能在顶部菜单里：<br>"
      "• <b>图像</b>：调整、预设、图像大小、旋转翻转<br>"
      "• <b>选择</b>：全选、反选、<b>选择主体</b>（自动抠人 / 物）、羽化<br>"
      "• <b>滤镜</b>：模糊、锐化、降噪等，调参数时能实时预览<br>"
-     "• <b>帮助 → 快捷键</b>（F1）：全部快捷键一览"),
-    ("menu_file", "⑧ 保存：两种方式",
-     "• <b>文件 → 导出图片</b>（Ctrl+Shift+S）：合成为一张新的 JPG / PNG，"
+     "• <b>帮助 → 快捷键</b>（F1）：全部快捷键一览")),
+    ("menu_file", _t("⑧ 保存：两种方式"),
+     _t("• <b>文件 → 导出图片</b>（Ctrl+Shift+S）：合成为一张新的 JPG / PNG，"
      "默认存在原片旁边，叫「原名_修图.jpg」，会自动出现在照片库里。<br>"
      "• <b>文件 → 保存工程</b>（Ctrl+S）：保留所有图层，下次打开这张照片可以接着改。<br><br>"
-     "原片在任何情况下都不会被覆盖。"),
-    (None, "试试这三个小练习",
-     "<b>1. 一键调色</b>：图层面板点 ◐ 调整 → 右侧「套用预设」选「日系」。<br><br>"
+     "原片在任何情况下都不会被覆盖。")),
+    (None, _t("试试这三个小练习"),
+     _t("<b>1. 一键调色</b>：图层面板点 ◐ 调整 → 右侧「套用预设」选「日系」。<br><br>"
      "<b>2. 去掉一个小瑕疵</b>：在图层面板选中「背景」→ 按 J → 在瑕疵上涂一下。<br><br>"
      "<b>3. 裁剪</b>：按 C → 选项栏选比例 1 : 1 → 拖动框 → 回车。<br><br>"
-     "想再看一遍这个教程：<b>帮助 → 新手教程</b>。祝修图愉快！"),
+     "想再看一遍这个教程：<b>帮助 → 新手教程</b>。祝修图愉快！")),
 ]
 
 
@@ -104,9 +105,9 @@ class TourOverlay(QWidget):
         self.body.setStyleSheet("line-height: 150%;")
         lay.addWidget(self.body)
         row = QHBoxLayout()
-        self.b_skip = TacButton("跳过教程", "secondary", height=30)
-        self.b_prev = TacButton("上一步", "secondary", height=30)
-        self.b_next = TacButton("下一步", "primary", height=30)
+        self.b_skip = TacButton(_t("跳过教程"), "secondary", height=30)
+        self.b_prev = TacButton(_t("上一步"), "secondary", height=30)
+        self.b_next = TacButton(_t("下一步"), "primary", height=30)
         self.b_skip.clicked.connect(self.finish)
         self.b_prev.clicked.connect(lambda: self.go(self.i - 1))
         self.b_next.clicked.connect(lambda: self.go(self.i + 1) if self.i < len(STEPS) - 1 else self.finish())
@@ -148,7 +149,7 @@ class TourOverlay(QWidget):
         self.body.setText(text)
         self.count.setText(f"{self.i + 1} / {len(STEPS)}")
         self.b_prev.setEnabled(self.i > 0)
-        self.b_next.setText("开始修图" if self.i == len(STEPS) - 1 else "下一步")
+        self.b_next.setText(_t("开始修图") if self.i == len(STEPS) - 1 else _t("下一步"))
         self.b_skip.setVisible(self.i < len(STEPS) - 1)
         self._layout()
         self.update()

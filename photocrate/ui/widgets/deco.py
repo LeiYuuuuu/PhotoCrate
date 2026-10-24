@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QSizePo
 
 from .. import theme, motion
 from ..theme import font
+from ...i18n import is_unknown, t as _t
 
 
 def _p():
@@ -118,8 +119,20 @@ class SectionHeader(QWidget):
     def __init__(self, index: str, title: str, en: str, sub: str = "", parent=None):
         super().__init__(parent)
         self.index, self.title, self.en, self.sub = index, title, en, sub
+        self._sub_lines = 1
         self.setFixedHeight(76 if sub else 62)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def resizeEvent(self, e):
+        # 说明文字放不下一行时折行（英文界面的说明比中文长），最多三行
+        if self.sub:
+            fm = QFontMetrics(font("cn", 9.5))
+            r = fm.boundingRect(0, 0, max(1, self.width()), 10000, Qt.TextFlag.TextWordWrap, self.sub)
+            lines = max(1, min(3, round(r.height() / max(1, fm.lineSpacing()))))
+            if lines != self._sub_lines:
+                self._sub_lines = lines
+                self.setFixedHeight(56 + 20 * lines)
+        super().resizeEvent(e)
 
     def paintEvent(self, e):
         p = _p()
@@ -163,7 +176,8 @@ class SectionHeader(QWidget):
         if self.sub:
             qp.setFont(font("cn", 9.5))
             qp.setPen(QColor(p.ink2))
-            qp.drawText(QRectF(0, 52, w, 20), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.sub)
+            qp.drawText(QRectF(0, 52, w, 20 * self._sub_lines),
+                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap, self.sub)
         qp.end()
 
 
@@ -561,11 +575,11 @@ class BarList(QWidget):
 
     def set_items(self, items: Iterable[tuple[str, int, str | None]]) -> None:
         items = list(items)
-        unknown = [it for it in items if it[0].startswith(("未知", "无法", "其他"))]
+        unknown = [it for it in items if is_unknown(it[0])]
         items = [it for it in items if it not in unknown] + unknown
         if len(items) > self.max_items:
             rest = sum(c for _, c, _ in items[self.max_items - 1:])
-            items = items[: self.max_items - 1] + [(f"其余 {len(items) - self.max_items + 1} 项", rest, None)]
+            items = items[: self.max_items - 1] + [(_t('其余 {0} 项', len(items) - self.max_items + 1), rest, None)]
         self.items = items
         self.setFixedHeight(max(1, len(items)) * self.row_h + 4)
         self.update()
@@ -594,7 +608,7 @@ class BarList(QWidget):
         if not self.items:
             qp.setPen(QColor(p.ink3))
             qp.setFont(font("cn", 9))
-            qp.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "暂无数据")
+            qp.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, _t("暂无数据"))
             qp.end()
             return
         total = sum(c for _, c, _ in self.items) or 1
@@ -607,7 +621,7 @@ class BarList(QWidget):
                 qp.fillRect(QRectF(0, y, self.width(), self.row_h), QColor(p.surface2))
             qp.setFont(font("cn", 9))
             qp.setPen(QColor(p.ink))
-            el = QFontMetrics(qp.font()).elidedText(label, Qt.TextElideMode.ElideRight, lw - 22)
+            el = QFontMetrics(qp.font()).elidedText(_t(label), Qt.TextElideMode.ElideRight, lw - 22)
             if color:
                 qp.fillRect(QRectF(2, y + self.row_h / 2 - 5, 10, 10), QColor(color))
                 qp.setPen(QPen(QColor(p.ink2), 0.6))
@@ -620,7 +634,7 @@ class BarList(QWidget):
             qp.fillRect(QRectF(bx, y + 7, bw, self.row_h - 14), QColor(p.surface2))
             frac = count / mx
             bar = QRectF(bx, y + 7, max(2.0, bw * frac), self.row_h - 14)
-            unknown = label.startswith(("未知", "其余", "无法", "其他"))
+            unknown = is_unknown(label)
             if unknown:
                 qp.save()
                 qp.setClipRect(bar)
@@ -679,7 +693,7 @@ class TimelineChart(QWidget):
             self._hover = i
             if 0 <= i < len(self.months):
                 k, c = self.months[i]
-                self.setToolTip(f"{k}：{c} 张")
+                self.setToolTip(_t('{0}：{1} 张', k, c))
             self.update()
 
     def mousePressEvent(self, e):
@@ -698,7 +712,7 @@ class TimelineChart(QWidget):
         if not self.months:
             qp.setPen(QColor(p.ink3))
             qp.setFont(font("cn", 9))
-            qp.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "暂无日期数据")
+            qp.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, _t("暂无日期数据"))
             qp.end()
             return
         top, bottom, left = 18, 30, 34

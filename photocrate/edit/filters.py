@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 import numpy as np
+from ..i18n import t as _t
 
 
 @dataclass
@@ -151,21 +152,21 @@ def threshold(rgba, scale, level=128.0):
 
 
 FILTERS: dict[str, FilterSpec] = {
-    "gaussian": FilterSpec("高斯模糊", gaussian, [("radius", "半径", 0.2, 250, 4.0, 1, " px")]),
-    "motion": FilterSpec("动感模糊", motion, [("angle", "角度", -180, 180, 0, 0, "°"),
-                                              ("distance", "距离", 1, 500, 20, 0, " px")]),
-    "unsharp": FilterSpec("USM 锐化", unsharp, [("amount", "数量", 1, 500, 100, 0, "%"),
-                                                ("radius", "半径", 0.1, 50, 1.5, 1, " px"),
-                                                ("threshold", "阈值", 0, 255, 0, 0, "")]),
-    "denoise": FilterSpec("减少杂色", denoise, [("strength", "强度", 1, 100, 40, 0, "")]),
-    "highpass": FilterSpec("高反差保留", highpass, [("radius", "半径", 0.2, 250, 6, 1, " px")]),
-    "mosaic": FilterSpec("马赛克", mosaic, [("cell", "单元格大小", 2, 300, 16, 0, " px")]),
-    "noise": FilterSpec("添加杂色", add_noise, [("amount", "数量", 0.1, 100, 8, 1, "%")], [("mono", "单色", True)]),
-    "posterize": FilterSpec("色调分离", posterize, [("levels", "色阶", 2, 32, 6, 0, "")]),
-    "threshold": FilterSpec("阈值", threshold, [("level", "阈值色阶", 1, 255, 128, 0, "")]),
-    "desaturate": FilterSpec("去色", desaturate),
-    "invert": FilterSpec("反相", invert),
-    "auto_tone": FilterSpec("自动色调", auto_tone),
+    "gaussian": FilterSpec(_t("高斯模糊"), gaussian, [("radius", _t("半径"), 0.2, 250, 4.0, 1, " px")]),
+    "motion": FilterSpec(_t("动感模糊"), motion, [("angle", _t("角度"), -180, 180, 0, 0, "°"),
+                                              ("distance", _t("距离"), 1, 500, 20, 0, " px")]),
+    "unsharp": FilterSpec(_t("USM 锐化"), unsharp, [("amount", _t("数量"), 1, 500, 100, 0, "%"),
+                                                ("radius", _t("半径"), 0.1, 50, 1.5, 1, " px"),
+                                                ("threshold", _t("阈值"), 0, 255, 0, 0, "")]),
+    "denoise": FilterSpec(_t("减少杂色"), denoise, [("strength", _t("强度"), 1, 100, 40, 0, "")]),
+    "highpass": FilterSpec(_t("高反差保留"), highpass, [("radius", _t("半径"), 0.2, 250, 6, 1, " px")]),
+    "mosaic": FilterSpec(_t("马赛克"), mosaic, [("cell", _t("单元格大小"), 2, 300, 16, 0, " px")]),
+    "noise": FilterSpec(_t("添加杂色"), add_noise, [("amount", _t("数量"), 0.1, 100, 8, 1, "%")], [("mono", _t("单色"), True)]),
+    "posterize": FilterSpec(_t("色调分离"), posterize, [("levels", _t("色阶"), 2, 32, 6, 0, "")]),
+    "threshold": FilterSpec(_t("阈值"), threshold, [("level", _t("阈值色阶"), 1, 255, 128, 0, "")]),
+    "desaturate": FilterSpec(_t("去色"), desaturate),
+    "invert": FilterSpec(_t("反相"), invert),
+    "auto_tone": FilterSpec(_t("自动色调"), auto_tone),
 }
 
 

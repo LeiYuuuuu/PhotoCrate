@@ -18,6 +18,7 @@ import sys
 import time
 from datetime import datetime
 from urllib.parse import unquote
+from ..i18n import t as _t
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ def send_to_trash(path: str) -> float:
     t = time.time()
     send2trash(path)
     if os.path.lexists(path):
-        raise IOError("放入回收站失败")
+        raise IOError(_t("放入回收站失败"))
     return t
 
 
@@ -167,10 +168,10 @@ def restore_from_trash(path: str, deleted_after: float | None = None) -> None:
     """把回收站里的文件放回原处。找不到或原处已被占用时抛异常。"""
     hit = find_in_trash(path, deleted_after)
     if hit is None:
-        raise FileNotFoundError("回收站里找不到（可能已清空回收站或手动还原过）")
+        raise FileNotFoundError(_t("回收站里找不到（可能已清空回收站或手动还原过）"))
     fp, ip = hit
     if os.path.lexists(path):
-        raise FileExistsError("原位置已有同名文件，未覆盖")
+        raise FileExistsError(_t("原位置已有同名文件，未覆盖"))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     os.rename(fp, path)
     try:

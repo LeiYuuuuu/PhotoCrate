@@ -13,6 +13,7 @@ from ..dialogs import ask, info, run_with_progress
 from ..widgets.deco import BarList, Panel, StatCard, TacButton, caption
 from ..widgets.thumbgrid import ThumbGrid
 from .base import Page
+from ...i18n import is_en, t as _t
 
 GROUP_COLORS = {"自然风光": "#3FAE5A", "城市建筑": "#3C7BD9", "人物": "#E2453A", "美食": "#EE8A1E",
                 "动物植物": "#8E5AC9", "室内": "#8D8D84", "文档截图": "#55554E"}
@@ -21,10 +22,10 @@ GROUP_COLORS = {"自然风光": "#3FAE5A", "城市建筑": "#3C7BD9", "人物": 
 class AiPage(Page):
     page_id = "ai"
     index = "07"
-    title = "AI 搜图"
+    title = _t("AI 搜图")
     en = "AI search // scenes · text · similar"
-    sub = ("输入一句话找照片（如“铁塔夜景”“一碗拉面”“海边日落”），或选中一张照片找相似的；照片按画面内容自动分成场景。"
-           "使用开源中文 CLIP 模型，全部在本机运行，照片不会上传。")
+    sub = (_t("输入一句话找照片（如“铁塔夜景”“一碗拉面”“海边日落”），或选中一张照片找相似的；照片按画面内容自动分成场景。"
+           "使用开源中文 CLIP 模型，全部在本机运行，照片不会上传。"))
 
     def __init__(self, ctx, parent=None):
         super().__init__(ctx, parent)
@@ -33,8 +34,8 @@ class AiPage(Page):
         top.setSpacing(12)
 
         # ---- 模型 ----
-        mp = Panel("模型", "Models // offline", "")
-        mp.setFixedWidth(520)
+        mp = Panel(_t("模型"), "Models // offline", "")
+        mp.setFixedWidth(560 if is_en() else 520)
         self.model_panel = mp
         self.rows: dict[str, tuple[QLabel, TacButton]] = {}
         for key in ("clip", "face"):
@@ -43,7 +44,7 @@ class AiPage(Page):
             name.setMinimumWidth(220)
             st = QLabel("")
             st.setProperty("role", "dim")
-            b = TacButton("下载", "primary", height=28)
+            b = TacButton(_t("下载"), "primary", height=28)
             b.clicked.connect(lambda _=False, k=key: self.download(k))
             r.addWidget(name)
             r.addWidget(st, 1)
@@ -51,26 +52,26 @@ class AiPage(Page):
             mp.body.addLayout(r)
             self.rows[key] = (st, b)
         r = QHBoxLayout()
-        r.addWidget(QLabel("下载源"))
+        r.addWidget(QLabel(_t("下载源")))
         self.mirror = QComboBox()
-        for v, t in (("auto", "自动（官方失败时用国内镜像）"), ("hf", "Hugging Face 官方"), ("mirror", "国内镜像 hf-mirror.com")):
+        for v, t in (("auto", _t("自动（官方失败时用国内镜像）")), ("hf", _t("Hugging Face 官方")), ("mirror", _t("国内镜像 hf-mirror.com"))):
             self.mirror.addItem(t, v)
         self.mirror.setCurrentIndex(max(0, self.mirror.findData(ctx.settings.get("ai_mirror", "auto"))))
         self.mirror.currentIndexChanged.connect(lambda _: ctx.set_setting("ai_mirror", self.mirror.currentData()))
         r.addWidget(self.mirror, 1)
-        self.b_run = TacButton("分析全部照片", "secondary", en="ANALYZE", height=30)
+        self.b_run = TacButton(_t("分析全部照片"), "secondary", en="ANALYZE", height=30)
         self.b_run.clicked.connect(self.analyze)
         r.addWidget(self.b_run)
         mp.body.addLayout(r)
-        mp.body.addWidget(caption("模型下载到 " + str(models.models_dir()) + "；之后每次扫描会自动识别新照片"
-                                  "（结果有缓存）。人脸模型下载后需要重新分析一次。", "faint", 8))
+        mp.body.addWidget(caption(_t("模型下载到 ") + str(models.models_dir()) + _t("；之后每次扫描会自动识别新照片"
+                                  "（结果有缓存）。人脸模型下载后需要重新分析一次。"), "faint", 8))
         top.addWidget(mp)
 
-        sp = Panel("索引", "Index", "")
+        sp = Panel(_t("索引"), "Index", "")
         cr = QHBoxLayout()
-        self.c_idx = StatCard("已识别场景", "INDEXED", accent=p.accent)
-        self.c_faces = StatCard("人脸", "FACES", accent=p.accent2)
-        self.c_people = StatCard("人物", "PEOPLE", accent=p.ok)
+        self.c_idx = StatCard(_t("已识别场景"), "INDEXED", accent=p.accent)
+        self.c_faces = StatCard(_t("人脸"), "FACES", accent=p.accent2)
+        self.c_people = StatCard(_t("人物"), "PEOPLE", accent=p.ok)
         for c in (self.c_idx, self.c_faces, self.c_people):
             cr.addWidget(c)
         sp.body.addLayout(cr)
@@ -83,11 +84,11 @@ class AiPage(Page):
         left = QWidget()
         lv = QVBoxLayout(left)
         lv.setContentsMargins(0, 0, 0, 0)
-        scp = Panel("场景", "Scenes", "")
+        scp = Panel(_t("场景"), "Scenes", "")
         self.scene_panel = scp
         self.mode = QComboBox()
-        self.mode.addItem("细分场景", "scene")
-        self.mode.addItem("大类", "group")
+        self.mode.addItem(_t("细分场景"), "scene")
+        self.mode.addItem(_t("大类"), "group")
         self.mode.currentIndexChanged.connect(lambda _: self.refresh())
         scp.add_header_widget(self.mode)
         self.bars = BarList(max_items=24, row_h=22, label_w=96)
@@ -101,24 +102,24 @@ class AiPage(Page):
         left.setFixedWidth(330)
         mid.addWidget(left)
 
-        rp = Panel("搜索结果", "Results", "")
+        rp = Panel(_t("搜索结果"), "Results", "")
         self.res_panel = rp
         sr = QHBoxLayout()
         self.query = QLineEdit()
-        self.query.setPlaceholderText("输入要找的画面：铁塔夜景、拉面、海边日落、穿红衣服的人、猫…")
+        self.query.setPlaceholderText(_t("输入要找的画面：铁塔夜景、拉面、海边日落、穿红衣服的人、猫…"))
         self.query.returnPressed.connect(self.search)
         sr.addWidget(self.query, 1)
-        self.b_search = TacButton("搜索", "primary", en="SEARCH", height=32)
+        self.b_search = TacButton(_t("搜索"), "primary", en="SEARCH", height=32)
         self.b_search.clicked.connect(self.search)
         sr.addWidget(self.b_search)
-        self.b_similar = TacButton("找相似（选中一张）", "secondary", height=32)
+        self.b_similar = TacButton(_t("找相似（选中一张）"), "secondary", height=32)
         self.b_similar.clicked.connect(self.similar)
         sr.addWidget(self.b_similar)
-        sr.addWidget(QLabel("显示前"))
+        sr.addWidget(QLabel(_t("显示前")))
         self.topn = QSpinBox()
         self.topn.setRange(10, 1000)
         self.topn.setValue(60)
-        self.topn.setSuffix(" 张")
+        self.topn.setSuffix(_t(" 张"))
         sr.addWidget(self.topn)
         rp.body.addLayout(sr)
         # 找相似时显示“目标照片”
@@ -135,7 +136,7 @@ class AiPage(Page):
         tl.addWidget(self.t_img)
         tv = QVBoxLayout()
         tv.setSpacing(2)
-        tv.addWidget(caption("目标照片 · TARGET", "faint", 8))
+        tv.addWidget(caption(_t("目标照片 · TARGET"), "faint", 8))
         self.t_name = QLabel("")
         self.t_name.setStyleSheet("font-size: 13pt; font-weight: 600;")
         tv.addWidget(self.t_name)
@@ -145,10 +146,10 @@ class AiPage(Page):
         tv.addStretch(1)
         tl.addLayout(tv, 1)
         tb = QVBoxLayout()
-        self.b_tview = TacButton("大图对比", "secondary", height=28)
-        self.b_tview.setToolTip("在大图里依次查看目标和结果；按 C 可以并排对比")
+        self.b_tview = TacButton(_t("大图对比"), "secondary", height=28)
+        self.b_tview.setToolTip(_t("在大图里依次查看目标和结果；按 C 可以并排对比"))
         self.b_tview.clicked.connect(self.view_target)
-        self.b_tclose = TacButton("清除", "secondary", height=28)
+        self.b_tclose = TacButton(_t("清除"), "secondary", height=28)
         self.b_tclose.clicked.connect(self.clear_results)
         tb.addWidget(self.b_tview)
         tb.addWidget(self.b_tclose)
@@ -180,14 +181,14 @@ class AiPage(Page):
             ready = models.ready(key)
             text = models.status_text(key)
             st.setText(text)
-            col = theme.current().ok if ready and "缺少" not in text else theme.current().warn
+            col = theme.current().ok if ready and "onnxruntime" not in text else theme.current().warn
             st.setStyleSheet(f"color: {col};")
             b.setVisible(not ready)
         s = lib.ai.stats(lib.groups)
         n = s["photos"] or 1
         self.c_idx.set(f"{s['indexed']}", s["indexed"] / n, f"/ {s['photos']}")
-        self.c_faces.set(str(s["faces"]), s["faces_done"] / n, f"张脸 · {s['faces_done']} 张已检测")
-        self.c_people.set(str(s["people"]), None, f"人 · {s['named']} 已命名")
+        self.c_faces.set(str(s["faces"]), s["faces_done"] / n, _t('张脸 · {0} 张已检测', s['faces_done']))
+        self.c_people.set(str(s["people"]), None, _t('人 · {0} 已命名', s['named']))
         mode = self.mode.currentData()
         counts: dict[str, int] = {}
         for g in lib.groups:
@@ -204,44 +205,42 @@ class AiPage(Page):
         self.query.setEnabled(ok)
         self.b_similar.setEnabled(ok and len(self.grid.selected_gids()) == 1)
         if not ok:
-            hint = ("先下载“中文 CLIP”模型，再点“分析全部照片”。" if not lib.ai.clip_ready()
-                    else "还没有分析过照片：点“分析全部照片”。")
+            hint = (_t("先下载“中文 CLIP”模型，再点“分析全部照片”。") if not lib.ai.clip_ready()
+                    else _t("还没有分析过照片：点“分析全部照片”。"))
             self.res_panel.set_meta(hint)
         elif not self.grid.model_.groups:
-            self.res_panel.set_meta("输入描述后按回车搜索，或点左边的场景")
+            self.res_panel.set_meta(_t("输入描述后按回车搜索，或点左边的场景"))
 
     # ---- 下载 / 分析 -----------------------------------------------------
     def download(self, key: str):
         size = models.download_size(key)
-        if not ask(self, "下载 AI 模型", f"将下载 <b>{models.MODELS[key]['label']}</b>（约 {size / 1e6:.0f} MB）到<br>"
-                   f"{models.models_dir()}<br><br>来源：{'Hugging Face' if key == 'clip' else 'GitHub（OpenCV Zoo）'}"
-                   f"；许可：{models.MODELS[key]['license']}。只需下载一次。", ok="下载", en="DOWNLOAD"):
+        if not ask(self, _t("下载 AI 模型"), _t('将下载 <b>{0}</b>（约 {1:.0f} MB）到<br>{2}<br><br>来源：{3}；许可：{4}。只需下载一次。', models.MODELS[key]['label'], size / 1e6, models.models_dir(), 'Hugging Face' if key == 'clip' else 'GitHub（OpenCV Zoo）', models.MODELS[key]['license']), ok=_t("下载"), en="DOWNLOAD"):
             return
         mirror = self.ctx.settings.get("ai_mirror", "auto")
 
         def job(prog, cancel):
             return models.download(key, lambda d, t, c: prog((d, t, c)), cancel, mirror)
 
-        res, tb = run_with_progress(self.ctx, self, "正在下载模型", "DOWNLOADING", job)
+        res, tb = run_with_progress(self.ctx, self, _t("正在下载模型"), "DOWNLOADING", job)
         self.ctx.library.ai.unload()
         self.refresh()
         if tb:
             last = tb.strip().splitlines()[-1]
-            info(self, "下载失败", f"{last}<br><br>可以在“下载源”里换成国内镜像再试；或手动下载后放进 {models.models_dir()}。",
+            info(self, _t("下载失败"), _t('{0}<br><br>可以在“下载源”里换成国内镜像再试；或手动下载后放进 {1}。', last, models.models_dir()),
                  "ERROR")
             return
         if models.ready(key):
-            if ask(self, "下载完成", "模型已就绪。现在分析全部照片吗？（会重新扫描一遍，已有结果走缓存）",
-                   ok="开始分析", cancel="稍后", en="READY"):
+            if ask(self, _t("下载完成"), _t("模型已就绪。现在分析全部照片吗？（会重新扫描一遍，已有结果走缓存）"),
+                   ok=_t("开始分析"), cancel=_t("稍后"), en="READY"):
                 self.analyze()
 
     def analyze(self):
         lib = self.ctx.library
         if not lib.groups and not self.ctx.settings.get("source_dirs"):
-            info(self, "还没有照片", "请先在「资源接入」页添加照片文件夹。")
+            info(self, _t("还没有照片"), _t("请先在「资源接入」页添加照片文件夹。"))
             return
         if not (lib.ai.clip_ready() or models.ready("face")):
-            info(self, "还没有模型", "请先下载模型。")
+            info(self, _t("还没有模型"), _t("请先下载模型。"))
             return
         src = self.window().page("source") if hasattr(self.window(), "page") else None
         if src is None:
@@ -272,7 +271,7 @@ class AiPage(Page):
             return
         pm = QPixmap(g.thumb) if g.thumb else QPixmap()
         if pm.isNull():
-            self.t_img.setText("无预览")
+            self.t_img.setText(_t("无预览"))
         else:
             self.t_img.setPixmap(pm.scaled(self.t_img.size(), Qt.AspectRatioMode.KeepAspectRatio,
                                            Qt.TransformationMode.SmoothTransformation))
@@ -280,9 +279,9 @@ class AiPage(Page):
         bits = [g.date.strftime("%Y-%m-%d %H:%M")] if g.date else []
         sc = g.feats.get("scene")
         if sc:
-            bits.append(f"场景：{sc['scene']}")
-        bits.append(f"找到 {len(self.grid.model_.groups)} 张相似的照片，按相似度从高到低排列"
-                    if self.grid.model_.groups else "没有找到明显相似的照片")
+            bits.append(_t('场景：{0}', _t(sc['scene'])))
+        bits.append(_t('找到 {0} 张相似的照片，按相似度从高到低排列', len(self.grid.model_.groups))
+                    if self.grid.model_.groups else _t("没有找到明显相似的照片"))
         self.t_info.setText("   ·   ".join(bits))
         self.target.show()
 
@@ -294,7 +293,7 @@ class AiPage(Page):
     def clear_results(self):
         self.grid.set_groups([], {})
         self._set_target(None)
-        self.res_panel.set_meta("输入描述后按回车搜索，或点左边的场景")
+        self.res_panel.set_meta(_t("输入描述后按回车搜索，或点左边的场景"))
 
     def search(self):
         q = self.query.text().strip()
@@ -303,10 +302,10 @@ class AiPage(Page):
         try:
             ranked = self.ctx.library.ai.search_text(q)
         except Exception as e:
-            info(self, "搜索出错", str(e), "ERROR")
+            info(self, _t("搜索出错"), str(e), "ERROR")
             return
-        self._show(ranked, f"“{q}” · 只显示明显相关的，按相关度排序（分数越高越像）" if ranked
-                   else f"“{q}” · 没有找到明显相关的照片，换个说法试试")
+        self._show(ranked, _t('“{0}” · 只显示明显相关的，按相关度排序（分数越高越像）', q) if ranked
+                   else _t('“{0}” · 没有找到明显相关的照片，换个说法试试', q))
 
     def similar(self):
         gids = self.grid.selected_gids()
@@ -317,9 +316,9 @@ class AiPage(Page):
         try:
             ranked = lib.ai.search_similar(gids[0])
         except Exception as e:
-            info(self, "找相似出错", str(e), "ERROR")
+            info(self, _t("找相似出错"), str(e), "ERROR")
             return
-        self._show(ranked, f"与 {g.name if g else ''} 相似 · 百分比 = 综合相似度（内容 + 颜色构图）",
+        self._show(ranked, _t('与 {0} 相似 · 百分比 = 综合相似度（内容 + 颜色构图）', g.name if g else ''),
                    fmt="{:.0%}", target=g)
 
     def show_scene(self, label: str):
@@ -331,4 +330,4 @@ class AiPage(Page):
         self.grid.settings_snapshot = self.ctx.settings.snapshot()
         self.grid.set_groups(gs, {g.gid: {"tag": f"{label} {g.feats['scene']['prob']:.0%}"} for g in gs})
         self._set_target(None)
-        self.res_panel.set_meta(f"{len(gs)} ITEMS · 场景：{label}（按把握度排序）")
+        self.res_panel.set_meta(_t('{0} ITEMS · 场景：{1}（按把握度排序）', len(gs), label))

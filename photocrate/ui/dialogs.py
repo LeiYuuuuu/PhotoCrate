@@ -11,6 +11,7 @@ from ..ops.pathsafe import human_size
 from . import theme
 from .theme import font
 from .widgets.deco import HazardStripe, Panel, SegProgress, StatCard, TacButton, caption
+from ..i18n import t as _t
 
 
 class _Base(QDialog):
@@ -48,7 +49,7 @@ class _Base(QDialog):
         root.addLayout(self.buttons)
 
 
-def ask(parent, title: str, text: str, ok: str = "确定", cancel: str = "取消", danger: bool = False,
+def ask(parent, title: str, text: str, ok: str = _t("确定"), cancel: str = _t("取消"), danger: bool = False,
         en: str = "CONFIRM") -> bool:
     d = _Base(parent, title, en, hazard=danger)
     lab = QLabel(text)
@@ -74,7 +75,7 @@ def info(parent, title: str, text: str, en: str = "NOTICE") -> None:
     lab.setMinimumWidth(420)
     lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     d.body.addWidget(lab)
-    b = TacButton("知道了", "primary")
+    b = TacButton(_t("知道了"), "primary")
     b.clicked.connect(d.accept)
     d.buttons.addWidget(b)
     d.exec()
@@ -108,7 +109,7 @@ class ProgressDialog(_Base):
         self.setMinimumWidth(520)
         self.bar = SegProgress()
         self.bar.busy = True
-        self.cur = QLabel("准备中…")
+        self.cur = QLabel(_t("准备中…"))
         self.cur.setFont(font("mono", 9))
         self.cur.setProperty("role", "dim")
         self.count = QLabel("")
@@ -118,8 +119,8 @@ class ProgressDialog(_Base):
         row.addWidget(self.cur, 1)
         row.addWidget(self.count)
         self.body.addLayout(row)
-        self.body.addWidget(caption("取消会在当前这组照片处理完后停止，不会留下复制了一半的文件。", "faint", 8.5))
-        self.cancel_btn = TacButton("取消", "secondary")
+        self.body.addWidget(caption(_t("取消会在当前这组照片处理完后停止，不会留下复制了一半的文件。"), "faint", 8.5))
+        self.cancel_btn = TacButton(_t("取消"), "secondary")
         self.buttons.addWidget(self.cancel_btn)
         self.worker = None
         self.cancel_btn.clicked.connect(self._cancel)
@@ -142,7 +143,7 @@ class ProgressDialog(_Base):
         if self.worker:
             self.worker.cancel()
         self.cancel_btn.setEnabled(False)
-        self.cur.setText("正在取消（完成当前一组后停止）…")
+        self.cur.setText(_t("正在取消（完成当前一组后停止）…"))
 
     def _finish(self):
         self._timer.stop()
@@ -174,7 +175,7 @@ def run_with_progress(ctx, parent, title: str, en: str, job):
 
 
 class _OpsModel(QAbstractTableModel):
-    HEAD = ["源文件", "→ 目标位置（相对目标文件夹）"]
+    HEAD = [_t("源文件"), _t("→ 目标位置（相对目标文件夹）")]
 
     def __init__(self, plan, groups_by_id):
         super().__init__()
@@ -198,7 +199,7 @@ class _OpsModel(QAbstractTableModel):
     def data(self, idx, role=Qt.ItemDataRole.DisplayRole):
         src, rel, renamed = self.rows[idx.row()]
         if role == Qt.ItemDataRole.DisplayRole:
-            return src if idx.column() == 0 else rel + ("   [自动编号]" if renamed and idx.column() == 1 else "")
+            return src if idx.column() == 0 else rel + (_t("   [自动编号]") if renamed and idx.column() == 1 else "")
         if role == Qt.ItemDataRole.ToolTipRole:
             return src if idx.column() == 0 else rel
         if role == Qt.ItemDataRole.FontRole:
@@ -210,29 +211,29 @@ class PlanDialog(_Base):
     """模拟运行结果：确认后才真正执行。"""
 
     def __init__(self, parent, plan, journal_hint: bool = True):
-        op_name = "复制" if plan.operation == "copy" else "移动"
-        super().__init__(parent, f"确认{op_name}计划", "DRY RUN // REVIEW BEFORE EXECUTE", hazard=True)
+        op_name = _t("复制") if plan.operation == "copy" else _t("移动")
+        super().__init__(parent, _t('确认{0}计划', op_name), "DRY RUN // REVIEW BEFORE EXECUTE", hazard=True)
         self.plan = plan
         self.resize(980, 640)
         cards = QGridLayout()
         cards.setSpacing(8)
-        c1 = StatCard(f"将{op_name}照片", "GROUPS")
-        c1.set(f"{len(plan.items)}", unit="组")
-        c2 = StatCard("涉及文件", "FILES")
-        c2.set(f"{plan.file_count}", unit="个")
-        c3 = StatCard("数据量", "VOLUME")
+        c1 = StatCard(_t('将{0}照片', op_name), "GROUPS")
+        c1.set(f"{len(plan.items)}", unit=_t("组"))
+        c2 = StatCard(_t("涉及文件"), "FILES")
+        c2.set(f"{plan.file_count}", unit=_t("个"))
+        c3 = StatCard(_t("数据量"), "VOLUME")
         c3.set(human_size(plan.total_bytes).split()[0], unit=human_size(plan.total_bytes).split()[1])
-        c4 = StatCard("新建文件夹", "NEW DIRS")
-        c4.set(f"{plan.new_dirs}", unit="个")
+        c4 = StatCard(_t("新建文件夹"), "NEW DIRS")
+        c4.set(f"{plan.new_dirs}", unit=_t("个"))
         for i, c in enumerate((c1, c2, c3, c4)):
             cards.addWidget(c, 0, i)
         self.body.addLayout(cards)
-        lines = [f"<b>目标文件夹：</b>{plan.target_root}", f"<b>分区规则：</b>{plan.spec_text}"]
+        lines = [_t('<b>目标文件夹：</b>{0}', plan.target_root), _t('<b>分区规则：</b>{0}', plan.spec_text)]
         if plan.cross_bytes and plan.operation == "move":
-            lines.append(f"<b>跨磁盘：</b>{human_size(plan.cross_bytes)} 需要先复制、校验后再删除原文件"
-                         + (f"（目标盘剩余 {human_size(plan.free_bytes)}）" if plan.free_bytes else ""))
+            lines.append(_t('<b>跨磁盘：</b>{0} 需要先复制、校验后再删除原文件', human_size(plan.cross_bytes))
+                         + (_t('（目标盘剩余 {0}）', human_size(plan.free_bytes)) if plan.free_bytes else ""))
         if plan.skipped_inplace:
-            lines.append(f"<b>已在目标位置：</b>{plan.skipped_inplace} 组（跳过）")
+            lines.append(_t('<b>已在目标位置：</b>{0} 组（跳过）', plan.skipped_inplace))
         info_lab = QLabel("<br>".join(lines))
         info_lab.setWordWrap(True)
         info_lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -246,7 +247,7 @@ class PlanDialog(_Base):
             l = QLabel("■  " + e)
             l.setStyleSheet(f"color: {p.danger}; font-weight: 700;")
             self.body.addWidget(l)
-        panel = Panel("操作清单", "OPERATION MANIFEST", f"{plan.file_count} ENTRIES", pad=6)
+        panel = Panel(_t("操作清单"), "OPERATION MANIFEST", f"{plan.file_count} ENTRIES", pad=6)
         tv = QTableView()
         tv.setModel(_OpsModel(plan, None))
         tv.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -257,27 +258,27 @@ class PlanDialog(_Base):
         tv.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         panel.body.addWidget(tv)
         self.body.addWidget(panel, 1)
-        note = caption("执行前会先写入操作日志；完成后可在「记录」页一键撤销。重名文件只会自动加编号，绝不覆盖。", "faint", 8.5)
+        note = caption(_t("执行前会先写入操作日志；完成后可在「记录」页一键撤销。重名文件只会自动加编号，绝不覆盖。"), "faint", 8.5)
         self.body.addWidget(note)
-        exp = TacButton("导出清单 CSV", "secondary")
+        exp = TacButton(_t("导出清单 CSV"), "secondary")
         exp.clicked.connect(self._export)
         self.buttons.insertWidget(0, exp)
-        bc = TacButton("返回修改", "secondary")
+        bc = TacButton(_t("返回修改"), "secondary")
         bc.clicked.connect(self.reject)
-        bo = TacButton(f"确认{op_name}", "primary", en="EXECUTE")
+        bo = TacButton(_t('确认{0}', op_name), "primary", en="EXECUTE")
         bo.clicked.connect(self.accept)
         bo.setEnabled(plan.ok)
         self.buttons.addWidget(bc)
         self.buttons.addWidget(bo)
 
     def _export(self):
-        path, _ = QFileDialog.getSaveFileName(self, "导出清单", "移动计划.csv", "CSV (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(self, _t("导出清单"), _t("移动计划.csv"), "CSV (*.csv)")
         if not path:
             return
         import csv
         with open(path, "w", encoding="utf-8-sig", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["源路径", "目标路径", "大小(字节)"])
+            w.writerow([_t("源路径"), _t("目标路径"), _t("大小(字节)")])
             for it in self.plan.items:
                 for op in it.ops:
                     w.writerow([op.src, op.dst, op.size])

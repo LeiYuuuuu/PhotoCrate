@@ -18,6 +18,7 @@ from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
+from ..i18n import t as _t
 
 log = logging.getLogger(__name__)
 
@@ -54,12 +55,12 @@ def format_offset(seconds: int | None) -> str:
 
 
 _TZ_NOTES = {
-    "+08:00": "中国、新加坡、台湾", "+09:00": "日本、韩国", "+07:00": "泰国、越南", "+05:30": "印度",
-    "+00:00": "英国(冬)、冰岛", "+01:00": "欧洲中部(冬)、英国(夏)", "+02:00": "欧洲中部(夏)",
-    "+03:00": "莫斯科、土耳其", "+04:00": "迪拜", "+10:00": "悉尼(冬)", "+11:00": "悉尼(夏)",
-    "+12:00": "新西兰(冬)", "+13:00": "新西兰(夏)", "-03:00": "巴西",
-    "-04:00": "美国东部(夏令时)", "-05:00": "美国东部(冬令时)", "-06:00": "美国中部(冬)",
-    "-07:00": "美国西部(夏)", "-08:00": "美国西部(冬)", "-10:00": "夏威夷",
+    "+08:00": _t("中国、新加坡、台湾"), "+09:00": _t("日本、韩国"), "+07:00": _t("泰国、越南"), "+05:30": _t("印度"),
+    "+00:00": _t("英国(冬)、冰岛"), "+01:00": _t("欧洲中部(冬)、英国(夏)"), "+02:00": _t("欧洲中部(夏)"),
+    "+03:00": _t("莫斯科、土耳其"), "+04:00": _t("迪拜"), "+10:00": _t("悉尼(冬)"), "+11:00": _t("悉尼(夏)"),
+    "+12:00": _t("新西兰(冬)"), "+13:00": _t("新西兰(夏)"), "-03:00": _t("巴西"),
+    "-04:00": _t("美国东部(夏令时)"), "-05:00": _t("美国东部(冬令时)"), "-06:00": _t("美国中部(冬)"),
+    "-07:00": _t("美国西部(夏)"), "-08:00": _t("美国西部(冬)"), "-10:00": _t("夏威夷"),
 }
 
 
@@ -71,7 +72,7 @@ def timezone_choices() -> list[tuple[int, str]]:
     for v in sorted(vals):
         o = format_offset(v)
         note = _TZ_NOTES.get(o)
-        out.append((v, f"UTC{o}" + (f"（{note}）" if note else "")))
+        out.append((v, f"UTC{o}" + (_t('（{0}）', note) if note else "")))
     return out
 
 
@@ -212,7 +213,7 @@ def load_track_file(path: str) -> list[TrackPoint]:
         return parse_gpx(path)
     if ext == ".kml":
         return parse_kml(path)
-    raise ValueError("只支持 .gpx 与 .kml 文件")
+    raise ValueError(_t("只支持 .gpx 与 .kml 文件"))
 
 
 # ---------------------------------------------------------------------------
@@ -348,18 +349,18 @@ def fill_locations(groups, index: TrackIndex, geo_service, window_minutes: int,
     return stats
 
 
-MATCH_KIND_LABELS = {"track": "GPS 轨迹", "reference": "参考照片", "library": "同批带 GPS 的照片"}
+MATCH_KIND_LABELS = {"track": _t("GPS 轨迹"), "reference": _t("参考照片"), "library": _t("同批带 GPS 的照片")}
 
 
 def describe_span(points: list[TrackPoint]) -> str:
     utc = [p.utc for p in points if p.utc is not None]
     local = [p.local for p in points if p.local is not None]
     if not utc and not local:
-        return "无有效轨迹点"
-    ts, unit = (local, "当地时间") if local else (utc, "UTC")
+        return _t("无有效轨迹点")
+    ts, unit = (local, _t("当地时间")) if local else (utc, "UTC")
     t0 = datetime.fromtimestamp(min(ts), timezone.utc)
     t1 = datetime.fromtimestamp(max(ts), timezone.utc)
-    return f"{len(points)} 个点，{t0:%Y-%m-%d %H:%M} ~ {t1:%Y-%m-%d %H:%M}（{unit}）"
+    return _t('{0} 个点，{1:%Y-%m-%d %H:%M} ~ {2:%Y-%m-%d %H:%M}（{3}）', len(points), t0, t1, unit)
 
 
 def shift_label(seconds: int) -> str:

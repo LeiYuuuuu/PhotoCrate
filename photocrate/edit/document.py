@@ -28,10 +28,11 @@ import numpy as np
 
 from . import adjust
 from .blend import composite
+from ..i18n import t as _t
 
 _ids = itertools.count(1)
 
-KIND_NAMES = {"pixel": "图层", "text": "文字", "adjust": "调整"}
+KIND_NAMES = {"pixel": _t("图层"), "text": _t("文字"), "adjust": _t("调整")}
 
 
 def _ceil_div(a: int, b: int) -> int:
@@ -468,7 +469,7 @@ class Document:
 
     # ---- 新建 / 删除 / 排序 ----
     def add_layer(self, layer: Layer, index: int | None = None, name: str | None = None) -> Layer:
-        with self.edit(name or f"新建{KIND_NAMES.get(layer.kind, '图层')}"):
+        with self.edit(name or _t('新建{0}', KIND_NAMES.get(layer.kind, _t('图层')))):
             if index is None:
                 i = self.index_of(self.active_id)
                 index = i + 1 if i >= 0 else len(self.layers)
@@ -480,44 +481,44 @@ class Document:
     def new_pixel_layer(self, name: str | None = None) -> Layer:
         n = sum(1 for l in self.layers if l.kind == "pixel")
         pix = np.zeros((self.height, self.width, 4), np.uint8)
-        return self.add_layer(Layer("pixel", name or f"图层 {n}", pix))
+        return self.add_layer(Layer("pixel", name or _t('图层 {0}', n), pix))
 
-    def new_adjust_layer(self, params: dict | None = None, name: str = "调整") -> Layer:
+    def new_adjust_layer(self, params: dict | None = None, name: str = _t("调整")) -> Layer:
         l = Layer("adjust", name, params=adjust.normalize(params))
         if self.selection is not None:
             l.mask = self.selection.copy()
-        return self.add_layer(l, name=f"新建调整图层「{name}」")
+        return self.add_layer(l, name=_t('新建调整图层「{0}」', name))
 
     def new_text_layer(self, params: dict, x: int, y: int) -> Layer:
-        l = Layer("text", (params.get("text") or "文字").splitlines()[0][:16] or "文字", x=x, y=y,
+        l = Layer("text", (params.get("text") or _t("文字")).splitlines()[0][:16] or _t("文字"), x=x, y=y,
                   params=dict(params))
         l.render_text()
-        return self.add_layer(l, name="新建文字图层")
+        return self.add_layer(l, name=_t("新建文字图层"))
 
-    def place_image(self, rgba: np.ndarray, name: str = "置入的图片") -> Layer:
+    def place_image(self, rgba: np.ndarray, name: str = _t("置入的图片")) -> Layer:
         h, w = rgba.shape[:2]
         s = min(1.0, 0.9 * self.width / w, 0.9 * self.height / h)
         if s < 1:
             rgba = _resize(rgba, max(1, int(w * s)), max(1, int(h * s)))
             h, w = rgba.shape[:2]
         l = Layer("pixel", name, np.ascontiguousarray(rgba), (self.width - w) // 2, (self.height - h) // 2)
-        return self.add_layer(l, name=f"置入「{name}」")
+        return self.add_layer(l, name=_t('置入「{0}」', name))
 
     def duplicate_layer(self, lid: int) -> Layer | None:
         src = self.layer(lid)
         if src is None:
             return None
-        l = Layer(src.kind, src.name + " 拷贝", None if src.pixels is None else src.pixels.copy(), src.x, src.y,
+        l = Layer(src.kind, src.name + _t(" 拷贝"), None if src.pixels is None else src.pixels.copy(), src.x, src.y,
                   copy.deepcopy(src.params))
         l.visible, l.opacity, l.blend, l.mask_enabled = src.visible, src.opacity, src.blend, src.mask_enabled
         l.mask = None if src.mask is None else src.mask.copy()
-        return self.add_layer(l, self.index_of(lid) + 1, "复制图层")
+        return self.add_layer(l, self.index_of(lid) + 1, _t("复制图层"))
 
     def delete_layer(self, lid: int) -> None:
         i = self.index_of(lid)
         if i < 0 or len(self.layers) <= 1:
             return
-        with self.edit("删除图层"):
+        with self.edit(_t("删除图层")):
             self.layers.pop(i)
             self.active_id = self.layers[max(0, i - 1)].id
             self.mask_edit = False
@@ -527,10 +528,10 @@ class Document:
         j = i + delta
         if i < 0 or not 0 <= j < len(self.layers):
             return
-        with self.edit("调整图层顺序"):
+        with self.edit(_t("调整图层顺序")):
             self.layers.insert(j, self.layers.pop(i))
 
-    def set_props(self, lid: int, key: str | None = None, name: str = "图层属性", **kw) -> None:
+    def set_props(self, lid: int, key: str | None = None, name: str = _t("图层属性"), **kw) -> None:
         l = self.layer(lid)
         if l is None:
             return
@@ -539,7 +540,7 @@ class Document:
                 setattr(l, k, v)
             l.version += 1
 
-    def set_params(self, lid: int, params: dict, key: str | None = None, name: str = "调整") -> None:
+    def set_params(self, lid: int, params: dict, key: str | None = None, name: str = _t("调整")) -> None:
         l = self.layer(lid)
         if l is None:
             return
@@ -559,7 +560,7 @@ class Document:
             l.x += int(dx)
             l.y += int(dy)
         l.version += 1
-        self.history.push_state("移动", st)
+        self.history.push_state(_t("移动"), st)
         self.changed("layers")
         self.emit("history")
 
@@ -569,7 +570,7 @@ class Document:
         l = self.layer(lid)
         if l is None or l.kind == "text" or l.mask is not None:
             return
-        with self.edit("添加图层蒙版"):
+        with self.edit(_t("添加图层蒙版")):
             x, y, w, h = l.bounds(self)
             if mode == "selection" and self.selection is not None:
                 l.mask = crop_canvas(self.selection, x, y, w, h, 0)
@@ -583,7 +584,7 @@ class Document:
         l = self.layer(lid)
         if l is None or l.mask is None:
             return
-        with self.edit("删除图层蒙版"):
+        with self.edit(_t("删除图层蒙版")):
             l.mask = None
             l.touch_mask()
             self.mask_edit = False
@@ -592,7 +593,7 @@ class Document:
         l = self.layer(lid)
         if l is None or l.mask is None or not l.has_pixels:
             return
-        with self.edit("应用图层蒙版"):
+        with self.edit(_t("应用图层蒙版")):
             px = l.pixels.copy()
             px[..., 3] = (px[..., 3].astype(np.uint16) * l.mask // 255).astype(np.uint8)
             l.pixels, l.mask = px, None
@@ -605,12 +606,12 @@ class Document:
         l = self.layer(lid)
         if l is None or l.mask is None:
             return
-        with self.edit("反相蒙版"):
+        with self.edit(_t("反相蒙版")):
             l.mask = 255 - l.mask
             l.touch_mask()
 
     # ---- 选区 ----
-    def set_selection(self, mask: np.ndarray | None, name: str = "选区") -> None:
+    def set_selection(self, mask: np.ndarray | None, name: str = _t("选区")) -> None:
         if mask is not None and not mask.any():
             mask = None
         if mask is None and self.selection is None:
@@ -619,20 +620,20 @@ class Document:
             self.selection = mask
 
     def select_all(self) -> None:
-        self.set_selection(np.full((self.height, self.width), 255, np.uint8), "全选")
+        self.set_selection(np.full((self.height, self.width), 255, np.uint8), _t("全选"))
 
     def deselect(self) -> None:
-        self.set_selection(None, "取消选择")
+        self.set_selection(None, _t("取消选择"))
 
     def invert_selection(self) -> None:
         sel = self.selection
-        self.set_selection(np.full((self.height, self.width), 255, np.uint8) if sel is None else 255 - sel, "反选")
+        self.set_selection(np.full((self.height, self.width), 255, np.uint8) if sel is None else 255 - sel, _t("反选"))
 
     def feather_selection(self, radius: float) -> None:
         import cv2
         if self.selection is None or radius <= 0:
             return
-        self.set_selection(cv2.GaussianBlur(self.selection, (0, 0), radius / 2), "羽化")
+        self.set_selection(cv2.GaussianBlur(self.selection, (0, 0), radius / 2), _t("羽化"))
 
     def grow_selection(self, px: int) -> None:
         import cv2
@@ -645,7 +646,7 @@ class Document:
         else:
             dist = cv2.distanceTransform(hard, cv2.DIST_L2, 5)
             out = (dist > -px).astype(np.uint8) * 255
-        self.set_selection(out, "扩展选区" if px > 0 else "收缩选区")
+        self.set_selection(out, _t("扩展选区") if px > 0 else _t("收缩选区"))
 
     def selection_bbox(self):
         return mask_bbox(self.selection)
@@ -669,7 +670,7 @@ class Document:
         if l is None or l.kind != "text":
             return
         if record:
-            with self.edit("栅格化文字"):
+            with self.edit(_t("栅格化文字")):
                 l.kind = "pixel"
                 l.version += 1
         else:
@@ -681,7 +682,7 @@ class Document:
         if l is None:
             return
         sel = self.sel_local(l)
-        with self.edit("清除"):
+        with self.edit(_t("清除")):
             l.kind = "pixel"
             px = l.pixels.copy()
             if sel is None:
@@ -697,7 +698,7 @@ class Document:
             return
         sel = self.sel_local(l)
         a = np.full((l.h, l.w), opacity * rgba[3] / 255.0, np.float32) if sel is None else sel * opacity * rgba[3] / 255
-        with self.edit("填充"):
+        with self.edit(_t("填充")):
             l.kind = "pixel"
             l.pixels = over(l.pixels, np.array(rgba[:3], np.float32) / 255.0, a)
             l.touch()
@@ -715,8 +716,8 @@ class Document:
         x, y, w, h = bb
         part = l.pixels[y:y + h, x:x + w].copy()
         part[..., 3] = np.clip(part[..., 3] * sel[y:y + h, x:x + w] + 0.5, 0, 255).astype(np.uint8)
-        nl = Layer("pixel", l.name + (" 剪切" if cut else " 拷贝"), part, l.x + x, l.y + y)
-        with self.edit("通过剪切的图层" if cut else "通过拷贝的图层"):
+        nl = Layer("pixel", l.name + (_t(" 剪切") if cut else _t(" 拷贝")), part, l.x + x, l.y + y)
+        with self.edit(_t("通过剪切的图层") if cut else _t("通过拷贝的图层")):
             if cut:
                 px = l.pixels.copy()
                 px[..., 3] = np.clip(px[..., 3] * (1 - sel) + 0.5, 0, 255).astype(np.uint8)
@@ -815,7 +816,7 @@ class Document:
         if not sel.any():
             return False
         out = inpaint(l.pixels, sel)
-        self.replace_pixels(lid, out, "内容识别填充")
+        self.replace_pixels(lid, out, _t("内容识别填充"))
         return True
 
     # ---- 合并 ----
@@ -848,7 +849,7 @@ class Document:
             x0, y0, x1, y1 = min(x0, ux), min(y0, uy), max(x1, ux + uw), max(y1, uy + uh)
         base = self._view(lo, opacity=1.0, blend="normal", visible=True, mask_enabled=True)
         pix = self.compose_rect([base, up], x0, y0, x1 - x0, y1 - y0)
-        with self.edit("向下合并"):
+        with self.edit(_t("向下合并")):
             lo.kind, lo.pixels, lo.x, lo.y, lo.mask = "pixel", pix, x0, y0, None
             lo.touch()
             lo.touch_mask()
@@ -858,14 +859,14 @@ class Document:
 
     def flatten(self) -> None:
         pix = self.render_full()
-        with self.edit("拼合图像"):
-            l = self._register(Layer("pixel", "背景", pix))
+        with self.edit(_t("拼合图像")):
+            l = self._register(Layer("pixel", _t("背景"), pix))
             self.layers = [l]
             self.active_id = l.id
             self.mask_edit = False
 
     def stamp_visible(self) -> Layer:
-        return self.add_layer(Layer("pixel", "盖印图层", self.render_full()), len(self.layers), "盖印可见图层")
+        return self.add_layer(Layer("pixel", _t("盖印图层"), self.render_full()), len(self.layers), _t("盖印可见图层"))
 
     # ---- 画布：裁剪 / 旋转 / 翻转 / 图像大小 ----
     def crop(self, x: float, y: float, w: float, h: float, angle: float = 0.0) -> None:
@@ -879,7 +880,7 @@ class Document:
         cx, cy = x + w / 2, y + h / 2
         # 新画布 (u, v) → 旧画布：old = 中心 + R · (u − w/2, v − h/2)
         M = np.array([[c, -s, cx - c * w / 2 + s * h / 2], [s, c, cy - s * w / 2 - c * h / 2]], np.float64)
-        with self.edit("裁剪"):
+        with self.edit(_t("裁剪")):
             for l in self.layers:
                 if l.kind == "text":
                     l.kind = "pixel"
@@ -901,7 +902,7 @@ class Document:
         self.emit("canvas")
 
     def _crop_straight(self, x: int, y: int, w: int, h: int) -> None:
-        with self.edit("裁剪"):
+        with self.edit(_t("裁剪")):
             for l in self.layers:
                 if l.kind == "adjust":
                     if l.mask is not None:
@@ -933,7 +934,7 @@ class Document:
         if not k:
             return
         W, H = self.width, self.height
-        with self.edit({1: "顺时针旋转 90°", 2: "旋转 180°", 3: "逆时针旋转 90°"}[k]):
+        with self.edit({1: _t("顺时针旋转 90°"), 2: _t("旋转 180°"), 3: _t("逆时针旋转 90°")}[k]):
             for l in self.layers:
                 if l.kind == "text":
                     l.kind = "pixel"
@@ -962,7 +963,7 @@ class Document:
 
     def flip(self, horizontal: bool = True) -> None:
         W, H = self.width, self.height
-        with self.edit("水平翻转" if horizontal else "垂直翻转"):
+        with self.edit(_t("水平翻转") if horizontal else _t("垂直翻转")):
             ax = 1 if horizontal else 0
             for l in self.layers:
                 if l.kind == "text":
@@ -987,7 +988,7 @@ class Document:
     def resize_image(self, w: int, h: int) -> None:
         w, h = max(1, int(w)), max(1, int(h))
         sx, sy = w / self.width, h / self.height
-        with self.edit("图像大小"):
+        with self.edit(_t("图像大小")):
             for l in self.layers:
                 if l.kind == "adjust":
                     if l.mask is not None:
@@ -1037,7 +1038,7 @@ class Document:
                             borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
         mk = None if msk is None else cv2.warpAffine(msk, Mt, (nw, nh), flags=cv2.INTER_LINEAR,
                                                     borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        with self.edit("自由变换"):
+        with self.edit(_t("自由变换")):
             l.kind = "pixel"
             l.pixels, l.x, l.y = px, int(x0), int(y0)
             l.xform = None

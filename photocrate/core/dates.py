@@ -13,6 +13,8 @@ import re
 from datetime import datetime, timedelta
 from typing import Any
 
+from ..i18n import t as _t
+
 MIN_DATE = datetime(1990, 1, 1)
 
 # 每条规则：name 名称、regex 正则（命名分组 y m d H M S，或 ts13 毫秒时间戳 / ts10 秒时间戳）
@@ -111,10 +113,10 @@ def resolve_date(meta: dict[str, Any], filename: str, mtime_ns: int | None,
 
 
 DATE_SOURCE_LABELS = {
-    "exif": "EXIF 拍摄时间",
-    "exif_create": "EXIF 创建时间",
-    "xmp": "XMP 日期",
-    "filename": "文件名推测",
-    "mtime": "修改时间推测",
-    None: "未知",
+    "exif": _t("EXIF 拍摄时间"),
+    "exif_create": _t("EXIF 创建时间"),
+    "xmp": _t("XMP 日期"),
+    "filename": _t("文件名推测"),
+    "mtime": _t("修改时间推测"),
+    None: _t("未知"),
 }

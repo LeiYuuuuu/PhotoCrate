@@ -28,6 +28,7 @@ from .canvas import CanvasView
 from .icons import paint_icon
 from .panels import (HistoryPanel, Histogram, LayersPanel, ParamSlider, PropertiesPanel, Swatches, TextEditor)
 from .tools import TOOLS, TransformTool, _Busy
+from ...i18n import t as _t
 
 # 「图像 → 调整」里的条目：(名称, 展开哪一组, 初始参数)
 ADJUSTMENTS = [
@@ -166,8 +167,8 @@ class OptionsBar(QWidget):
             b.setCheckable(True)
             b.setChecked(val == cur)
             b.setStyleSheet("padding: 3px 10px;")
-            b.setToolTip({"new": "新选区", "add": "添加到选区（Shift）", "sub": "从选区减去（Alt）",
-                          "and": "与选区交叉（Shift+Alt）"}.get(val, text))
+            b.setToolTip({"new": _t("新选区"), "add": _t("添加到选区（Shift）"), "sub": _t("从选区减去（Alt）"),
+                          "and": _t("与选区交叉（Shift+Alt）")}.get(val, text))
             grp.addButton(b)
             b.toggled.connect(lambda on, v=val: on and self.win.opts.__setitem__(key, v))
             bl.addWidget(b)
@@ -305,17 +306,17 @@ class FilterDialog(_Base):
             cb.setChecked(bool(self.params[key]))
             cb.toggled.connect(lambda on, k=key: self._set(k, on))
             self.body.addWidget(cb)
-        self.preview = QCheckBox("预览")
+        self.preview = QCheckBox(_t("预览"))
         self.preview.setChecked(True)
         self.preview.toggled.connect(lambda _: self._update())
         self.body.addWidget(self.preview)
         doc = win.doc
-        note = "作用于当前图层" + ("的选区内" if doc.selection is not None else "")
+        note = _t("作用于当前图层") + (_t("的选区内") if doc.selection is not None else "")
         if doc.active is not None and doc.active.kind == "text":
-            note += "；文字图层会被栅格化"
-        self.body.addWidget(caption(note + "。", "faint", 8.5))
-        bc = TacButton("取消", "secondary")
-        bo = TacButton("确定", "primary")
+            note += _t("；文字图层会被栅格化")
+        self.body.addWidget(caption(note + _t("。"), "faint", 8.5))
+        bc = TacButton(_t("取消"), "secondary")
+        bo = TacButton(_t("确定"), "primary")
         bc.clicked.connect(self.reject)
         bo.clicked.connect(self.accept)
         self.buttons.addWidget(bc)
@@ -357,8 +358,8 @@ class NumberDialog(_Base):
         self.body.addLayout(r)
         if note:
             self.body.addWidget(caption(note, "faint", 8.5))
-        bc = TacButton("取消", "secondary")
-        bo = TacButton("确定", "primary")
+        bc = TacButton(_t("取消"), "secondary")
+        bo = TacButton(_t("确定"), "primary")
         bc.clicked.connect(self.reject)
         bo.clicked.connect(self.accept)
         self.buttons.addWidget(bc)
@@ -372,7 +373,7 @@ class NumberDialog(_Base):
 
 class ImageSizeDialog(_Base):
     def __init__(self, parent, w: int, h: int):
-        super().__init__(parent, "图像大小", "IMAGE SIZE")
+        super().__init__(parent, _t("图像大小"), "IMAGE SIZE")
         self.ratio = w / h
         g = QHBoxLayout()
         self.w = QSpinBox()
@@ -381,11 +382,11 @@ class ImageSizeDialog(_Base):
             s.setRange(1, 30000)
             s.setValue(v)
             s.setSuffix(" px")
-        g.addWidget(QLabel("宽"))
+        g.addWidget(QLabel(_t("宽")))
         g.addWidget(self.w)
-        g.addWidget(QLabel("高"))
+        g.addWidget(QLabel(_t("高")))
         g.addWidget(self.h)
-        self.keep = QCheckBox("保持比例")
+        self.keep = QCheckBox(_t("保持比例"))
         self.keep.setChecked(True)
         g.addWidget(self.keep)
         self.body.addLayout(g)
@@ -397,12 +398,12 @@ class ImageSizeDialog(_Base):
             r.addWidget(b)
         r.addStretch(1)
         self.body.addLayout(r)
-        self.body.addWidget(caption(f"原尺寸 {w} × {h}。缩小用区域平均，放大用双三次插值；文字图层按比例改字号，仍可编辑。",
+        self.body.addWidget(caption(_t('原尺寸 {0} × {1}。缩小用区域平均，放大用双三次插值；文字图层按比例改字号，仍可编辑。', w, h),
                                     "faint", 8.5))
         self.w.valueChanged.connect(lambda v: self.keep.isChecked() and self._sync(self.h, round(v / self.ratio)))
         self.h.valueChanged.connect(lambda v: self.keep.isChecked() and self._sync(self.w, round(v * self.ratio)))
-        bc = TacButton("取消", "secondary")
-        bo = TacButton("确定", "primary")
+        bc = TacButton(_t("取消"), "secondary")
+        bo = TacButton(_t("确定"), "primary")
         bc.clicked.connect(self.reject)
         bo.clicked.connect(self.accept)
         self.buttons.addWidget(bc)
@@ -417,21 +418,21 @@ class ImageSizeDialog(_Base):
 
 class FillDialog(_Base):
     def __init__(self, parent, has_sel: bool):
-        super().__init__(parent, "填充", "FILL")
+        super().__init__(parent, _t("填充"), "FILL")
         r = QHBoxLayout()
-        r.addWidget(QLabel("内容："))
+        r.addWidget(QLabel(_t("内容：")))
         self.kind = QComboBox()
-        for k, t in (("fg", "前景色"), ("bg", "背景色"), ("black", "黑色"), ("white", "白色"), ("gray", "50% 灰色"),
-                     ("content", "内容识别（用周围画面补上）")):
+        for k, t in (("fg", _t("前景色")), ("bg", _t("背景色")), ("black", _t("黑色")), ("white", _t("白色")), ("gray", _t("50% 灰色")),
+                     ("content", _t("内容识别（用周围画面补上）"))):
             self.kind.addItem(t, k)
         r.addWidget(self.kind, 1)
         self.body.addLayout(r)
-        self.opacity = ParamSlider("不透明度", 1, 100, 100, 0, "%")
+        self.opacity = ParamSlider(_t("不透明度"), 1, 100, 100, 0, "%")
         self.body.addWidget(self.opacity)
-        self.body.addWidget(caption("填充当前图层" + ("的选区。" if has_sel else "（没有选区 = 整个图层）。内容识别需要先做选区。"),
+        self.body.addWidget(caption(_t("填充当前图层") + (_t("的选区。") if has_sel else _t("（没有选区 = 整个图层）。内容识别需要先做选区。")),
                                     "faint", 8.5))
-        bc = TacButton("取消", "secondary")
-        bo = TacButton("确定", "primary")
+        bc = TacButton(_t("取消"), "secondary")
+        bo = TacButton(_t("确定"), "primary")
         bc.clicked.connect(self.reject)
         bo.clicked.connect(self.accept)
         self.buttons.addWidget(bc)
@@ -440,16 +441,16 @@ class FillDialog(_Base):
 
 class TextDialog(_Base):
     def __init__(self, win, layer, new: bool):
-        super().__init__(win, "新建文字" if new else "编辑文字", "TEXT")
+        super().__init__(win, _t("新建文字") if new else _t("编辑文字"), "TEXT")
         self.win, self.layer = win, layer
         self.setModal(True)
         self.setMinimumWidth(460)
         self.ed = TextEditor(layer.params)
         self.ed.edited.connect(self._edited)
         self.body.addWidget(self.ed)
-        self.body.addWidget(caption("文字图层以后随时可以改：选中它在右侧「属性」里改，或用文字工具点一下。", "faint", 8.5))
-        bc = TacButton("取消", "secondary")
-        bo = TacButton("确定", "primary")
+        self.body.addWidget(caption(_t("文字图层以后随时可以改：选中它在右侧「属性」里改，或用文字工具点一下。"), "faint", 8.5))
+        bc = TacButton(_t("取消"), "secondary")
+        bo = TacButton(_t("确定"), "primary")
         bc.clicked.connect(self.reject)
         bo.clicked.connect(self.accept)
         self.buttons.addWidget(bc)
@@ -461,24 +462,24 @@ class TextDialog(_Base):
         l = self.layer
         l.params = dict(self.ed.params)
         l.render_text()
-        first = (l.params.get("text") or "文字").strip().splitlines()
-        l.name = (first[0] if first else "文字")[:16]
+        first = (l.params.get("text") or _t("文字")).strip().splitlines()
+        l.name = (first[0] if first else _t("文字"))[:16]
         self.win.doc.version += 1
         self.win.mark_interactive()
         self.win.canvas.request_render(True)
 
 
 class ExportDialog(_Base):
-    FORMATS = [(".jpg", "JPEG（.jpg，体积小，发朋友圈 / 打印）"), (".png", "PNG（无损，保留透明）"),
-               (".tif", "TIFF（无损，给其他修图软件）"), (".webp", "WebP")]
+    FORMATS = [(".jpg", _t("JPEG（.jpg，体积小，发朋友圈 / 打印）")), (".png", _t("PNG（无损，保留透明）")),
+               (".tif", _t("TIFF（无损，给其他修图软件）")), (".webp", "WebP")]
 
     def __init__(self, win):
-        super().__init__(win, "导出图片", "EXPORT // NEW FILE")
+        super().__init__(win, _t("导出图片"), "EXPORT // NEW FILE")
         self.win = win
         doc = win.doc
         s = win.ctx.settings if win.ctx is not None else None
         r = QHBoxLayout()
-        r.addWidget(QLabel("格式："))
+        r.addWidget(QLabel(_t("格式：")))
         self.fmt = QComboBox()
         for ext, t in self.FORMATS:
             self.fmt.addItem(t, ext)
@@ -487,30 +488,29 @@ class ExportDialog(_Base):
         r.addWidget(self.fmt, 1)
         self.body.addLayout(r)
         r = QHBoxLayout()
-        r.addWidget(QLabel("保存到："))
+        r.addWidget(QLabel(_t("保存到：")))
         self.path = QLineEdit(eio.suggest_export_path(doc, self.fmt.currentData()))
         r.addWidget(self.path, 1)
-        b = TacButton("浏览…", "secondary", height=30)
+        b = TacButton(_t("浏览…"), "secondary", height=30)
         b.clicked.connect(self._browse)
         r.addWidget(b)
         self.body.addLayout(r)
-        self.quality = ParamSlider("质量", 50, 100, int((s.get("editor_export_q") if s else 0) or 92))
+        self.quality = ParamSlider(_t("质量"), 50, 100, int((s.get("editor_export_q") if s else 0) or 92))
         self.body.addWidget(self.quality)
-        self.keep_exif = QCheckBox("保留原片的拍摄信息（EXIF：时间、相机、镜头…）")
+        self.keep_exif = QCheckBox(_t("保留原片的拍摄信息（EXIF：时间、相机、镜头…）"))
         self.keep_exif.setChecked(True)
-        self.strip_gps = QCheckBox("去掉 GPS 位置（发到网上时建议勾选）")
+        self.strip_gps = QCheckBox(_t("去掉 GPS 位置（发到网上时建议勾选）"))
         self.strip_gps.setChecked(bool(s.get("editor_strip_gps")) if s else False)
-        self.rescan = QCheckBox("保存后重新扫描，让新文件出现在照片库里")
+        self.rescan = QCheckBox(_t("保存后重新扫描，让新文件出现在照片库里"))
         self.rescan.setChecked(True)
         for w in (self.keep_exif, self.strip_gps, self.rescan):
             self.body.addWidget(w)
-        self.body.addWidget(caption(f"画布 {doc.width} × {doc.height}，{len(doc.layers)} 个图层合并成一张。原片不会被修改；"
-                                    "想保留图层以后再改，用「文件 → 保存工程」。", "faint", 8.5))
+        self.body.addWidget(caption(_t('画布 {0} × {1}，{2} 个图层合并成一张。原片不会被修改；想保留图层以后再改，用「文件 → 保存工程」。', doc.width, doc.height, len(doc.layers)), "faint", 8.5))
         self.fmt.currentIndexChanged.connect(self._fmt_changed)
         self.path.textChanged.connect(lambda _: self._update_rescan())
         self._fmt_changed()
-        bc = TacButton("取消", "secondary")
-        bo = TacButton("导出", "primary", en="EXPORT")
+        bc = TacButton(_t("取消"), "secondary")
+        bo = TacButton(_t("导出"), "primary", en="EXPORT")
         bc.clicked.connect(self.reject)
         bo.clicked.connect(self._ok)
         self.buttons.addWidget(bc)
@@ -537,7 +537,7 @@ class ExportDialog(_Base):
 
     def _browse(self):
         ext = self.fmt.currentData()
-        p, _ = QFileDialog.getSaveFileName(self, "导出到", self.path.text(), f"图片 (*{ext})")
+        p, _ = QFileDialog.getSaveFileName(self, _t("导出到"), self.path.text(), _t('图片 (*{0})', ext))
         if p:
             if not os.path.splitext(p)[1]:
                 p += ext
@@ -547,8 +547,8 @@ class ExportDialog(_Base):
         p = self.path.text().strip()
         if not p:
             return
-        if os.path.exists(p) and not choose(self, "文件已存在", f"{p}<br>已经存在，要覆盖它吗？",
-                                            [("yes", "覆盖", "danger"), (None, "取消", "secondary")]):
+        if os.path.exists(p) and not choose(self, _t("文件已存在"), _t('{0}<br>已经存在，要覆盖它吗？', p),
+                                            [("yes", _t("覆盖"), "danger"), (None, _t("取消"), "secondary")]):
             return
         self.accept()
 
@@ -611,18 +611,18 @@ class EditorWindow(QMainWindow):
         rl = QVBoxLayout(right)
         rl.setContentsMargins(6, 6, 6, 6)
         rl.setSpacing(6)
-        hp = Panel("直方图", "HISTOGRAM", pad=6)
+        hp = Panel(_t("直方图"), "HISTOGRAM", pad=6)
         self.histogram = Histogram()
         hp.body.addWidget(self.histogram)
         rl.addWidget(hp)
         split = QSplitter(Qt.Orientation.Vertical)
-        pp = self.panel_props = Panel("属性", "PROPERTIES", pad=0)
+        pp = self.panel_props = Panel(_t("属性"), "PROPERTIES", pad=0)
         self.props = PropertiesPanel(self)
         pp.body.addWidget(self.props)
-        lp = self.panel_layers = Panel("图层", "LAYERS", pad=0)
+        lp = self.panel_layers = Panel(_t("图层"), "LAYERS", pad=0)
         self.layers = LayersPanel(self)
         lp.body.addWidget(self.layers)
-        hsp = self.panel_history = Panel("历史记录", "HISTORY", pad=6)
+        hsp = self.panel_history = Panel(_t("历史记录"), "HISTORY", pad=6)
         self.history = HistoryPanel(self)
         hsp.body.addWidget(self.history)
         for w in (pp, lp, hsp):
@@ -638,8 +638,8 @@ class EditorWindow(QMainWindow):
         sb = self.statusBar()
         self.msg = QLabel("")
         sb.addWidget(self.msg, 1)
-        self.orig_btn = QPushButton("按住看原图（\\）")
-        self.orig_btn.setToolTip("按住时只显示最底下的背景层，松开恢复")
+        self.orig_btn = QPushButton(_t("按住看原图（\\）"))
+        self.orig_btn.setToolTip(_t("按住时只显示最底下的背景层，松开恢复"))
         self.orig_btn.pressed.connect(lambda: self.show_original(True))
         self.orig_btn.released.connect(lambda: self.show_original(False))
         sb.addPermanentWidget(self.orig_btn)
@@ -690,112 +690,112 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
     def _menus(self) -> None:
         mb = self.menuBar()
         d = lambda: self.doc                                    # noqa: E731
-        m = self.menu_file = mb.addMenu("文件")
-        self._act(m, "打开图片…", self.open_image, "Ctrl+O")
-        self._act(m, "打开工程…", lambda: self.open_image(project=True))
-        self._act(m, "置入图片（作为新图层）…", self.place_image, "Ctrl+Shift+P")
+        m = self.menu_file = mb.addMenu(_t("文件"))
+        self._act(m, _t("打开图片…"), self.open_image, "Ctrl+O")
+        self._act(m, _t("打开工程…"), lambda: self.open_image(project=True))
+        self._act(m, _t("置入图片（作为新图层）…"), self.place_image, "Ctrl+Shift+P")
         m.addSeparator()
-        self._act(m, "保存工程", self.save_project, "Ctrl+S")
-        self._act(m, "工程另存为…", lambda: self.save_project(ask=True))
-        self._act(m, "导出图片…", self.export, ["Ctrl+Shift+S", "Ctrl+Alt+Shift+W"])
+        self._act(m, _t("保存工程"), self.save_project, "Ctrl+S")
+        self._act(m, _t("工程另存为…"), lambda: self.save_project(ask=True))
+        self._act(m, _t("导出图片…"), self.export, ["Ctrl+Shift+S", "Ctrl+Alt+Shift+W"])
         m.addSeparator()
-        self._act(m, "关闭", self.close, "Ctrl+W")
+        self._act(m, _t("关闭"), self.close, "Ctrl+W")
 
-        m = mb.addMenu("编辑")
-        self.a_undo = self._act(m, "撤销", self.undo, "Ctrl+Z")
-        self.a_redo = self._act(m, "重做", self.redo, ["Ctrl+Shift+Z", "Ctrl+Y"])
+        m = mb.addMenu(_t("编辑"))
+        self.a_undo = self._act(m, _t("撤销"), self.undo, "Ctrl+Z")
+        self.a_redo = self._act(m, _t("重做"), self.redo, ["Ctrl+Shift+Z", "Ctrl+Y"])
         m.addSeparator()
-        self._act(m, "剪切", lambda: self.copy(cut=True), "Ctrl+X")
-        self._act(m, "拷贝", self.copy, "Ctrl+C")
-        self._act(m, "合并拷贝", lambda: self.copy(merged=True), "Ctrl+Shift+C")
-        self._act(m, "粘贴（作为新图层）", self.paste, "Ctrl+V")
+        self._act(m, _t("剪切"), lambda: self.copy(cut=True), "Ctrl+X")
+        self._act(m, _t("拷贝"), self.copy, "Ctrl+C")
+        self._act(m, _t("合并拷贝"), lambda: self.copy(merged=True), "Ctrl+Shift+C")
+        self._act(m, _t("粘贴（作为新图层）"), self.paste, "Ctrl+V")
         m.addSeparator()
-        self._act(m, "填充…", self.fill, "Shift+F5")
-        self._act(m, "内容识别填充（去掉选区里的东西）", self.content_fill, "Shift+Backspace")
-        self._act(m, "清除选区内容", self.clear, "Delete")
+        self._act(m, _t("填充…"), self.fill, "Shift+F5")
+        self._act(m, _t("内容识别填充（去掉选区里的东西）"), self.content_fill, "Shift+Backspace")
+        self._act(m, _t("清除选区内容"), self.clear, "Delete")
         m.addSeparator()
-        self._act(m, "自由变换", lambda: self.set_tool("transform"), "Ctrl+T")
+        self._act(m, _t("自由变换"), lambda: self.set_tool("transform"), "Ctrl+T")
 
-        m = self.menu_image = mb.addMenu("图像")
-        sub = m.addMenu("调整（新建调整图层）")
+        m = self.menu_image = mb.addMenu(_t("图像"))
+        sub = m.addMenu(_t("调整（新建调整图层）"))
         for name, focus, params in ADJUSTMENTS:
-            self._act(sub, name, lambda n=name, f=focus, p=params: self.new_adjust(n, p, f))
-        sub = m.addMenu("滤镜预设（新建调整图层）")
+            self._act(sub, _t(name), lambda n=name, f=focus, p=params: self.new_adjust(_t(n), p, f))
+        sub = m.addMenu(_t("滤镜预设（新建调整图层）"))
         for name in adjust.PRESETS:
-            self._act(sub, name, lambda n=name: self.new_adjust(n, adjust.preset(n)))
+            self._act(sub, _t(name), lambda n=name: self.new_adjust(_t(n), adjust.preset(n)))
         m.addSeparator()
-        self._act(m, "自动色调（当前图层）", lambda: self.run_filter("auto_tone"), "Ctrl+Shift+L")
-        self._act(m, "去色（当前图层）", lambda: self.run_filter("desaturate"), "Ctrl+Shift+U")
-        self._act(m, "反相（当前图层）", lambda: self.run_filter("invert"), "Ctrl+I")
+        self._act(m, _t("自动色调（当前图层）"), lambda: self.run_filter("auto_tone"), "Ctrl+Shift+L")
+        self._act(m, _t("去色（当前图层）"), lambda: self.run_filter("desaturate"), "Ctrl+Shift+U")
+        self._act(m, _t("反相（当前图层）"), lambda: self.run_filter("invert"), "Ctrl+I")
         m.addSeparator()
-        self._act(m, "图像大小…", self.image_size, "Ctrl+Alt+I")
-        self._act(m, "裁剪到选区", self.crop_to_selection)
-        sub = m.addMenu("图像旋转")
-        self._act(sub, "顺时针 90°", lambda: d().rotate(1))
-        self._act(sub, "逆时针 90°", lambda: d().rotate(3))
+        self._act(m, _t("图像大小…"), self.image_size, "Ctrl+Alt+I")
+        self._act(m, _t("裁剪到选区"), self.crop_to_selection)
+        sub = m.addMenu(_t("图像旋转"))
+        self._act(sub, _t("顺时针 90°"), lambda: d().rotate(1))
+        self._act(sub, _t("逆时针 90°"), lambda: d().rotate(3))
         self._act(sub, "180°", lambda: d().rotate(2))
         sub.addSeparator()
-        self._act(sub, "水平翻转", lambda: d().flip(True))
-        self._act(sub, "垂直翻转", lambda: d().flip(False))
+        self._act(sub, _t("水平翻转"), lambda: d().flip(True))
+        self._act(sub, _t("垂直翻转"), lambda: d().flip(False))
 
-        m = mb.addMenu("图层")
-        self._act(m, "新建图层", lambda: d().new_pixel_layer(), "Ctrl+Shift+N")
-        self._act(m, "新建调整图层", lambda: self.new_adjust())
-        self._act(m, "复制图层 / 通过拷贝的图层", lambda: d().layer_via_copy(), "Ctrl+J")
-        self._act(m, "通过剪切的图层", lambda: d().layer_via_copy(cut=True), "Ctrl+Shift+J")
-        self._act(m, "删除图层", lambda: d().delete_layer(d().active_id))
+        m = mb.addMenu(_t("图层"))
+        self._act(m, _t("新建图层"), lambda: d().new_pixel_layer(), "Ctrl+Shift+N")
+        self._act(m, _t("新建调整图层"), lambda: self.new_adjust())
+        self._act(m, _t("复制图层 / 通过拷贝的图层"), lambda: d().layer_via_copy(), "Ctrl+J")
+        self._act(m, _t("通过剪切的图层"), lambda: d().layer_via_copy(cut=True), "Ctrl+Shift+J")
+        self._act(m, _t("删除图层"), lambda: d().delete_layer(d().active_id))
         m.addSeparator()
-        self._act(m, "添加图层蒙版", self.add_mask)
-        self._act(m, "删除图层蒙版", lambda: d().delete_mask(d().active_id))
-        self._act(m, "应用图层蒙版", lambda: d().apply_mask(d().active_id))
-        self._act(m, "反相蒙版", lambda: d().invert_mask(d().active_id))
+        self._act(m, _t("添加图层蒙版"), self.add_mask)
+        self._act(m, _t("删除图层蒙版"), lambda: d().delete_mask(d().active_id))
+        self._act(m, _t("应用图层蒙版"), lambda: d().apply_mask(d().active_id))
+        self._act(m, _t("反相蒙版"), lambda: d().invert_mask(d().active_id))
         m.addSeparator()
-        self._act(m, "上移一层", lambda: d().move_layer(d().active_id, 1), "Ctrl+]")
-        self._act(m, "下移一层", lambda: d().move_layer(d().active_id, -1), "Ctrl+[")
+        self._act(m, _t("上移一层"), lambda: d().move_layer(d().active_id, 1), "Ctrl+]")
+        self._act(m, _t("下移一层"), lambda: d().move_layer(d().active_id, -1), "Ctrl+[")
         m.addSeparator()
-        self._act(m, "向下合并", lambda: self._busy_call("正在合并…", lambda: d().merge_down(d().active_id)), "Ctrl+E")
-        self._act(m, "盖印可见图层", lambda: self._busy_call("正在合成…", d().stamp_visible), "Ctrl+Alt+Shift+E")
-        self._act(m, "拼合图像", lambda: self._busy_call("正在拼合…", d().flatten))
+        self._act(m, _t("向下合并"), lambda: self._busy_call(_t("正在合并…"), lambda: d().merge_down(d().active_id)), "Ctrl+E")
+        self._act(m, _t("盖印可见图层"), lambda: self._busy_call(_t("正在合成…"), d().stamp_visible), "Ctrl+Alt+Shift+E")
+        self._act(m, _t("拼合图像"), lambda: self._busy_call(_t("正在拼合…"), d().flatten))
         m.addSeparator()
-        self._act(m, "栅格化文字", lambda: d().rasterize(d().active_id))
+        self._act(m, _t("栅格化文字"), lambda: d().rasterize(d().active_id))
 
-        m = mb.addMenu("选择")
-        self._act(m, "全选", lambda: d().select_all(), "Ctrl+A")
-        self._act(m, "取消选择", lambda: d().deselect(), "Ctrl+D")
-        self._act(m, "反选", lambda: d().invert_selection(), "Ctrl+Shift+I")
+        m = mb.addMenu(_t("选择"))
+        self._act(m, _t("全选"), lambda: d().select_all(), "Ctrl+A")
+        self._act(m, _t("取消选择"), lambda: d().deselect(), "Ctrl+D")
+        self._act(m, _t("反选"), lambda: d().invert_selection(), "Ctrl+Shift+I")
         m.addSeparator()
-        self._act(m, "选择主体（自动）", self.select_subject)
+        self._act(m, _t("选择主体（自动）"), self.select_subject)
         m.addSeparator()
-        self._act(m, "羽化…", lambda: self._sel_number("羽化选区", "羽化半径", 8, d().feather_selection), "Shift+F6")
-        self._act(m, "扩展…", lambda: self._sel_number("扩展选区", "扩展量", 4, d().grow_selection))
-        self._act(m, "收缩…", lambda: self._sel_number("收缩选区", "收缩量", 4, lambda v: d().grow_selection(-v)))
+        self._act(m, _t("羽化…"), lambda: self._sel_number(_t("羽化选区"), _t("羽化半径"), 8, d().feather_selection), "Shift+F6")
+        self._act(m, _t("扩展…"), lambda: self._sel_number(_t("扩展选区"), _t("扩展量"), 4, d().grow_selection))
+        self._act(m, _t("收缩…"), lambda: self._sel_number(_t("收缩选区"), _t("收缩量"), 4, lambda v: d().grow_selection(-v)))
 
-        m = mb.addMenu("滤镜")
-        self.a_last_filter = self._act(m, "上次滤镜", self.repeat_filter, "Ctrl+F")
+        m = mb.addMenu(_t("滤镜"))
+        self.a_last_filter = self._act(m, _t("上次滤镜"), self.repeat_filter, "Ctrl+F")
         self.a_last_filter.setEnabled(False)
         m.addSeparator()
         for fid in ("gaussian", "motion", "unsharp", "denoise", "highpass", "mosaic", "noise", "posterize",
                     "threshold"):
             self._act(m, FILTERS[fid].name + "…", lambda f=fid: self.run_filter(f))
 
-        m = mb.addMenu("视图")
-        self._act(m, "放大", lambda: self.canvas.zoom_step(True), ["Ctrl+=", "Ctrl++"])
-        self._act(m, "缩小", lambda: self.canvas.zoom_step(False), "Ctrl+-")
-        self._act(m, "适合窗口", self.canvas.fit, "Ctrl+0")
-        self._act(m, "实际像素（100%）", lambda: self.canvas.set_zoom(1.0), "Ctrl+1")
+        m = mb.addMenu(_t("视图"))
+        self._act(m, _t("放大"), lambda: self.canvas.zoom_step(True), ["Ctrl+=", "Ctrl++"])
+        self._act(m, _t("缩小"), lambda: self.canvas.zoom_step(False), "Ctrl+-")
+        self._act(m, _t("适合窗口"), self.canvas.fit, "Ctrl+0")
+        self._act(m, _t("实际像素（100%）"), lambda: self.canvas.set_zoom(1.0), "Ctrl+1")
 
-        m = mb.addMenu("帮助")
-        self._act(m, "新手教程", self.start_tour)
-        self._act(m, "快捷键…", self.show_help, "F1")
+        m = mb.addMenu(_t("帮助"))
+        self._act(m, _t("新手教程"), self.start_tour)
+        self._act(m, _t("快捷键…"), self.show_help, "F1")
 
         # 工具与颜色的单键快捷键（不放进菜单）
         for t in self.tools.values():
             if t.shortcut:
                 self._act(None, t.name, lambda tid=t.id: self.set_tool(tid), t.shortcut)
-        self._act(None, "交换前景 / 背景色", self.swap_colors, "X")
-        self._act(None, "默认颜色", self.reset_colors, "D")
-        self._act(None, "笔刷变小", lambda: self._brush_size(1 / 1.25), "[")
-        self._act(None, "笔刷变大", lambda: self._brush_size(1.25), "]")
+        self._act(None, _t("交换前景 / 背景色"), self.swap_colors, "X")
+        self._act(None, _t("默认颜色"), self.reset_colors, "D")
+        self._act(None, _t("笔刷变小"), lambda: self._brush_size(1 / 1.25), "[")
+        self._act(None, _t("笔刷变大"), lambda: self._brush_size(1.25), "]")
 
     # ---- 状态 ----
     def status_msg(self, text: str) -> None:
@@ -809,8 +809,8 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
 
     def _update_title(self) -> None:
         d = self.doc
-        name = d.source.name or os.path.basename(d.source.project or "") or "未命名"
-        self.setWindowTitle(f"影匣 · 修图 — {name}{'  *' if d.modified else ''}")
+        name = d.source.name or os.path.basename(d.source.project or "") or _t("未命名")
+        self.setWindowTitle(_t('影匣 · 修图 — {0}{1}', name, '  *' if d.modified else ''))
 
     def _update_zoom(self) -> None:
         self.zoom_lab.setText(f"{self.canvas.zoom * 100:.0f}%   {self.doc.width} × {self.doc.height}")
@@ -939,7 +939,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self.doc.mask_edit = bool(on and l is not None and l.mask is not None)
         if self.doc.mask_edit:
             self.reset_colors()
-            self.status_msg("正在蒙版上画：黑色隐藏、白色显示（X 交换前景 / 背景色）")
+            self.status_msg(_t("正在蒙版上画：黑色隐藏、白色显示（X 交换前景 / 背景色）"))
         self.layers.update_marks()
         self._msig = self._mask_sig()
 
@@ -974,7 +974,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._leave_transform()
         n = self.doc.history.undo()
         if n:
-            self.status_msg(f"撤销：{n}")
+            self.status_msg(_t('撤销：{0}', n))
             self.props.sync()
             self._msig = self._mask_sig()
 
@@ -984,7 +984,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._leave_transform()
         n = self.doc.history.redo()
         if n:
-            self.status_msg(f"重做：{n}")
+            self.status_msg(_t('重做：{0}', n))
             self.props.sync()
             self._msig = self._mask_sig()
 
@@ -1013,16 +1013,16 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
             return
         self.mark_interactive()
         self.canvas.hot = l.id
-        self.doc.set_params(l.id, ed.params, key=f"adj{l.id}:{key}", name=f"调整：{label}")
+        self.doc.set_params(l.id, ed.params, key=f"adj{l.id}:{key}", name=_t('调整：{0}', label))
 
     def apply_preset(self, name: str) -> None:
         l = self.doc.active
         if l is None or l.kind != "adjust":
             return
         p = adjust.preset(name) if name else adjust.default_params()
-        self.doc.set_params(l.id, p, name=f"预设：{name}" if name else "复位调整")
-        if name and l.name in ("调整",) + tuple(adjust.PRESETS):
-            self.doc.layer(l.id).name = name
+        self.doc.set_params(l.id, p, name=_t('预设：{0}', _t(name)) if name else _t("复位调整"))
+        if name and l.name in (_t("调整"),) + tuple(_t(n) for n in adjust.PRESETS):
+            self.doc.layer(l.id).name = _t(name)
         self.props.sync()
         self.layers.refresh(thumbs=False)
 
@@ -1032,9 +1032,9 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         if l is None or l.kind != "text" or ed is None:
             return
         self.mark_interactive()
-        self.doc.set_params(l.id, ed.params, key=f"text{l.id}:{key}", name="编辑文字")
+        self.doc.set_params(l.id, ed.params, key=f"text{l.id}:{key}", name=_t("编辑文字"))
 
-    def new_adjust(self, name: str = "调整", params: dict | None = None, focus: str | None = None) -> None:
+    def new_adjust(self, name: str = _t("调整"), params: dict | None = None, focus: str | None = None) -> None:
         self.doc.new_adjust_layer(params or {}, name)
         self.props.rebuild(focus)
 
@@ -1043,7 +1043,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         if d.active is None:
             return
         if d.active.kind == "text":
-            info(self, "文字图层不能加蒙版", "先「栅格化文字」，或者把文字放进一个图层组…（暂不支持组）。也可以直接用调整图层的蒙版。")
+            info(self, _t("文字图层不能加蒙版"), _t("先「栅格化文字」，或者把文字放进一个图层组…（暂不支持组）。也可以直接用调整图层的蒙版。"))
             return
         d.add_mask(d.active_id, "selection" if d.selection is not None else "reveal")
 
@@ -1056,7 +1056,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
             p = default_params()
             size = int(self.opts.get("text_size", 96))
             p.update(font=self.opts.get("text_font") or p["font"], size=size, color=self.fg.name())
-            layer = Layer("text", "文字", x=pos[0], y=int(pos[1] - size * 0.25), params=p)
+            layer = Layer("text", _t("文字"), x=pos[0], y=int(pos[1] - size * 0.25), params=p)
             layer.render_text()
             i = d.index_of(d.active_id)
             d.layers.insert(i + 1 if i >= 0 else len(d.layers), d._register(layer))
@@ -1065,7 +1065,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         dlg = TextDialog(self, layer, new)
         ok = dlg.exec() == TextDialog.DialogCode.Accepted and (layer.params.get("text") or "").strip()
         if ok:
-            d.history.push_state("新建文字图层" if new else "编辑文字", before)
+            d.history.push_state(_t("新建文字图层") if new else _t("编辑文字"), before)
             d.changed("layers")
             d.emit("history")
             self.props.rebuild()
@@ -1075,7 +1075,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
     def _need_pixels(self, what: str):
         l = self.doc.active
         if l is None or l.kind == "adjust":
-            self.status_msg(f"{what}需要一个像素图层：在图层面板里选中它")
+            self.status_msg(_t('{0}需要一个像素图层：在图层面板里选中它', what))
             return None
         return l
 
@@ -1089,12 +1089,12 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
             if dlg.exec() != FilterDialog.DialogCode.Accepted:
                 return
             params = dlg.params
-        with _Busy(self, f"正在应用{spec.name}…"):
+        with _Busy(self, _t('正在应用{0}…', spec.name)):
             self.doc.apply_filter(l.id, fid, params or {})
         self._last_filter = (fid, dict(params or {}))
-        self.a_last_filter.setText(f"上次滤镜：{spec.name}")
+        self.a_last_filter.setText(_t('上次滤镜：{0}', spec.name))
         self.a_last_filter.setEnabled(True)
-        self.status_msg(f"已应用：{spec.name}")
+        self.status_msg(_t('已应用：{0}', spec.name))
 
     def repeat_filter(self) -> None:
         if self._last_filter:
@@ -1106,13 +1106,13 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         if dlg.exec() == ImageSizeDialog.DialogCode.Accepted:
             w, h = dlg.w.value(), dlg.h.value()
             if (w, h) != (d.width, d.height):
-                with _Busy(self, "正在调整图像大小…"):
+                with _Busy(self, _t("正在调整图像大小…")):
                     d.resize_image(w, h)
 
     def crop_to_selection(self) -> None:
         bb = self.doc.selection_bbox()
         if bb is None:
-            self.status_msg("先做一个选区")
+            self.status_msg(_t("先做一个选区"))
             return
         self.doc.crop(*bb)
 
@@ -1120,17 +1120,17 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         from ...edit.paint import object_select_doc
         d = self.doc
         mx, my = d.width * 0.02, d.height * 0.02
-        with _Busy(self, "正在识别主体…"):
+        with _Busy(self, _t("正在识别主体…")):
             m = object_select_doc(d, (mx, my, d.width - mx, d.height - my))
         if not m.any():
-            self.status_msg("没有识别出主体：用「对象选择」工具框住它试试")
+            self.status_msg(_t("没有识别出主体：用「对象选择」工具框住它试试"))
             return
-        d.set_selection(m, "选择主体")
-        self.status_msg("已选出主体；边缘不准可以用「对象选择」工具 Shift / Alt 补选、减选")
+        d.set_selection(m, _t("选择主体"))
+        self.status_msg(_t("已选出主体；边缘不准可以用「对象选择」工具 Shift / Alt 补选、减选"))
 
     def _sel_number(self, title: str, label: str, default: int, fn) -> None:
         if self.doc.selection is None:
-            self.status_msg("先做一个选区")
+            self.status_msg(_t("先做一个选区"))
             return
         v = NumberDialog.ask(self, title, label, default, 1, 500)
         if v:
@@ -1139,7 +1139,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
 
     def fill(self) -> None:
         d = self.doc
-        l = self._need_pixels("填充")
+        l = self._need_pixels(_t("填充"))
         if l is None:
             return
         dlg = FillDialog(self, d.selection is not None)
@@ -1156,25 +1156,25 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
 
     def content_fill(self) -> None:
         d = self.doc
-        l = self._need_pixels("内容识别填充")
+        l = self._need_pixels(_t("内容识别填充"))
         if l is None:
             return
         if d.selection is None:
-            self.status_msg("先用选框 / 套索圈出要去掉的东西（圈大一点），再内容识别填充")
+            self.status_msg(_t("先用选框 / 套索圈出要去掉的东西（圈大一点），再内容识别填充"))
             return
-        with _Busy(self, "正在用周围的画面补上…"):
+        with _Busy(self, _t("正在用周围的画面补上…")):
             ok = d.content_fill(l.id)
-        self.status_msg("完成：不满意可以撤销，换个选区再试，或用污点修复画笔补几下" if ok else "选区不在当前图层上")
+        self.status_msg(_t("完成：不满意可以撤销，换个选区再试，或用污点修复画笔补几下") if ok else _t("选区不在当前图层上"))
 
     def clear(self) -> None:
         d = self.doc
         if self.tool is not None and self.tool.id == "crop":
             return
-        l = self._need_pixels("清除")
+        l = self._need_pixels(_t("清除"))
         if l is None:
             return
         if d.selection is None:
-            self.status_msg("先做一个选区，再按 Delete 清除选区里的内容")
+            self.status_msg(_t("先做一个选区，再按 Delete 清除选区里的内容"))
             return
         d.clear_selected(l.id)
 
@@ -1186,7 +1186,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
             src = d.flat_rgba()
             ox = oy = 0
         else:
-            l = self._need_pixels("拷贝")
+            l = self._need_pixels(_t("拷贝"))
             if l is None:
                 return
             src, ox, oy = l.pixels, l.x, l.y
@@ -1206,31 +1206,31 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         QApplication.clipboard().setImage(img)
         if cut and not merged and sel is not None:
             d.clear_selected(d.active_id)
-        self.status_msg(f"已拷贝 {part.shape[1]} × {part.shape[0]}")
+        self.status_msg(_t('已拷贝 {0} × {1}', part.shape[1], part.shape[0]))
 
     def paste(self) -> None:
         img = QApplication.clipboard().image()
         if img.isNull():
-            self.status_msg("剪贴板里没有图片")
+            self.status_msg(_t("剪贴板里没有图片"))
             return
         img = img.convertToFormat(QImage.Format.Format_RGBA8888)
         w, h = img.width(), img.height()
         arr = np.frombuffer(img.constBits(), np.uint8, img.bytesPerLine() * h).reshape(h, img.bytesPerLine())
         arr = arr[:, :w * 4].reshape(h, w, 4).copy()
-        self.doc.place_image(arr, "粘贴的图片")
+        self.doc.place_image(arr, _t("粘贴的图片"))
 
     # ---- 文件 ----
     def open_image(self, project: bool = False) -> None:
         start = os.path.dirname(self.doc.source.path or self.doc.source.project or "") or os.path.expanduser("~")
-        flt = "修图工程 (*.pcedit)" if project else eio.OPEN_FILTER
-        p, _ = QFileDialog.getOpenFileName(self, "打开", start, flt)
+        flt = _t("修图工程 (*.pcedit)") if project else eio.OPEN_FILTER
+        p, _ = QFileDialog.getOpenFileName(self, _t("打开"), start, flt)
         if p:
             open_editor(self.ctx, self.parent(), path=p)
 
     def place_image(self) -> None:
         from PIL import Image, ImageOps
         start = os.path.dirname(self.doc.source.path or "") or os.path.expanduser("~")
-        p, _ = QFileDialog.getOpenFileName(self, "置入图片", start, eio.OPEN_FILTER)
+        p, _ = QFileDialog.getOpenFileName(self, _t("置入图片"), start, eio.OPEN_FILTER)
         if not p:
             return
         try:
@@ -1238,7 +1238,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
                 im = ImageOps.exif_transpose(im)
                 arr = np.array(im.convert("RGBA"), dtype=np.uint8)
         except Exception as e:
-            info(self, "无法打开", f"{p}<br>{e}", "ERROR")
+            info(self, _t("无法打开"), f"{p}<br>{e}", "ERROR")
             return
         self.doc.place_image(arr, os.path.splitext(os.path.basename(p))[0])
         self.set_tool("transform")
@@ -1247,21 +1247,21 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         d = self.doc
         path = d.source.project or (eio.project_path_for(d.source.path) if d.source.path else "")
         if ask or not path:
-            path, _ = QFileDialog.getSaveFileName(self, "保存工程", path or os.path.expanduser("~/未命名.pcedit"),
-                                                  "修图工程 (*.pcedit)")
+            path, _ = QFileDialog.getSaveFileName(self, _t("保存工程"), path or os.path.expanduser(_t("~/未命名.pcedit")),
+                                                  _t("修图工程 (*.pcedit)"))
             if not path:
                 return False
             if not path.lower().endswith(eio.PROJECT_EXT):
                 path += eio.PROJECT_EXT
         self._leave_transform()
         try:
-            with _Busy(self, "正在保存工程…"):
+            with _Busy(self, _t("正在保存工程…")):
                 size = eio.save_project(d, path)
         except Exception as e:
-            info(self, "保存失败", str(e), "ERROR")
+            info(self, _t("保存失败"), str(e), "ERROR")
             return False
         from ...ops.pathsafe import human_size
-        self.status_msg(f"工程已保存：{path}（{human_size(size)}）。和原片同名时会跟着照片一起移动 / 改名")
+        self.status_msg(_t('工程已保存：{0}（{1}）。和原片同名时会跟着照片一起移动 / 改名', path, human_size(size)))
         self._update_title()
         return True
 
@@ -1277,18 +1277,18 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
             s.set("editor_export_q", int(dlg.quality.value()))
             s.set("editor_strip_gps", dlg.strip_gps.isChecked())
         try:
-            with _Busy(self, "正在导出…"):
+            with _Busy(self, _t("正在导出…")):
                 size = eio.export_image(self.doc, path, int(dlg.quality.value()), dlg.keep_exif.isChecked(),
                                         dlg.strip_gps.isChecked())
         except Exception as e:
-            info(self, "导出失败", str(e), "ERROR")
+            info(self, _t("导出失败"), str(e), "ERROR")
             return False
         from ...ops.pathsafe import human_size
         self.doc.modified = False
         self._update_title()
-        self.status_msg(f"已导出：{path}（{human_size(size)}）")
+        self.status_msg(_t('已导出：{0}（{1}）', path, human_size(size)))
         if self.ctx is not None:
-            self.ctx.status.emit(f"修图已导出：{path}")
+            self.ctx.status.emit(_t('修图已导出：{0}', path))
             if dlg.rescan.isChecked() and dlg.in_library() and hasattr(self.ctx, "rescan_requested"):
                 self.ctx.rescan_requested.emit()
         return True
@@ -1309,34 +1309,34 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._tour = TourOverlay(self, done)
 
     def show_help(self) -> None:
-        rows = [("V / M / L / W / Q", "移动 / 选框 / 套索 / 魔棒 / 对象选择"),
-                ("C / I", "裁剪（按住 Ctrl 拖线拉直）/ 吸管"),
-                ("J / B / S / E", "污点修复 / 画笔 / 仿制图章（Alt 取样）/ 橡皮擦"),
-                ("K / G / T", "油漆桶 / 渐变 / 文字"),
-                ("H / Z / 空格", "抓手 / 缩放 / 按住空格临时拖动画面"),
-                ("[ ]", "笔刷变小 / 变大"),
-                ("X / D", "交换前景背景色 / 恢复黑白"),
-                ("Shift / Alt", "选区工具：添加 / 减去（一起按 = 交叉）"),
-                ("Ctrl+Z / Ctrl+Shift+Z", "撤销 / 重做（历史记录面板里可以直接跳到任一步）"),
-                ("Ctrl+J / Ctrl+Shift+J", "通过拷贝 / 剪切的图层（有选区时只取选区）"),
-                ("Ctrl+T", "自由变换：拖角缩放、框外旋转，回车应用"),
-                ("Ctrl+E / Ctrl+Alt+Shift+E", "向下合并 / 盖印可见图层"),
-                ("Ctrl+A / D / Shift+I", "全选 / 取消选择 / 反选"),
-                ("Shift+F5 / Shift+Backspace", "填充 / 内容识别填充"),
-                ("Ctrl+0 / Ctrl+1 / 滚轮", "适合窗口 / 100% / 以鼠标为中心缩放"),
-                ("按住 \\", "看原图（只显示背景层）"),
-                ("Ctrl+S / Ctrl+Shift+S", "保存工程（保留图层）/ 导出图片（新文件）")]
+        rows = [("V / M / L / W / Q", _t("移动 / 选框 / 套索 / 魔棒 / 对象选择")),
+                ("C / I", _t("裁剪（按住 Ctrl 拖线拉直）/ 吸管")),
+                ("J / B / S / E", _t("污点修复 / 画笔 / 仿制图章（Alt 取样）/ 橡皮擦")),
+                ("K / G / T", _t("油漆桶 / 渐变 / 文字")),
+                (_t("H / Z / 空格"), _t("抓手 / 缩放 / 按住空格临时拖动画面")),
+                ("[ ]", _t("笔刷变小 / 变大")),
+                ("X / D", _t("交换前景背景色 / 恢复黑白")),
+                ("Shift / Alt", _t("选区工具：添加 / 减去（一起按 = 交叉）")),
+                ("Ctrl+Z / Ctrl+Shift+Z", _t("撤销 / 重做（历史记录面板里可以直接跳到任一步）")),
+                ("Ctrl+J / Ctrl+Shift+J", _t("通过拷贝 / 剪切的图层（有选区时只取选区）")),
+                ("Ctrl+T", _t("自由变换：拖角缩放、框外旋转，回车应用")),
+                ("Ctrl+E / Ctrl+Alt+Shift+E", _t("向下合并 / 盖印可见图层")),
+                ("Ctrl+A / D / Shift+I", _t("全选 / 取消选择 / 反选")),
+                ("Shift+F5 / Shift+Backspace", _t("填充 / 内容识别填充")),
+                (_t("Ctrl+0 / Ctrl+1 / 滚轮"), _t("适合窗口 / 100% / 以鼠标为中心缩放")),
+                (_t("按住 \\"), _t("看原图（只显示背景层）")),
+                ("Ctrl+S / Ctrl+Shift+S", _t("保存工程（保留图层）/ 导出图片（新文件）"))]
         html = "<table cellspacing=6>" + "".join(f"<tr><td><b>{k}</b></td><td>{v}</td></tr>" for k, v in rows) + "</table>"
-        info(self, "修图快捷键", html, "SHORTCUTS")
+        info(self, _t("修图快捷键"), html, "SHORTCUTS")
 
     def closeEvent(self, e):
         if self.tool is not None and self.tool.busy():
             self.tool.deactivate()
         self._leave_transform()
         if self.doc.modified:
-            r = choose(self, "保存修改？", "这张图有还没保存的修改。<br>「保存工程」保留全部图层，以后可以接着改；"
-                       "也可以先取消，用「文件 → 导出图片」存一张成品。",
-                       [("save", "保存工程", "primary"), ("drop", "不保存", "danger"), (None, "取消", "secondary")])
+            r = choose(self, _t("保存修改？"), _t("这张图有还没保存的修改。<br>「保存工程」保留全部图层，以后可以接着改；"
+                       "也可以先取消，用「文件 → 导出图片」存一张成品。"),
+                       [("save", _t("保存工程"), "primary"), ("drop", _t("不保存"), "danger"), (None, _t("取消"), "secondary")])
             if r is None or (r == "save" and not self.save_project()):
                 e.ignore()
                 return
@@ -1363,18 +1363,17 @@ def open_editor(ctx, parent=None, group=None, path: str | None = None) -> Editor
     try:
         if group is not None:
             if getattr(group, "is_video", False):
-                info(parent, "不能修图", "视频不能在这里修图。", "NOTICE")
+                info(parent, _t("不能修图"), _t("视频不能在这里修图。"), "NOTICE")
                 return None
             from ...ops.exporter import source_file
             f = source_file(group)
             if f is None:
-                info(parent, "不能修图", "这组里没有可以打开的图片文件。", "NOTICE")
+                info(parent, _t("不能修图"), _t("这组里没有可以打开的图片文件。"), "NOTICE")
                 return None
             proj = eio.project_path_for(f.path)
             if os.path.exists(proj):
-                r = choose(parent, "接着上次修？", f"这张照片有一个修图工程：<br><b>{os.path.basename(proj)}</b>"
-                           "<br>打开工程会恢复上次的全部图层；打开原片则从头开始。",
-                           [("proj", "打开工程", "primary"), ("orig", "打开原片", "secondary"), (None, "取消", "secondary")])
+                r = choose(parent, _t("接着上次修？"), _t('这张照片有一个修图工程：<br><b>{0}</b><br>打开工程会恢复上次的全部图层；打开原片则从头开始。', os.path.basename(proj)),
+                           [("proj", _t("打开工程"), "primary"), ("orig", _t("打开原片"), "secondary"), (None, _t("取消"), "secondary")])
                 if r is None:
                     return None
                 if r == "proj":
@@ -1391,7 +1390,7 @@ def open_editor(ctx, parent=None, group=None, path: str | None = None) -> Editor
             finally:
                 QApplication.restoreOverrideCursor()
     except Exception as e:
-        info(parent, "打开失败", f"{e}", "ERROR")
+        info(parent, _t("打开失败"), f"{e}", "ERROR")
         return None
     if doc is None:
         return None

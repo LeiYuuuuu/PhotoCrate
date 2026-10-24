@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Callable
+from ..i18n import t as _t
 
 TokenFn = Callable[[Any, "PartitionContext"], "str | None"]
 
@@ -40,7 +41,7 @@ class Dimension:
     label: str = ""                # 中文名
     en: str = ""                   # 英文小标签（界面装饰用）
     description: str = ""
-    unknown: str = "未知"          # 无法判断时的文件夹名
+    unknown: str = _t("未知")          # 无法判断时的文件夹名
     order_by: str = "count"        # 预览树中同级文件夹排序：name / count
     options: list[Option] = []
 
@@ -72,7 +73,7 @@ class Dimension:
                     parts.append(o.label)
             else:
                 parts.append(f"{o.label}{v}{o.suffix}")
-        return self.label + (f"（{'，'.join(parts)}）" if parts else "")
+        return self.label + (_t('（{0}）', _t('，').join(parts)) if parts else "")
 
 
 DIMENSIONS: dict[str, Dimension] = {}
@@ -80,15 +81,33 @@ DIMENSIONS: dict[str, Dimension] = {}
 
 def register_dimension(d: Dimension) -> Dimension:
     if not d.id:
-        raise ValueError("维度必须有 id")
+        raise ValueError(_t("维度必须有 id"))
     DIMENSIONS[d.id] = d
     return d
+
+
+# 模板占位符的英文写法（两种语言都能用：{年} 和 {year} 是同一个）
+TOKEN_ALIASES = {
+    "year": "年", "month": "月", "day": "日", "ym": "年月", "ymd": "年月日", "date": "日期", "time": "时间",
+    "quarter": "季度", "datesource": "日期来源",
+    "country": "国家", "province": "省", "city": "市", "district": "区县", "place": "地区",
+    "warmth": "冷暖", "color": "主色", "tone": "明暗",
+    "brand": "品牌", "camera": "相机", "lens": "镜头", "source": "来源",
+    "format": "格式", "type": "类型", "ext": "扩展名", "orientation": "方向", "resolution": "分辨率",
+    "focal": "焦段", "iso": "感光度", "sharpness": "清晰度",
+    "rating": "星级", "flag": "标记", "label": "色标",
+    "trip": "旅行", "tripday": "第几天", "tripdays": "旅行天数",
+    "scene": "场景", "scenegroup": "场景大类", "person": "人物", "folder": "原文件夹",
+}
 
 
 def all_tokens() -> dict[str, TokenFn]:
     out: dict[str, TokenFn] = {}
     for d in DIMENSIONS.values():
         out.update(d.tokens())
+    for en, zh in TOKEN_ALIASES.items():
+        if zh in out and en not in out:
+            out[en] = out[zh]
     return out
 
 
@@ -123,7 +142,7 @@ def is_raw_side(member, group) -> bool:
 
 def _ext_label(path: str) -> str:
     import os
-    return os.path.splitext(path)[1].lstrip(".").upper() or "其他"
+    return os.path.splitext(path)[1].lstrip(".").upper() or _t("其他")
 
 
 def member_format(member, group) -> str:
@@ -157,4 +176,5 @@ def group_formats(group) -> list[str]:
 
 
 def is_unknown_label(name: str) -> bool:
-    return name.startswith(("未知", "无法", "未分析", "其他"))
+    from ..i18n import is_unknown
+    return is_unknown(name)

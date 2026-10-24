@@ -6,6 +6,7 @@ import os
 from ..analyzers.builtin import (BLUR_LABELS, FLAG_NAMES, LABEL_NAMES, ORIENTATION_LABELS, SOURCE_LABELS,
                                  blur_state, classify_color)
 from .base import FORMAT_TOKEN, Dimension, Option, PartitionContext, register_dimension
+from ..i18n import t as _t
 
 
 # ---------------------------------------------------------------------------
@@ -14,23 +15,23 @@ from .base import FORMAT_TOKEN, Dimension, Option, PartitionContext, register_di
 
 class DateDimension(Dimension):
     id = "date"
-    label = "拍摄日期"
+    label = _t("拍摄日期")
     en = "DATE"
-    description = "按 EXIF 拍摄时间分组；没有时依次用文件名、修改时间推测。"
-    unknown = "未知日期"
+    description = _t("按 EXIF 拍摄时间分组；没有时依次用文件名、修改时间推测。")
+    unknown = _t("未知日期")
     order_by = "name"
     options = [
-        Option("granularity", "层级", default="y/ym", choices=[
-            ("y", "年"),
-            ("y/ym", "年 / 年-月"),
-            ("y/ym/ymd", "年 / 年-月 / 年-月-日"),
-            ("ym", "年-月"),
-            ("ymd", "年-月-日"),
-            ("y/q", "年 / 季度"),
+        Option("granularity", _t("层级"), default="y/ym", choices=[
+            ("y", _t("年")),
+            ("y/ym", _t("年 / 年-月")),
+            ("y/ym/ymd", _t("年 / 年-月 / 年-月-日")),
+            ("ym", _t("年-月")),
+            ("ymd", _t("年-月-日")),
+            ("y/q", _t("年 / 季度")),
         ]),
-        Option("guess", "推测日期", default="normal", choices=[
-            ("normal", "正常归类"),
-            ("separate", "单独放「日期待确认」"),
+        Option("guess", _t("推测日期"), default="normal", choices=[
+            ("normal", _t("正常归类")),
+            ("separate", _t("单独放「日期待确认」")),
         ]),
     ]
 
@@ -39,7 +40,7 @@ class DateDimension(Dimension):
         if dt is None:
             return [self.unknown]
         if opts.get("guess") == "separate" and g.date_is_guess:
-            prefix = ["日期待确认"]
+            prefix = [_t("日期待确认")]
         else:
             prefix = []
         y, ym, ymd = f"{dt.year:04d}", f"{dt.year:04d}-{dt.month:02d}", f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}"
@@ -57,7 +58,7 @@ class DateDimension(Dimension):
             "日期": d("%Y%m%d"), "时间": d("%H%M%S"),          # 紧凑写法，适合文件名
             "季度": lambda g, ctx: f"Q{(g.date.month - 1) // 3 + 1}" if g.date else None,
             "日期来源": lambda g, ctx: {"exif": "EXIF", "exif_create": "EXIF", "xmp": "XMP",
-                                    "filename": "文件名推测", "mtime": "修改时间推测"}.get(g.date_source),
+                                    "filename": _t("文件名推测"), "mtime": _t("修改时间推测")}.get(g.date_source),
         }
 
 
@@ -67,21 +68,21 @@ class DateDimension(Dimension):
 
 class RegionDimension(Dimension):
     id = "region"
-    label = "地区"
+    label = _t("地区")
     en = "REGION"
-    description = "按 GPS、轨迹 / 参考照片匹配或手动指定的地点，离线识别国家 / 省 / 市 / 区县；都没有的放入「未知地点」。"
-    unknown = "未知地点"
+    description = _t("按 GPS、轨迹 / 参考照片匹配或手动指定的地点，离线识别国家 / 省 / 市 / 区县；都没有的放入「未知地点」。")
+    unknown = _t("未知地点")
     options = [
-        Option("level", "层级", default="country/province/city", choices=[
-            ("country", "国家"),
-            ("country/province", "国家 / 省"),
-            ("country/province/city", "国家 / 省 / 市"),
-            ("country/province/city/district", "国家 / 省 / 市 / 区县"),
-            ("province/city", "省 / 市（国内不写“中国”）"),
-            ("city", "仅城市"),
+        Option("level", _t("层级"), default="country/province/city", choices=[
+            ("country", _t("国家")),
+            ("country/province", _t("国家 / 省")),
+            ("country/province/city", _t("国家 / 省 / 市")),
+            ("country/province/city/district", _t("国家 / 省 / 市 / 区县")),
+            ("province/city", _t("省 / 市（国内不写“中国”）")),
+            ("city", _t("仅城市")),
         ]),
-        Option("inferred", "使用推测地点", kind="bool", default=True,
-               tip="设置中开启“按时间就近推断地点”后生效"),
+        Option("inferred", _t("使用推测地点"), kind="bool", default=True,
+               tip=_t("设置中开启“按时间就近推断地点”后生效")),
     ]
 
     def segments(self, g, opts, ctx):
@@ -123,17 +124,17 @@ class RegionDimension(Dimension):
 
 class ColorDimension(Dimension):
     id = "color"
-    label = "色调"
+    label = _t("色调")
     en = "COLOR TONE"
-    description = "根据预览图的颜色统计：冷暖、主色、明暗。阈值可在设置中调整。"
-    unknown = "未分析色调"
+    description = _t("根据预览图的颜色统计：冷暖、主色、明暗。阈值可在设置中调整。")
+    unknown = _t("未分析色调")
     options = [
-        Option("mode", "分组方式", default="warmth", choices=[
-            ("warmth", "冷暖（暖 / 冷 / 中性 / 黑白）"),
-            ("main", "主色（红 / 橙 / 黄 / 绿 / 蓝 …）"),
-            ("tone", "明暗（暗调 / 中间调 / 亮调）"),
-            ("warmth/tone", "冷暖 / 明暗（两级）"),
-            ("warmth+tone", "冷暖·明暗（合并一级）"),
+        Option("mode", _t("分组方式"), default="warmth", choices=[
+            ("warmth", _t("冷暖（暖 / 冷 / 中性 / 黑白）")),
+            ("main", _t("主色（红 / 橙 / 黄 / 绿 / 蓝 …）")),
+            ("tone", _t("明暗（暗调 / 中间调 / 亮调）")),
+            ("warmth/tone", _t("冷暖 / 明暗（两级）")),
+            ("warmth+tone", _t("冷暖·明暗（合并一级）")),
         ]),
     ]
 
@@ -149,7 +150,7 @@ class ColorDimension(Dimension):
         if mode == "warmth/tone":
             return [c["warmth"], c["tone"]]
         if mode == "warmth+tone":
-            return [f"{c['warmth']}·{c['tone']}"]
+            return [f"{_t(c['warmth'])}·{_t(c['tone'])}"]
         return [c["warmth"]]
 
     def tokens(self):
@@ -167,13 +168,13 @@ class ColorDimension(Dimension):
 
 class CameraDimension(Dimension):
     id = "camera"
-    label = "相机"
+    label = _t("相机")
     en = "CAMERA"
-    description = "按 EXIF 中的相机品牌 / 型号分组。"
-    unknown = "未知相机"
+    description = _t("按 EXIF 中的相机品牌 / 型号分组。")
+    unknown = _t("未知相机")
     options = [
-        Option("level", "层级", default="model", choices=[
-            ("make", "品牌"), ("model", "型号"), ("make/model", "品牌 / 型号"),
+        Option("level", _t("层级"), default="model", choices=[
+            ("make", _t("品牌")), ("model", _t("型号")), ("make/model", _t("品牌 / 型号")),
         ]),
     ]
 
@@ -192,10 +193,10 @@ class CameraDimension(Dimension):
 
 class LensDimension(Dimension):
     id = "lens"
-    label = "镜头"
+    label = _t("镜头")
     en = "LENS"
-    description = "按 EXIF 镜头型号分组（手机照片通常为机身镜头）。"
-    unknown = "未知镜头"
+    description = _t("按 EXIF 镜头型号分组（手机照片通常为机身镜头）。")
+    unknown = _t("未知镜头")
     options = []
 
     def segments(self, g, opts, ctx):
@@ -207,10 +208,10 @@ class LensDimension(Dimension):
 
 class SourceDimension(Dimension):
     id = "source"
-    label = "来源"
+    label = _t("来源")
     en = "SOURCE"
-    description = "相机 / 手机 / 无人机 / 截图 / 其他（无相机信息，如网图、聊天保存）。"
-    unknown = "其他（无相机信息）"
+    description = _t("相机 / 手机 / 无人机 / 截图 / 其他（无相机信息，如网图、聊天保存）。")
+    unknown = _t("其他（无相机信息）")
     options = []
 
     def segments(self, g, opts, ctx):
@@ -226,16 +227,16 @@ class SourceDimension(Dimension):
 
 class FileTypeDimension(Dimension):
     id = "filetype"
-    label = "文件类型"
+    label = _t("文件类型")
     en = "FILE TYPE"
-    description = "按格式分开放（ARW / JPG / HEIC …），或按整组类型（RAW+JPG 视为同一张）。"
-    unknown = "其他类型"
+    description = _t("按格式分开放（ARW / JPG / HEIC …），或按整组类型（RAW+JPG 视为同一张）。")
+    unknown = _t("其他类型")
     order_by = "count"
     options = [
-        Option("mode", "分组方式", default="file", choices=[
-            ("file", "按格式分开（RAW 与 JPG 各放各的）"),
-            ("kind", "按整组类型（RAW+JPG 放一起）"),
-            ("ext", "按整组扩展名（ARW+JPG 放一起）"),
+        Option("mode", _t("分组方式"), default="file", choices=[
+            ("file", _t("按格式分开（RAW 与 JPG 各放各的）")),
+            ("kind", _t("按整组类型（RAW+JPG 放一起）")),
+            ("ext", _t("按整组扩展名（ARW+JPG 放一起）")),
         ]),
     ]
 
@@ -255,10 +256,10 @@ class FileTypeDimension(Dimension):
 
 class OrientationDimension(Dimension):
     id = "orientation"
-    label = "横竖幅"
+    label = _t("横竖幅")
     en = "ORIENTATION"
-    description = "横幅 / 竖幅 / 方形 / 全景（已按 EXIF 方向旋转后判断）。"
-    unknown = "未知画幅"
+    description = _t("横幅 / 竖幅 / 方形 / 全景（已按 EXIF 方向旋转后判断）。")
+    unknown = _t("未知画幅")
     options = []
 
     def segments(self, g, opts, ctx):
@@ -277,14 +278,14 @@ def _bucket(v, edges, labels):
 
 class ResolutionDimension(Dimension):
     id = "resolution"
-    label = "分辨率"
+    label = _t("分辨率")
     en = "RESOLUTION"
-    description = "按像素数分档。"
-    unknown = "未知分辨率"
+    description = _t("按像素数分档。")
+    unknown = _t("未知分辨率")
     order_by = "name"
     options = []
     EDGES = [2, 8, 16, 30]
-    LABELS = ["1_小于200万像素", "2_200-800万像素", "3_800-1600万像素", "4_1600-3000万像素", "5_3000万像素以上"]
+    LABELS = [_t("1_小于200万像素"), _t("2_200-800万像素"), _t("3_800-1600万像素"), _t("4_1600-3000万像素"), _t("5_3000万像素以上")]
 
     def _label(self, g):
         mp = g.feat("shape", "mp")
@@ -299,14 +300,14 @@ class ResolutionDimension(Dimension):
 
 class FocalDimension(Dimension):
     id = "focal"
-    label = "焦段"
+    label = _t("焦段")
     en = "FOCAL LENGTH"
-    description = "按等效 35mm 焦距分档（无等效焦距时用实际焦距）。"
-    unknown = "未知焦段"
+    description = _t("按等效 35mm 焦距分档（无等效焦距时用实际焦距）。")
+    unknown = _t("未知焦段")
     order_by = "name"
     options = []
     EDGES = [24, 35, 70, 135]
-    LABELS = ["1_超广角(24mm以下)", "2_广角(24-34mm)", "3_标准(35-69mm)", "4_中长焦(70-134mm)", "5_长焦(135mm以上)"]
+    LABELS = [_t("1_超广角(24mm以下)"), _t("2_广角(24-34mm)"), _t("3_标准(35-69mm)"), _t("4_中长焦(70-134mm)"), _t("5_长焦(135mm以上)")]
 
     def _label(self, g):
         f = g.meta.get("focal35") or g.meta.get("focal")
@@ -321,14 +322,14 @@ class FocalDimension(Dimension):
 
 class IsoDimension(Dimension):
     id = "iso"
-    label = "感光度"
+    label = _t("感光度")
     en = "ISO"
-    description = "按 ISO 分档。"
-    unknown = "未知ISO"
+    description = _t("按 ISO 分档。")
+    unknown = _t("未知ISO")
     order_by = "name"
     options = []
     EDGES = [201, 801, 3201]
-    LABELS = ["1_ISO 200以下", "2_ISO 201-800", "3_ISO 801-3200", "4_ISO 3200以上"]
+    LABELS = [_t("1_ISO 200以下"), "2_ISO 201-800", "3_ISO 801-3200", _t("4_ISO 3200以上")]
 
     def _label(self, g):
         iso = g.meta.get("iso")
@@ -343,10 +344,10 @@ class IsoDimension(Dimension):
 
 class BlurDimension(Dimension):
     id = "blur"
-    label = "清晰度"
+    label = _t("清晰度")
     en = "SHARPNESS"
-    description = "拉普拉斯方差检测模糊；阈值在「清晰度」页或设置中调整。"
-    unknown = "无法判断"
+    description = _t("拉普拉斯方差检测模糊；阈值在「清晰度」页或设置中调整。")
+    unknown = _t("无法判断")
     options = []
 
     def segments(self, g, opts, ctx):
@@ -358,23 +359,23 @@ class BlurDimension(Dimension):
 
 class RatingDimension(Dimension):
     id = "rating"
-    label = "星级 / 标记"
+    label = _t("星级 / 标记")
     en = "RATING"
-    description = "按在本软件或 Lightroom / Bridge 里打的星级、留弃标记或色标分组。"
-    unknown = "未评星"
+    description = _t("按在本软件或 Lightroom / Bridge 里打的星级、留弃标记或色标分组。")
+    unknown = _t("未评星")
     order_by = "name"
-    options = [Option("mode", "分类方式", default="rating", choices=[
-        ("rating", "星级（5星 … 1星 / 未评星，弃用单独一组）"),
-        ("flag", "留用 / 弃用 / 未标记"),
-        ("label", "色标"),
+    options = [Option("mode", _t("分类方式"), default="rating", choices=[
+        ("rating", _t("星级（5星 … 1星 / 未评星，弃用单独一组）")),
+        ("flag", _t("留用 / 弃用 / 未标记")),
+        ("label", _t("色标")),
     ])]
 
     @staticmethod
     def _rating(g):
         if g.feat("rating", "flag") == "reject":
-            return "弃用"
+            return _t("弃用")
         r = int(g.feat("rating", "rating") or 0)
-        return f"{r}星" if r > 0 else None
+        return _t('{0}星', r) if r > 0 else None
 
     @staticmethod
     def _flag(g):
@@ -383,14 +384,14 @@ class RatingDimension(Dimension):
     @staticmethod
     def _label(g):
         lab = g.feat("rating", "label")
-        return (LABEL_NAMES.get(lab, lab) + "色标") if lab else None
+        return (LABEL_NAMES.get(lab, lab) + _t("色标")) if lab else None
 
     def segments(self, g, opts, ctx):
         mode = opts.get("mode", "rating")
         if mode == "flag":
-            return [self._flag(g) or "未标记"]
+            return [self._flag(g) or _t("未标记")]
         if mode == "label":
-            return [self._label(g) or "无色标"]
+            return [self._label(g) or _t("无色标")]
         return [self._rating(g) or self.unknown]
 
     def tokens(self):
@@ -400,18 +401,18 @@ class RatingDimension(Dimension):
 
 class TripDimension(Dimension):
     id = "trip"
-    label = "旅行"
+    label = _t("旅行")
     en = "TRIP"
-    description = "按自动分出的每次旅行归档（在「旅行与地图」页可设常住地、改旅行名）；不属于任何旅行的照片放进“日常”。"
-    unknown = "日常"
+    description = _t("按自动分出的每次旅行归档（在「旅行与地图」页可设常住地、改旅行名）；不属于任何旅行的照片放进“日常”。")
+    unknown = _t("日常")
     order_by = "name"
-    options = [Option("mode", "层级", default="trip", choices=[
-        ("trip", "旅行名（2025-12-31 日本 东京·京都·大阪）"),
-        ("trip/day", "旅行名 / 第几天"),
-        ("trip/daydate", "旅行名 / 第几天 日期（第3天 01-02）"),
-        ("day", "只要第几天（放在别的条件下面用）"),
+    options = [Option("mode", _t("层级"), default="trip", choices=[
+        ("trip", _t("旅行名（2025-12-31 日本 东京·京都·大阪）")),
+        ("trip/day", _t("旅行名 / 第几天")),
+        ("trip/daydate", _t("旅行名 / 第几天 日期（第3天 01-02）")),
+        ("day", _t("只要第几天（放在别的条件下面用）")),
     ]),
-        Option("other", "非旅行照片", kind="text", default="", tip="留空 = 使用设置里的“日常”")]
+        Option("other", _t("非旅行照片"), kind="text", default="", tip=_t("留空 = 使用设置里的“日常”"))]
 
     @staticmethod
     def _trip(g):
@@ -430,7 +431,7 @@ class TripDimension(Dimension):
         return s
 
     def segments(self, g, opts, ctx):
-        other = (opts.get("other") or ctx.settings.get("trip_other_name") or self.unknown).strip()
+        other = (opts.get("other") or _t(ctx.settings.get("trip_other_name") or "日常")).strip()
         mode = opts.get("mode", "trip")
         name = self._trip(g)
         if not name:
@@ -445,27 +446,27 @@ class TripDimension(Dimension):
 
     def tokens(self):
         return {"旅行": lambda g, c: self._trip(g), "第几天": lambda g, c: self._day(g),
-                "旅行天数": lambda g, c: (f"{g.feats['trip']['days']}天" if g.feats.get("trip") else None)}
+                "旅行天数": lambda g, c: (_t('{0}天', g.feats['trip']['days']) if g.feats.get("trip") else None)}
 
 
 class SceneDimension(Dimension):
     id = "scene"
-    label = "场景（AI）"
+    label = _t("场景（AI）")
     en = "SCENE"
-    description = "按 AI 识别的画面内容分组（山景、海边、夜景、美食、人像…）。需要先在「AI 搜图」页下载模型并分析。"
-    unknown = "未识别"
+    description = _t("按 AI 识别的画面内容分组（山景、海边、夜景、美食、人像…）。需要先在「AI 搜图」页下载模型并分析。")
+    unknown = _t("未识别")
     order_by = "count"
-    options = [Option("mode", "分类", default="scene", choices=[("scene", "细分场景（山景 / 海边 / 夜景 / 美食…）"),
-                                                             ("group", "大类（自然风光 / 城市建筑 / 人物 / 美食…）")]),
-               Option("min_prob", "把握低于", kind="float", default=0.25, minimum=0, maximum=0.9, step=0.05,
-                      tip="AI 把握不大的照片归入“其他场景”（0 = 一律按最像的场景）")]
+    options = [Option("mode", _t("分类"), default="scene", choices=[("scene", _t("细分场景（山景 / 海边 / 夜景 / 美食…）")),
+                                                             ("group", _t("大类（自然风光 / 城市建筑 / 人物 / 美食…）"))]),
+               Option("min_prob", _t("把握低于"), kind="float", default=0.25, minimum=0, maximum=0.9, step=0.05,
+                      tip=_t("AI 把握不大的照片归入“其他场景”（0 = 一律按最像的场景）"))]
 
     def segments(self, g, opts, ctx):
         sc = g.feats.get("scene")
         if not sc:
             return [self.unknown]
         if float(sc.get("prob") or 0) < float(opts.get("min_prob") or 0):
-            return ["其他场景"]
+            return [_t("其他场景")]
         return [sc["group"] if opts.get("mode") == "group" else sc["scene"]]
 
     def tokens(self):
@@ -475,40 +476,40 @@ class SceneDimension(Dimension):
 
 class PersonDimension(Dimension):
     id = "person"
-    label = "人物（AI）"
+    label = _t("人物（AI）")
     en = "PEOPLE"
-    description = "按照片里的人分组：在「人物」页给人脸组起名后生效。没有人脸的照片放进“无人像”。"
-    unknown = "无人像"
+    description = _t("按照片里的人分组：在「人物」页给人脸组起名后生效。没有人脸的照片放进“无人像”。")
+    unknown = _t("无人像")
     order_by = "count"
-    options = [Option("mode", "分法", default="main", choices=[
-        ("main", "主要人物（照片里脸最大的已命名的人）"),
-        ("group", "单人按名字，两位及以上已命名的人放“合影”"),
-        ("has", "有人像 / 无人像"),
+    options = [Option("mode", _t("分法"), default="main", choices=[
+        ("main", _t("主要人物（照片里脸最大的已命名的人）")),
+        ("group", _t("单人按名字，两位及以上已命名的人放“合影”")),
+        ("has", _t("有人像 / 无人像")),
     ])]
 
     def segments(self, g, opts, ctx):
         pp = g.feats.get("people")
-        other = ctx.settings.get("people_other_name") or "其他人"
+        other = _t(ctx.settings.get("people_other_name") or "其他人")
         if not pp or not pp.get("n"):
             return [self.unknown]
         mode = opts.get("mode", "main")
         if mode == "has":
-            return ["有人像"]
+            return [_t("有人像")]
         names = pp.get("names") or []
         if mode == "group" and len(names) >= 2:
-            return ["合影"]
+            return [_t("合影")]
         return [names[0] if names else other]
 
     def tokens(self):
-        return {"人物": lambda g, c: "、".join(((g.feats.get("people") or {}).get("names") or [])[:3]) or None}
+        return {"人物": lambda g, c: _t("、").join(((g.feats.get("people") or {}).get("names") or [])[:3]) or None}
 
 
 class FolderDimension(Dimension):
     id = "folder"
-    label = "原文件夹名"
+    label = _t("原文件夹名")
     en = "ORIGIN FOLDER"
-    description = "保留照片原来所在文件夹的名字（如“2023 云南旅行”）。"
-    unknown = "根目录"
+    description = _t("保留照片原来所在文件夹的名字（如“2023 云南旅行”）。")
+    unknown = _t("根目录")
     options = []
 
     def segments(self, g, opts, ctx):
@@ -521,13 +522,13 @@ class FolderDimension(Dimension):
 class FixedDimension(Dimension):
     """固定文件夹名（例如「待确认_模糊」）。"""
     id = "fixed"
-    label = "固定文件夹"
+    label = _t("固定文件夹")
     en = "FIXED"
-    description = "所有照片放进同一个指定名称的文件夹。"
-    options = [Option("name", "文件夹名", kind="text", default="已整理")]
+    description = _t("所有照片放进同一个指定名称的文件夹。")
+    options = [Option("name", _t("文件夹名"), kind="text", default=_t("已整理"))]
 
     def segments(self, g, opts, ctx):
-        return [opts.get("name") or "已整理"]
+        return [opts.get("name") or _t("已整理")]
 
 
 def register_builtin() -> None:

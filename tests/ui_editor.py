@@ -42,6 +42,9 @@ def main(out: str, theme_name: str = "light") -> int:
     from PySide6.QtGui import QColor, QMouseEvent
     from PySide6.QtWidgets import QApplication
 
+    from photocrate import i18n
+    i18n.set_language(os.environ.get("PHOTOCRATE_LANG"))   # PHOTOCRATE_LANG=en 时用英文界面跑一遍
+    from photocrate.i18n import t as _t
     from photocrate.bootstrap import bootstrap
     from photocrate.config import Settings
     from photocrate.core.library import Library
@@ -165,7 +168,7 @@ def main(out: str, theme_name: str = "light") -> int:
         yield 200
         lay = doc.active
         assert lay.pixels[620, 200, 3] == 255 and tuple(lay.pixels[620, 200, :3]) == (30, 200, 90)
-        assert doc.history.names()[-1] == "画笔"
+        assert doc.history.names()[-1] == _t("画笔")
         ew.undo()
         assert lay.pixels[620, 200, 3] == 0
         ew.redo()
@@ -173,7 +176,7 @@ def main(out: str, theme_name: str = "light") -> int:
         log("画笔一笔、撤销、重做")
 
         # ---- 调整图层：拖滑块只记一步 ----
-        ew.new_adjust("曲线", {}, "曲线")
+        ew.new_adjust(_t("曲线"), {}, "曲线")
         yield 200
         ed = ew.props.editor
         assert ed is not None and ed.sections["曲线"].body_w.isVisible()
@@ -182,7 +185,7 @@ def main(out: str, theme_name: str = "light") -> int:
             ed.sliders["exposure"].slider.setValue(v)
             yield 30
         assert abs(doc.active.params["exposure"] - 0.8) < 1e-6, doc.active.params["exposure"]
-        assert len(doc.history.steps) == n0 + 1 and doc.history.names()[-1] == "调整：曝光"
+        assert len(doc.history.steps) == n0 + 1 and doc.history.names()[-1] == _t("调整：{0}", _t("曝光"))
         ed.curve.changed.emit([[0, 0], [128, 150], [255, 255]])
         ed.preset.emit("胶片")
         yield 300
@@ -238,7 +241,7 @@ def main(out: str, theme_name: str = "light") -> int:
 
         # ---- 文字 ----
         def type_text():
-            for d in wait_modal("文字"):
+            for d in wait_modal(_t("新建文字")):
                 yield d
             m = modal()
             m.ed.text.setPlainText("京都 · 2026")
@@ -253,14 +256,14 @@ def main(out: str, theme_name: str = "light") -> int:
         yield 300
         tl = doc.active
         assert tl.kind == "text" and tl.params["text"] == "京都 · 2026" and tl.pixels[..., 3].max() == 255
-        assert doc.history.names()[-1] == "新建文字图层"
+        assert doc.history.names()[-1] == _t("新建文字图层")
         log("文字图层")
 
         # ---- 滤镜（对话框，预览后确定）----
         doc.set_active(bg.id)
 
         def accept_filter():
-            for d in wait_modal("高斯模糊"):
+            for d in wait_modal(_t("高斯模糊")):
                 yield d
             m = modal()
             yield 300
@@ -288,10 +291,10 @@ def main(out: str, theme_name: str = "light") -> int:
         assert not stray, f"多出来的顶层窗口：{[type(w).__name__ for w in stray]}"
 
         # ---- 导出 + 保存工程 ----
-        exp = os.path.join(lib_dir, "DSC00001_修图.jpg")
+        exp = os.path.join(lib_dir, f"DSC00001{_t('_修图')}.jpg")
 
         def accept_export():
-            for d in wait_modal("导出图片"):
+            for d in wait_modal(_t("导出图片")):
                 yield d
             m = modal()
             assert m.path.text() == exp, m.path.text()
@@ -318,7 +321,7 @@ def main(out: str, theme_name: str = "light") -> int:
             yield 200
         yield 300
         stems = sorted(g.stem for g in lib.groups if g.files)
-        assert stems == ["DSC00001", "DSC00001_修图"], stems
+        assert stems == ["DSC00001", "DSC00001" + _t("_修图")], stems
         g1 = next(g for g in lib.groups if g.stem == "DSC00001")
         assert any(f.path.endswith(".pcedit") and f.role == "sidecar" for f in g1.files), [f.path for f in g1.files]
         log("导出新文件（EXIF 保留、原片不变）→ 重新扫描进照片库；工程文件作为附属文件挂在原片上")

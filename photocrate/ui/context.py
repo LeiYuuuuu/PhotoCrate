@@ -14,6 +14,7 @@ from ..config import Settings
 from ..core.library import Library
 from ..ops.journal import Journal
 from ..ops.mover import Mover
+from ..i18n import t as _t
 
 
 class Worker(QThread):
@@ -66,7 +67,7 @@ class AppContext(QObject):
         if on_error:
             w.error.connect(on_error)
         else:
-            w.error.connect(lambda tb: self.status.emit("出错：" + tb.strip().splitlines()[-1]))
+            w.error.connect(lambda tb: self.status.emit(_t("出错：") + tb.strip().splitlines()[-1]))
         w.finished.connect(lambda: self._workers.discard(w))
         self._workers.add(w)
         w.start()
@@ -79,16 +80,16 @@ class AppContext(QObject):
             self.ratings_changed.emit()
             parts = []
             if change is None:
-                parts.append("已清除标记")
+                parts.append(_t("已清除标记"))
             else:
                 from ..analyzers.builtin import FLAG_NAMES, LABEL_NAMES
                 if "rating" in change:
-                    parts.append(f"{change['rating']} 星" if change["rating"] else "清除星级")
+                    parts.append(_t('{0} 星', change['rating']) if change["rating"] else _t("清除星级"))
                 if "label" in change:
-                    parts.append(f"色标 {LABEL_NAMES.get(change['label'], change['label'])}" if change["label"] else "清除色标")
+                    parts.append(_t('色标 {0}', LABEL_NAMES.get(change['label'], change['label'])) if change["label"] else _t("清除色标"))
                 if "flag" in change:
-                    parts.append(FLAG_NAMES.get(change["flag"], "取消留用 / 弃用") if change["flag"] else "取消留用 / 弃用")
-            self.status.emit(f"{n} 张照片：" + "、".join(parts) + "（写入 .xmp 后 Lightroom / Bridge 才能看到）")
+                    parts.append(FLAG_NAMES.get(change["flag"], _t("取消留用 / 弃用")) if change["flag"] else _t("取消留用 / 弃用"))
+            self.status.emit(_t('{0} 张照片：', n) + _t("、").join(parts) + _t("（写入 .xmp 后 Lightroom / Bridge 才能看到）"))
         return n
 
     def open_viewer(self, groups: list, index: int, parent=None):

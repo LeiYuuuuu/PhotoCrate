@@ -17,6 +17,7 @@ from ...analyzers.builtin import FLAG_NAMES, LABEL_COLORS, LABEL_NAMES, blur_sta
 from ...core.dates import DATE_SOURCE_LABELS
 from .. import theme
 from ..theme import font
+from ...i18n import t as _t
 
 GroupRole = Qt.ItemDataRole.UserRole + 1
 LabelRole = Qt.ItemDataRole.UserRole + 2     # 可选的显示覆盖：{"name": 文件名, "tag": 格式标签}
@@ -93,47 +94,46 @@ def tooltip_for(g, settings: dict | None = None) -> str:
     m = g.meta
     lines = [f"<b>{g.name}</b>", f"<span style='color:gray'>{g.folder}</span>"]
     if len(g.files) > 1:
-        lines.append("同组文件：" + "、".join(f.name for f in g.files if f.path != g.primary))
+        lines.append(_t("同组文件：") + _t("、").join(f.name for f in g.files if f.path != g.primary))
     if g.cross_folder:
-        lines.append("<span style='color:gray'>RAW 与 JPG 在不同文件夹（按文件名 + 拍摄时间配对）</span>")
+        lines.append(_t("<span style='color:gray'>RAW 与 JPG 在不同文件夹（按文件名 + 拍摄时间配对）</span>"))
     d = g.date
     dd = g.feats.get("date") or {}
     tz = f" {dd['tz']}" if dd.get("tz") else ""
-    lines.append(f"日期：{d.strftime('%Y-%m-%d %H:%M') if d else '未知'}{tz}（{DATE_SOURCE_LABELS.get(g.date_source, '')}）")
+    lines.append(_t('日期：{0}{1}（{2}）', d.strftime('%Y-%m-%d %H:%M') if d else _t('未知'), tz, DATE_SOURCE_LABELS.get(g.date_source, '')))
     if dd.get("corrected"):
         from ...core.geotime import shift_label
         orig = dd.get("orig_dt", "").replace("T", " ")[:16]
-        lines.append(f"时间已校正 {shift_label(int(dd.get('shift') or 0)) or '（仅时区）'}，文件里记录的是 {orig}"
+        lines.append(_t('时间已校正 {0}，文件里记录的是 {1}', shift_label(int(dd.get('shift') or 0)) or _t('（仅时区）'), orig)
                      + (f" {dd['orig_tz']}" if dd.get("orig_tz") else ""))
     geo = g.feats.get("geo") or {}
     if geo.get("country") or geo.get("has_gps"):
-        place = place_label(geo) or "未识别"
+        place = place_label(geo) or _t("未识别")
         if geo.get("source") == "track":
             from ...core.geotime import MATCH_KIND_LABELS
             gap = int(geo.get("match_gap_s") or 0)
-            how = (f"（{MATCH_KIND_LABELS.get(geo.get('match_kind'), '轨迹')}匹配：{geo.get('match_from', '')}，"
-                   f"相差 {gap // 60} 分 {gap % 60} 秒）")
+            how = (_t('（{0}匹配：{1}，相差 {2} 分 {3} 秒）', MATCH_KIND_LABELS.get(geo.get('match_kind'), _t('轨迹')), geo.get('match_from', ''), gap // 60, gap % 60))
         else:
-            how = {"manual": "（手动指定）", "inferred": "（按时间推测）"}.get(geo.get("source"), "")
-        lines.append(f"地点：{place}{how}")
+            how = {"manual": _t("（手动指定）"), "inferred": _t("（按时间推测）")}.get(geo.get("source"), "")
+        lines.append(_t('地点：{0}{1}', place, how))
     if geo.get("lat") is not None and geo.get("source") in ("gps", "track"):
-        lines.append(f"GPS：{geo['lat']:.5f}, {geo['lon']:.5f}" + ("（匹配）" if geo.get("source") == "track" else ""))
+        lines.append(_t('GPS：{0:.5f}, {1:.5f}', geo['lat'], geo['lon']) + (_t("（匹配）") if geo.get("source") == "track" else ""))
     if g.is_video:
         from ..viewer import fmt_duration
         dur = fmt_duration(m.get("duration"))
         note = []
         if dur:
-            note.append(f"时长 {dur}")
+            note.append(_t('时长 {0}', dur))
         if dd.get("tz_from"):
-            note.append(f"时区按附近照片 {dd['tz_from']} 推断")
+            note.append(_t('时区按附近照片 {0} 推断', dd['tz_from']))
         elif dd.get("tz_guess"):
-            note.append("时区未知（按电脑时区显示）")
-        lines.append("视频" + ("：" + "，".join(note) if note else "") + "（双击看画面，回车播放）")
+            note.append(_t("时区未知（按电脑时区显示）"))
+        lines.append(_t("视频") + (_t("：") + _t("，").join(note) if note else "") + _t("（双击看画面，回车播放）"))
     cam = g.feat("camera", "model")
     if cam:
-        lines.append(f"相机：{cam}")
+        lines.append(_t('相机：{0}', cam))
     if g.feat("camera", "lens"):
-        lines.append(f"镜头：{g.feat('camera', 'lens')}")
+        lines.append(_t('镜头：{0}', g.feat('camera', 'lens')))
     exp = []
     if m.get("focal"):
         exp.append(f"{m['focal']:.0f}mm")
@@ -142,28 +142,28 @@ def tooltip_for(g, settings: dict | None = None) -> str:
     if m.get("iso"):
         exp.append(f"ISO {m['iso']:.0f}")
     if exp:
-        lines.append("参数：" + "  ".join(exp))
+        lines.append(_t("参数：") + "  ".join(exp))
     if settings is not None:
         c = classify_color(g.feats.get("color"), settings)
         if c:
-            lines.append(f"色调：{c['warmth']} · {c['tone']} · 主色{c['main']}")
+            lines.append(_t('色调：{0} · {1} · 主色{2}', _t(c['warmth']), _t(c['tone']), _t(c['main'])))
     sc = g.feat("blur", "score")
     if sc is not None:
-        lines.append(f"清晰度分数：{sc:.0f}")
+        lines.append(_t('清晰度分数：{0:.0f}', sc))
     rt = g.feats.get("rating") or {}
     marks = []
     if rt.get("rating"):
         marks.append("★" * int(rt["rating"]))
     if rt.get("label"):
-        marks.append(f"色标 {LABEL_NAMES.get(rt['label'], rt['label'])}")
+        marks.append(_t('色标 {0}', LABEL_NAMES.get(rt['label'], rt['label'])))
     if rt.get("flag"):
         marks.append(FLAG_NAMES.get(rt["flag"], ""))
     if marks:
-        lines.append("标记：" + " · ".join(marks) + ("" if rt.get("manual") else "（照片 / .xmp 里原有）"))
+        lines.append(_t("标记：") + " · ".join(marks) + ("" if rt.get("manual") else _t("（照片 / .xmp 里原有）")))
     sim = g.feats.get("similar")
     if sim:
-        lines.append(f"相似照片：第 {sim['rank']}/{sim['size']} 张" + ("，这一组里最清晰" if sim.get("best") else ""))
-    lines.append("<span style='color:gray'>双击 / 空格看大图 · 1–5 打星 · P 留用 · X 弃用</span>")
+        lines.append(_t('相似照片：第 {0}/{1} 张', sim['rank'], sim['size']) + (_t("，这一组里最清晰") if sim.get("best") else ""))
+    lines.append(_t("<span style='color:gray'>双击 / 空格看大图 · 1–5 打星 · P 留用 · X 弃用</span>"))
     return "<br>".join(lines)
 
 
@@ -196,7 +196,7 @@ class ThumbDelegate(QStyledItemDelegate):
             qp.drawText(tr, Qt.AlignmentFlag.AlignCenter, txt)
         flag = rt.get("flag")
         if flag:
-            txt = "留" if flag == "pick" else "弃"
+            txt = _t("留") if flag == "pick" else _t("弃")
             tr = QRect(img.right() - 22, img.top() + 4, 18, 18)
             qp.fillRect(tr, QColor(p.ok if flag == "pick" else p.danger))
             qp.setPen(QColor("#FFFFFF"))
@@ -235,25 +235,25 @@ class ThumbDelegate(QStyledItemDelegate):
         elif g.kind not in ("jpeg",):
             tags.append((g.kind_label, p.slab, p.slab_ink))
         if g.date_is_guess:
-            tags.append(("日期推测", p.warn, "#FFFFFF"))
+            tags.append((_t("日期推测"), p.warn, "#FFFFFF"))
         elif g.date is None:
-            tags.append(("无日期", p.warn, "#FFFFFF"))
+            tags.append((_t("无日期"), p.warn, "#FFFFFF"))
         if self.highlight_blurry and blur_state(g, self.blur_threshold) == "blurry":
-            tags.append(("模糊", p.danger, "#FFFFFF"))
+            tags.append((_t("模糊"), p.danger, "#FFFFFF"))
         src = g.feat("geo", "source")
         if src == "inferred":
-            tags.append(("地点推测", p.accent2, "#FFFFFF"))
+            tags.append((_t("地点推测"), p.accent2, "#FFFFFF"))
         elif src == "track":
-            tags.append(("轨迹匹配", p.ok, "#FFFFFF"))
+            tags.append((_t("轨迹匹配"), p.ok, "#FFFFFF"))
         elif src == "manual":
-            tags.append(("手动地点", p.ink2, p.surface))
+            tags.append((_t("手动地点"), p.ink2, p.surface))
         if g.feat("date", "corrected"):
-            tags.append(("时间校正", p.accent, p.accent_ink))
+            tags.append((_t("时间校正"), p.accent, p.accent_ink))
         sim = g.feats.get("similar")
         if sim and self.show_similar:
-            tags.append((f"相似 {sim['rank']}/{sim['size']}", p.ink2, p.surface))
+            tags.append((_t('相似 {0}/{1}', sim['rank'], sim['size']), p.ink2, p.surface))
             if sim.get("best"):
-                tags.append(("最佳", p.ok, "#FFFFFF"))
+                tags.append((_t("最佳"), p.ok, "#FFFFFF"))
         rt = g.feats.get("rating") or {}
         if rt.get("flag") == "reject":
             veil = QColor(p.bg)
@@ -271,7 +271,7 @@ class ThumbDelegate(QStyledItemDelegate):
             ty += 19
         if g.is_video:
             from ..viewer import fmt_duration
-            txt = "▶ " + (fmt_duration((g.meta or {}).get("duration")) or "视频")
+            txt = "▶ " + (fmt_duration((g.meta or {}).get("duration")) or _t("视频"))
             qp.setFont(font("display", 9.5, 700))
             tw = QFontMetrics(qp.font()).horizontalAdvance(txt) + 14
             tr = QRect(img.right() - tw - 3, img.bottom() - 21, tw, 18)
@@ -410,21 +410,21 @@ class ThumbGrid(QListView):
         if g is None:
             return
         m = QMenu(self)
-        a1 = QAction("打开图片", m)
+        a1 = QAction(_t("打开图片"), m)
         a1.triggered.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(g.primary)))
-        a2 = QAction("在文件夹中显示", m)
+        a2 = QAction(_t("在文件夹中显示"), m)
         a2.triggered.connect(lambda: reveal_in_explorer(g.primary))
-        a3 = QAction("复制文件路径", m)
+        a3 = QAction(_t("复制文件路径"), m)
         a3.triggered.connect(lambda: QGuiApplication.clipboard().setText(g.primary))
         acts = [a1, a2, a3]
         if HOOKS.open is not None:
-            a0 = QAction("大图查看（空格）", m)
+            a0 = QAction(_t("大图查看（空格）"), m)
             idx = self.indexAt(pos)
             a0.triggered.connect(lambda: self._open(idx))
-            a1.setText("用系统程序打开")
+            a1.setText(_t("用系统程序打开"))
             acts.insert(0, a0)
         if HOOKS.edit is not None and not g.is_video:
-            ae = QAction("修图（图层 / 调整 / 修复）…", m)
+            ae = QAction(_t("修图（图层 / 调整 / 修复）…"), m)
             ae.triggered.connect(lambda: HOOKS.edit(g))
             acts.insert(1 if HOOKS.open is not None else 0, ae)
         for a in acts:
@@ -432,13 +432,13 @@ class ThumbGrid(QListView):
         if HOOKS.rate is not None:
             gids = self.selected_gids() or [g.gid]
             m.addSeparator()
-            sub = m.addMenu(f"标记（{len(gids)} 张）")
-            for text, change in ([(f"{'★' * n}  {n} 星", {"rating": n}) for n in range(1, 6)]
-                                 + [("清除星级  0", {"rating": 0}), (None, None),
-                                    ("留用  P", {"flag": "pick"}), ("弃用  X", {"flag": "reject"}),
-                                    ("取消留用 / 弃用  U", {"flag": None}), (None, None)]
-                                 + [(f"色标：{LABEL_NAMES[k]}", {"label": k}) for k in ("Red", "Yellow", "Green", "Blue", "Purple")]
-                                 + [("清除色标", {"label": None}), (None, None), ("清除本软件打的全部标记", "clear")]):
+            sub = m.addMenu(_t('标记（{0} 张）', len(gids)))
+            for text, change in ([(_t('{0}  {1} 星', '★' * n, n), {"rating": n}) for n in range(1, 6)]
+                                 + [(_t("清除星级  0"), {"rating": 0}), (None, None),
+                                    (_t("留用  P"), {"flag": "pick"}), (_t("弃用  X"), {"flag": "reject"}),
+                                    (_t("取消留用 / 弃用  U"), {"flag": None}), (None, None)]
+                                 + [(_t('色标：{0}', LABEL_NAMES[k]), {"label": k}) for k in ("Red", "Yellow", "Green", "Blue", "Purple")]
+                                 + [(_t("清除色标"), {"label": None}), (None, None), (_t("清除本软件打的全部标记"), "clear")]):
                 if text is None:
                     sub.addSeparator()
                     continue

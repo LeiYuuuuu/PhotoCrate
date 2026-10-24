@@ -15,21 +15,22 @@ from ..theme import font
 from ..widgets.deco import Panel, SegProgress, StatCard, TacButton, caption, micro_label
 from ..widgets.thumbgrid import ThumbGrid
 from .base import Page
+from ...i18n import t as _t
 
 FILTERS = [
-    ("all", "全部照片"), ("raw", "含 RAW"), ("jpeg", "JPG"), ("heif", "HEIC"), ("png", "PNG / 截图"),
-    ("guess", "日期为推测"), ("nodate", "无日期"), ("nogps", "无 GPS"), ("gps", "有 GPS"), ("noplace", "无地点"),
-    ("cross", "跨文件夹配对"), ("screenshot", "截图"),
+    ("all", _t("全部照片")), ("raw", _t("含 RAW")), ("jpeg", "JPG"), ("heif", "HEIC"), ("png", _t("PNG / 截图")),
+    ("guess", _t("日期为推测")), ("nodate", _t("无日期")), ("nogps", _t("无 GPS")), ("gps", _t("有 GPS")), ("noplace", _t("无地点")),
+    ("cross", _t("跨文件夹配对")), ("screenshot", _t("截图")),
 ]
-SORTS = [("date_asc", "拍摄时间 ↑"), ("date_desc", "拍摄时间 ↓"), ("name", "文件名"), ("folder", "所在文件夹")]
+SORTS = [("date_asc", _t("拍摄时间 ↑")), ("date_desc", _t("拍摄时间 ↓")), ("name", _t("文件名")), ("folder", _t("所在文件夹"))]
 
 
 class SourcePage(Page):
     page_id = "source"
     index = "01"
-    title = "资源接入"
+    title = _t("资源接入")
     en = "Source input // scan & index"
-    sub = "添加要整理的文件夹并扫描。扫描结果会缓存，第二次扫描同一批照片几乎是瞬间完成。"
+    sub = _t("添加要整理的文件夹并扫描。扫描结果会缓存，第二次扫描同一批照片几乎是瞬间完成。")
 
     def __init__(self, ctx, parent=None):
         super().__init__(ctx, parent)
@@ -39,7 +40,7 @@ class SourcePage(Page):
         top = QHBoxLayout()
         top.setSpacing(12)
         # ---- 数据源 ----
-        src = Panel("数据源", "Source folders")
+        src = Panel(_t("数据源"), "Source folders")
         src.setFixedWidth(400)
         self.dirs = QListWidget()
         self.dirs.setFixedHeight(96)
@@ -48,25 +49,25 @@ class SourcePage(Page):
             self.dirs.addItem(d)
         src.body.addWidget(self.dirs)
         row = QHBoxLayout()
-        b_add = TacButton("添加文件夹", "secondary", height=30)
-        b_rm = TacButton("移除", "secondary", height=30)
+        b_add = TacButton(_t("添加文件夹"), "secondary", height=30)
+        b_rm = TacButton(_t("移除"), "secondary", height=30)
         b_add.clicked.connect(self._add_dir)
         b_rm.clicked.connect(self._rm_dir)
         row.addWidget(b_add)
         row.addWidget(b_rm)
         row.addStretch(1)
-        self.recursive = QCheckBox("包含子文件夹")
+        self.recursive = QCheckBox(_t("包含子文件夹"))
         self.recursive.setChecked(bool(ctx.settings.get("recursive", True)))
         row.addWidget(self.recursive)
         src.body.addLayout(row)
         row2 = QHBoxLayout()
-        self.b_scan = TacButton("开始扫描", "primary", en="SCAN", height=38)
-        self.b_cancel = TacButton("取消", "secondary", height=38)
+        self.b_scan = TacButton(_t("开始扫描"), "primary", en="SCAN", height=38)
+        self.b_cancel = TacButton(_t("取消"), "secondary", height=38)
         self.b_cancel.setEnabled(False)
         self.b_scan.clicked.connect(self.start_scan)
         self.b_cancel.clicked.connect(self.cancel_scan)
         row2.addWidget(self.b_scan, 1)
-        self.b_import = TacButton("导入存储卡…", "secondary", en="IMPORT", height=38)
+        self.b_import = TacButton(_t("导入存储卡…"), "secondary", en="IMPORT", height=38)
         self.b_import.clicked.connect(self.import_media)
         row2.addWidget(self.b_import)
         row2.addWidget(self.b_cancel)
@@ -77,11 +78,11 @@ class SourcePage(Page):
         top.addWidget(src)
 
         # ---- 扫描状态 ----
-        st = Panel("扫描状态", "Index status", "IDLE")
+        st = Panel(_t("扫描状态"), "Index status", "IDLE")
         self.status_panel = st
         self.bar = SegProgress()
         st.body.addWidget(self.bar)
-        self.stage = QLabel("等待扫描")
+        self.stage = QLabel(_t("等待扫描"))
         self.stage.setFont(font("cn", 10, 600))
         self.counts = QLabel("META  —      PIXEL  —")
         self.counts.setFont(font("mono", 8.5))
@@ -97,12 +98,12 @@ class SourcePage(Page):
         st.body.addWidget(self.current)
         grid = QGridLayout()
         grid.setSpacing(8)
-        self.c_total = StatCard("照片", "Groups")
-        self.c_raw = StatCard("含 RAW", "Raw")
-        self.c_gps = StatCard("有 GPS", "Geotag", accent=theme.current().accent2)
-        self.c_date = StatCard("EXIF 拍摄时间", "Exif date")
-        self.c_guess = StatCard("日期推测 / 未知", "Inferred", accent=theme.current().warn)
-        self.c_shot = StatCard("截图", "Screenshot")
+        self.c_total = StatCard(_t("照片"), "Groups")
+        self.c_raw = StatCard(_t("含 RAW"), "Raw")
+        self.c_gps = StatCard(_t("有 GPS"), "Geotag", accent=theme.current().accent2)
+        self.c_date = StatCard(_t("EXIF 拍摄时间"), "Exif date")
+        self.c_guess = StatCard(_t("日期推测 / 未知"), "Inferred", accent=theme.current().warn)
+        self.c_shot = StatCard(_t("截图"), "Screenshot")
         for i, c in enumerate((self.c_total, self.c_raw, self.c_gps, self.c_date, self.c_guess, self.c_shot)):
             grid.addWidget(c, i // 3, i % 3)
         st.body.addLayout(grid)
@@ -122,11 +123,11 @@ class SourcePage(Page):
 
 
         # ---- 浏览 ----
-        br = Panel("照片浏览与挑选", "Browser // select", "")
+        br = Panel(_t("照片浏览与挑选"), "Browser // select", "")
         self.browser = br
         tb = QHBoxLayout()
         self.search = QLineEdit()
-        self.search.setPlaceholderText("按文件名 / 地点 / 相机搜索…")
+        self.search.setPlaceholderText(_t("按文件名 / 地点 / 相机搜索…"))
         self.search.setClearButtonEnabled(True)
         self.filter = QComboBox()
         for k, v in FILTERS:
@@ -138,8 +139,8 @@ class SourcePage(Page):
         self.size.setRange(120, 280)
         self.size.setValue(168)
         self.size.setFixedWidth(110)
-        b_all = TacButton("全选", "secondary", height=30)
-        b_none = TacButton("清除选择", "secondary", height=30)
+        b_all = TacButton(_t("全选"), "secondary", height=30)
+        b_none = TacButton(_t("清除选择"), "secondary", height=30)
         b_all.clicked.connect(lambda: self.grid.selectAll())
         b_none.clicked.connect(self._clear_selection)
         tb.addWidget(self.search, 2)
@@ -151,7 +152,7 @@ class SourcePage(Page):
         tb.addWidget(b_all)
         tb.addWidget(b_none)
         br.body.addLayout(tb)
-        self.sel_label = caption("扫描后可在这里挑选照片：不选 = 处理全部；选中部分 = 可在「分区」页只处理选中的。", "dim", 9)
+        self.sel_label = caption(_t("扫描后可在这里挑选照片：不选 = 处理全部；选中部分 = 可在「分区」页只处理选中的。"), "dim", 9)
         br.body.addWidget(self.sel_label)
         self.grid = ThumbGrid()
         br.body.addWidget(self.grid, 1)
@@ -184,7 +185,7 @@ class SourcePage(Page):
 
     def _add_dir(self):
         start = self._dirs()[-1] if self._dirs() else os.path.expanduser("~")
-        d = QFileDialog.getExistingDirectory(self, "选择照片文件夹", start)
+        d = QFileDialog.getExistingDirectory(self, _t("选择照片文件夹"), start)
         if d:
             d = os.path.normpath(d)
             if d not in self._dirs():
@@ -208,11 +209,11 @@ class SourcePage(Page):
             return self.ctx.mover.execute(plan, lambda d, t, c: prog((d, t, c)), cancel,
                                           {"spec": plan.spec_text, "kind": "import"})
         try:
-            res, tb = run_with_progress(self.ctx, self, "正在导入", "IMPORTING", job)
+            res, tb = run_with_progress(self.ctx, self, _t("正在导入"), "IMPORTING", job)
         finally:
             self.ctx.busy = False
         if tb or res is None:
-            info(self, "导入出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
+            info(self, _t("导入出错"), f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
             return
         hist = ImportHistory(history_path())
         try:
@@ -221,14 +222,14 @@ class SourcePage(Page):
             hist.close()
         self.ctx.files_changed.emit()
         dst = dlg.dst.text().strip()
-        msg = f"已导入 {res.done_groups} 张照片 / 视频（{res.done_files} 个文件）到<br>{dst}"
+        msg = _t('已导入 {0} 张照片 / 视频（{1} 个文件）到<br>{2}', res.done_groups, res.done_files, dst)
         if res.failed_groups:
-            msg += f"<br><br>{res.failed_groups} 张失败：<br>" + "<br>".join(res.errors[:6])
+            msg += _t('<br><br>{0} 张失败：<br>', res.failed_groups) + "<br>".join(res.errors[:6])
         if res.cancelled:
-            msg += "<br><br>已取消，剩余文件未导入（下次导入会接着来）。"
-        msg += f"<br><br>批次 #{res.batch_id}，可在「操作记录」页撤销。"
-        self.ctx.status.emit(f"导入完成：{res.done_files} 个文件")
-        info(self, "导入完成", msg, "COMPLETE")
+            msg += _t("<br><br>已取消，剩余文件未导入（下次导入会接着来）。")
+        msg += _t('<br><br>批次 #{0}，可在「操作记录」页撤销。', res.batch_id)
+        self.ctx.status.emit(_t('导入完成：{0} 个文件', res.done_files))
+        info(self, _t("导入完成"), msg, "COMPLETE")
         if dlg.cb_add.isChecked() and res.done_files:
             norm = os.path.normcase(os.path.normpath(dst))
             covered = any(norm == os.path.normcase(d) or norm.startswith(os.path.normcase(d) + os.sep)
@@ -249,15 +250,15 @@ class SourcePage(Page):
             self.tool_note.setText("")
             self.tool_note.hide()
         else:
-            self.tool_note.setText("▲ 未检测到 ExifTool：将使用内置读取，部分 RAW（如 CR3、RAF）的拍摄时间可能读不到。"
-                                   "可运行 tools\\get_exiftool.ps1 自动下载，或在「设置」中指定。")
+            self.tool_note.setText(_t("▲ 未检测到 ExifTool：将使用内置读取，部分 RAW（如 CR3、RAF）的拍摄时间可能读不到。"
+                                   "可运行 tools\\get_exiftool.ps1 自动下载，或在「设置」中指定。"))
             self.tool_note.show()
 
     # ---- 扫描 ------------------------------------------------------------
     def start_scan(self):
         dirs = [d for d in self._dirs() if os.path.isdir(d)]
         if not dirs:
-            info(self, "还没有文件夹", "请先点击「添加文件夹」选择要整理的照片所在位置。")
+            info(self, _t("还没有文件夹"), _t("请先点击「添加文件夹」选择要整理的照片所在位置。"))
             return
         self.ctx.settings.set("recursive", self.recursive.isChecked())
         self.ctx.settings.set("source_dirs", self._dirs())
@@ -281,15 +282,15 @@ class SourcePage(Page):
     def cancel_scan(self):
         if self.worker:
             self.worker.cancel()
-            self.stage.setText("正在取消…")
+            self.stage.setText(_t("正在取消…"))
 
     def _on_progress(self, pg: Progress):
-        names = {"enumerate": "枚举文件", "meta": "读取元数据", "pixel": "分析画面", "analyze": "整理日期与地点",
-                 "done": "完成"}
+        names = {"enumerate": _t("枚举文件"), "meta": _t("读取元数据"), "pixel": _t("分析画面"), "analyze": _t("整理日期与地点"),
+                 "done": _t("完成")}
         stage = pg.message if pg.stage in ("analyze", "ai") and pg.message else names.get(pg.stage, pg.stage)
         if pg.stage == "ai" and pg.ai_total:
             stage += f" {pg.ai_done}/{pg.ai_total}"
-        self.stage.setText(f"{stage} · 已发现 {pg.groups} 组照片")
+        self.stage.setText(_t('{0} · 已发现 {1} 组照片', stage, pg.groups))
         self.counts.setText(f"META  {pg.meta_done}/{pg.meta_total}      PIXEL  {pg.pix_done}/{pg.pix_total}")
         self.current.setText(pg.current[-90:] if pg.current else "")
         self.bar.set_value(pg.fraction)
@@ -305,34 +306,33 @@ class SourcePage(Page):
     def _on_done(self, rep):
         self._finish_ui()
         if rep.cancelled:
-            self.stage.setText("已取消")
+            self.stage.setText(_t("已取消"))
             self.status_panel.set_meta("CANCELLED")
             return
         self.bar.set_value(1)
         self.status_panel.set_meta(f"DONE · {rep.seconds:.1f}s")
-        paired = f"（{rep.paired_across} 组 RAW+JPG 跨文件夹配对）" if rep.paired_across else ""
-        self.stage.setText(f"扫描完成：{rep.groups} 组照片 / {rep.files} 个文件{paired}")
-        self.counts.setText(f"缓存命中 {rep.meta_cached + rep.pix_cached}   新分析 {rep.meta_read + rep.pix_computed}"
-                            + (f"   失败 {len(rep.errors)}" if rep.errors else ""))
+        paired = _t('（{0} 组 RAW+JPG 跨文件夹配对）', rep.paired_across) if rep.paired_across else ""
+        self.stage.setText(_t('扫描完成：{0} 组照片 / {1} 个文件{2}', rep.groups, rep.files, paired))
+        self.counts.setText(_t('缓存命中 {0}   新分析 {1}', rep.meta_cached + rep.pix_cached, rep.meta_read + rep.pix_computed)
+                            + (_t('   失败 {0}', len(rep.errors)) if rep.errors else ""))
         self.current.setText("")
         self.ctx.library_changed.emit()
-        self.ctx.status.emit(f"扫描完成：{rep.groups} 组照片，用时 {rep.seconds:.1f} 秒")
+        self.ctx.status.emit(_t('扫描完成：{0} 组照片，用时 {1:.1f} 秒', rep.groups, rep.seconds))
         if rep.errors:
             more = "<br>".join(rep.errors[:12]) + ("<br>…" if len(rep.errors) > 12 else "")
-            info(self, "部分文件无法预览", f"{len(rep.errors)} 个文件无法生成预览（不影响按日期/地区分区）：<br>"
-                                         f"<span style='font-size:8pt'>{more}</span>")
+            info(self, _t("部分文件无法预览"), _t("{0} 个文件无法生成预览（不影响按日期/地区分区）：<br><span style='font-size:8pt'>{1}</span>", len(rep.errors), more))
 
     def _on_error(self, tb: str):
         self._finish_ui()
-        self.stage.setText("扫描出错")
-        info(self, "扫描出错", f"<pre style='font-size:8pt'>{tb[-1500:]}</pre>", "ERROR")
+        self.stage.setText(_t("扫描出错"))
+        info(self, _t("扫描出错"), f"<pre style='font-size:8pt'>{tb[-1500:]}</pre>", "ERROR")
 
     # ---- 浏览 ------------------------------------------------------------
     def _on_library(self):
         lib = self.ctx.library
         gs = [g for g in lib.groups if g.files]
         n = len(gs) or 1
-        self.c_total.set(f"{len(gs)}", None, "组")
+        self.c_total.set(f"{len(gs)}", None, _t("组"))
         self.c_raw.set(f"{sum(1 for g in gs if g.has_raw)}", sum(1 for g in gs if g.has_raw) / n)
         gps = sum(1 for g in gs if g.feat("geo", "has_gps") and not g.feat("geo", "inferred"))
         self.c_gps.set(f"{gps}", gps / n)
@@ -423,6 +423,6 @@ class SourcePage(Page):
         if not total:
             return
         if n:
-            self.sel_label.setText(f"已选 {n} / 共 {total} 组 —— 在「分区」页可选择“仅处理已选”。双击打开图片，右键可在文件夹中显示。")
+            self.sel_label.setText(_t('已选 {0} / 共 {1} 组 —— 在「分区」页可选择“仅处理已选”。双击打开图片，右键可在文件夹中显示。', n, total))
         else:
-            self.sel_label.setText(f"共 {total} 组照片。未选择 = 分区时处理全部；按住 Ctrl / Shift 可多选。双击打开图片。")
+            self.sel_label.setText(_t('共 {0} 组照片。未选择 = 分区时处理全部；按住 Ctrl / Shift 可多选。双击打开图片。', total))

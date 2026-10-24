@@ -24,6 +24,7 @@ from PySide6.QtWidgets import QDialog, QHBoxLayout, QVBoxLayout, QWidget
 from ..analyzers.builtin import FLAG_NAMES, LABEL_COLORS, LABEL_NAMES, blur_state, place_label
 from . import theme
 from .theme import font
+from ..i18n import t as _t
 
 KEY_LABELS = {Qt.Key.Key_6: "Red", Qt.Key.Key_7: "Yellow", Qt.Key.Key_8: "Green", Qt.Key.Key_9: "Blue"}
 
@@ -340,7 +341,7 @@ class ImagePane(QWidget):
         qp.drawPolygon(QPolygonF([QPointF(c.x() - 13, c.y() - 20), QPointF(c.x() - 13, c.y() + 20),
                                   QPointF(c.x() + 22, c.y())]))
         dur = (self.group.meta or {}).get("duration")
-        txt = ("视频 " + fmt_duration(dur) if dur else "视频") + " · 双击 / 回车 播放"
+        txt = (_t("视频 ") + fmt_duration(dur) if dur else _t("视频")) + _t(" · 双击 / 回车 播放")
         qp.setFont(font("cn", 10, 600))
         tw = QFontMetrics(qp.font()).horizontalAdvance(txt) + 20
         r = QRectF(c.x() - tw / 2, c.y() + 54, tw, 26)
@@ -372,7 +373,7 @@ class ImagePane(QWidget):
         else:
             qp.setPen(QColor("#8A8C8E"))
             qp.setFont(font("mono", 10))
-            qp.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "LOADING…" if self.loading else "无法读取这张照片")
+            qp.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "LOADING…" if self.loading else _t("无法读取这张照片"))
         if self.group is not None and getattr(self.group, "is_video", False) and self.img:
             self._paint_play(qp)
         if self.zoom is not None:
@@ -456,7 +457,7 @@ class InfoBar(QWidget):
                 return
             qp.setFont(font("mono", 7.5))
             qp.setPen(QColor("#686C73"))
-            hint = "← → 或点两侧 翻页  ·  Z/双击 100%  ·  C 对比  ·  E 修图  ·  1–5 星  0 清除  ·  6–9 色标  ·  P 留用  X 弃用  U 取消  ·  Esc 关闭"
+            hint = _t("← → 或点两侧 翻页  ·  Z/双击 100%  ·  C 对比  ·  E 修图  ·  1–5 星  0 清除  ·  6–9 色标  ·  P 留用  X 弃用  U 取消  ·  Esc 关闭")
             qp.drawText(QRectF(0, 0, self.width() - 12, self.height()),
                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, hint)
         qp.end()
@@ -501,7 +502,7 @@ class ViewerWindow(QDialog):
         self.index = max(0, min(index, len(self.groups) - 1))
         self.compare = False
         self.left_index = self.index          # 对比模式左边固定的照片
-        self.setWindowTitle("影匣 · 大图查看")
+        self.setWindowTitle(_t("影匣 · 大图查看"))
         self.setStyleSheet("background: #0B0C0D;")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         lay = QVBoxLayout(self)
@@ -601,21 +602,21 @@ class ViewerWindow(QDialog):
         sc = g.feat("blur", "score")
         if sc is not None:
             st = blur_state(g, float(self.ctx.settings.get("blur_threshold", 60)))
-            parts.append(f"清晰度 {sc:.0f}" + ("（模糊）" if st == "blurry" else ""))
+            parts.append(_t('清晰度 {0:.0f}', sc) + (_t("（模糊）") if st == "blurry" else ""))
         sim = g.feats.get("similar")
         if sim:
-            parts.append(f"相似组 #{sim['cid']}：第 {sim['rank']}/{sim['size']}" + (" · 最佳" if sim["best"] else ""))
+            parts.append(_t('相似组 #{0}：第 {1}/{2}', sim['cid'], sim['rank'], sim['size']) + (_t(" · 最佳") if sim["best"] else ""))
         return "   ·   ".join(parts)
 
     def _update_info(self) -> None:
         g = self.groups[self.index]
         if self.compare:
             ga = self.groups[self.left_index]
-            self.top.left_text = f"对比  {ga.name}  ⟷  {g.name}"
-            self.top.right_text = f"右侧 {self.index + 1} / {len(self.groups)}   ·   {self._describe(self.current_group())}"
+            self.top.left_text = _t('对比  {0}  ⟷  {1}', ga.name, g.name)
+            self.top.right_text = _t('右侧 {0} / {1}   ·   {2}', self.index + 1, len(self.groups), self._describe(self.current_group()))
             self.bottom.groups = [ga, g]
         else:
-            self.top.left_text = f"{g.name}" + (f"   ({len(g.files)} 个文件)" if len(g.files) > 1 else "")
+            self.top.left_text = f"{g.name}" + (_t('   ({0} 个文件)', len(g.files)) if len(g.files) > 1 else "")
             self.top.right_text = f"{self.index + 1} / {len(self.groups)}   ·   {self._describe(g)}"
             self.bottom.groups = [g]
         self.top.update()

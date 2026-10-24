@@ -5,13 +5,14 @@
 from __future__ import annotations
 
 import numpy as np
+from ..i18n import t as _t
 
 BLEND_MODES = [
-    ("normal", "正常"), ("multiply", "正片叠底"), ("screen", "滤色"), ("overlay", "叠加"),
-    ("soft_light", "柔光"), ("hard_light", "强光"), ("darken", "变暗"), ("lighten", "变亮"),
-    ("color_dodge", "颜色减淡"), ("color_burn", "颜色加深"), ("linear_dodge", "线性减淡（添加）"),
-    ("linear_burn", "线性加深"), ("difference", "差值"), ("exclusion", "排除"),
-    ("hue", "色相"), ("saturation", "饱和度"), ("color", "颜色"), ("luminosity", "明度"),
+    ("normal", _t("正常")), ("multiply", _t("正片叠底")), ("screen", _t("滤色")), ("overlay", _t("叠加")),
+    ("soft_light", _t("柔光")), ("hard_light", _t("强光")), ("darken", _t("变暗")), ("lighten", _t("变亮")),
+    ("color_dodge", _t("颜色减淡")), ("color_burn", _t("颜色加深")), ("linear_dodge", _t("线性减淡（添加）")),
+    ("linear_burn", _t("线性加深")), ("difference", _t("差值")), ("exclusion", _t("排除")),
+    ("hue", _t("色相")), ("saturation", _t("饱和度")), ("color", _t("颜色")), ("luminosity", _t("明度")),
 ]
 BLEND_NAMES = dict(BLEND_MODES)
 EPS = 1e-6

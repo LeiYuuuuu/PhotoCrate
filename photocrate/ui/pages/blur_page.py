@@ -17,6 +17,7 @@ from ..dialogs import PlanDialog, info
 from ..widgets.deco import Panel, StatCard, TacButton, caption, micro_label
 from ..widgets.thumbgrid import ThumbGrid
 from .base import Page
+from ...i18n import t as _t
 
 LO, HI = 5.0, 2000.0
 
@@ -32,16 +33,16 @@ def _from_slider(i: int) -> float:
 class BlurPage(Page):
     page_id = "blur"
     index = "09"
-    title = "清晰度检测"
+    title = _t("清晰度检测")
     en = "Sharpness scan // laplacian variance"
-    sub = "分数越低越模糊。拖动阈值，观察哪些照片被标红，找到适合你照片的值；结果只是建议，绝不会自动删除。"
+    sub = _t("分数越低越模糊。拖动阈值，观察哪些照片被标红，找到适合你照片的值；结果只是建议，绝不会自动删除。")
 
     def __init__(self, ctx, parent=None):
         super().__init__(ctx, parent)
         p = theme.current()
         top = QHBoxLayout()
         top.setSpacing(12)
-        ctl = Panel("阈值", "Threshold")
+        ctl = Panel(_t("阈值"), "Threshold")
         ctl.setFixedWidth(430)
         r = QHBoxLayout()
         self.slider = QSlider(Qt.Orientation.Horizontal)
@@ -59,9 +60,9 @@ class BlurPage(Page):
         r.addWidget(self.spin)
         ctl.body.addLayout(r)
         fr = QHBoxLayout()
-        self.f_all = QRadioButton("全部")
-        self.f_blur = QRadioButton("只看模糊")
-        self.f_unk = QRadioButton("无法判断")
+        self.f_all = QRadioButton(_t("全部"))
+        self.f_blur = QRadioButton(_t("只看模糊"))
+        self.f_unk = QRadioButton(_t("无法判断"))
         bg = QButtonGroup(self)
         for b in (self.f_all, self.f_blur, self.f_unk):
             bg.addButton(b)
@@ -69,33 +70,33 @@ class BlurPage(Page):
         self.f_blur.setChecked(True)
         fr.addStretch(1)
         ctl.body.addLayout(fr)
-        ctl.body.addWidget(caption("算法：在长边 1024 像素的预览上计算拉普拉斯方差，分 4×4 小块取最清晰的两块，"
-                                   "因此“主体清晰、背景虚化”不会被误判。夜景高噪点照片分数会偏高。预览太小（<640px）的标为“无法判断”。",
+        ctl.body.addWidget(caption(_t("算法：在长边 1024 像素的预览上计算拉普拉斯方差，分 4×4 小块取最清晰的两块，"
+                                   "因此“主体清晰、背景虚化”不会被误判。夜景高噪点照片分数会偏高。预览太小（<640px）的标为“无法判断”。"),
                                    "faint", 8))
         top.addWidget(ctl)
 
-        cards = Panel("结果", "Result")
+        cards = Panel(_t("结果"), "Result")
         cr = QHBoxLayout()
-        self.c_blur = StatCard("模糊", "Blurry", accent=p.danger)
-        self.c_sharp = StatCard("清晰", "Sharp", accent=p.ok)
-        self.c_unk = StatCard("无法判断", "Unknown", accent=p.ink3)
+        self.c_blur = StatCard(_t("模糊"), "Blurry", accent=p.danger)
+        self.c_sharp = StatCard(_t("清晰"), "Sharp", accent=p.ok)
+        self.c_unk = StatCard(_t("无法判断"), "Unknown", accent=p.ink3)
         for c in (self.c_blur, self.c_sharp, self.c_unk):
             cr.addWidget(c)
         cards.body.addLayout(cr)
         ar = QHBoxLayout()
-        ar.addWidget(QLabel("移入文件夹名："))
-        self.folder_name = QLineEdit("待确认_模糊")
+        ar.addWidget(QLabel(_t("移入文件夹名：")))
+        self.folder_name = QLineEdit(_t("待确认_模糊"))
         self.folder_name.setFixedWidth(160)
         ar.addWidget(self.folder_name)
         ar.addStretch(1)
-        self.b_move = TacButton("把模糊照片移入文件夹…", "primary", en="ISOLATE", height=36)
+        self.b_move = TacButton(_t("把模糊照片移入文件夹…"), "primary", en="ISOLATE", height=36)
         self.b_move.clicked.connect(self.isolate)
         ar.addWidget(self.b_move)
         cards.body.addLayout(ar)
         top.addWidget(cards, 1)
         self.root.addLayout(top)
 
-        gp = Panel("照片", "Gallery // sorted by score", "")
+        gp = Panel(_t("照片"), "Gallery // sorted by score", "")
         self.gpanel = gp
         self.grid = ThumbGrid(selectable=False)
         self.grid.delegate.show_score = True
@@ -168,10 +169,10 @@ class BlurPage(Page):
         if not groups:
             return
         start = self.ctx.settings.get("target_dir") or (groups[0].folder if groups else os.path.expanduser("~"))
-        d = QFileDialog.getExistingDirectory(self, "模糊照片的「待确认」文件夹放在哪里？", start)
+        d = QFileDialog.getExistingDirectory(self, _t("模糊照片的「待确认」文件夹放在哪里？"), start)
         if not d:
             return
-        name = self.folder_name.text().strip() or "待确认_模糊"
+        name = self.folder_name.text().strip() or _t("待确认_模糊")
         spec = PartitionSpec("rules", [Rule("fixed", {"name": name})])
         plan = build_plan(groups, spec, PartitionContext(self.ctx.settings.snapshot()), os.path.normpath(d),
                           "move", "rename", "none")
@@ -183,4 +184,4 @@ class BlurPage(Page):
         if page is not None:
             page.execute(plan)
         else:
-            info(self, "无法执行", "未找到执行器")
+            info(self, _t("无法执行"), _t("未找到执行器"))

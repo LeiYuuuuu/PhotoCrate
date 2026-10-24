@@ -21,12 +21,13 @@ from ..timeplace_dialogs import PLACE_SCOPES, ItineraryDialog, TimeShiftDialog, 
 from ..widgets.deco import Panel, StatCard, TacButton, caption
 from ..widgets.thumbgrid import ThumbGrid
 from .base import Page
+from ...i18n import is_en, t as _t
 
 DayRole = Qt.ItemDataRole.UserRole + 11
 
 
 class DayModel(QAbstractTableModel):
-    HEAD = ["日期", "照片", "时间段", "相机", "地点", "地点来源", "时区 / 校正"]
+    HEAD = [_t("日期"), _t("照片"), _t("时间段"), _t("相机"), _t("地点"), _t("地点来源"), _t("时区 / 校正")]
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -55,17 +56,17 @@ class DayModel(QAbstractTableModel):
         if not r.cameras:
             return "—"
         top = r.cameras.most_common()
-        return top[0][0] + (f" 等 {len(top)} 台" if len(top) > 1 else "")
+        return top[0][0] + (_t(' 等 {0} 台', len(top)) if len(top) > 1 else "")
 
     @staticmethod
     def _zone(r: DayRow) -> str:
         parts = []
         if r.tzs:
             tz = r.tzs.most_common()
-            parts.append(tz[0][0] + (f" 等 {len(tz)} 种" if len(tz) > 1 else ""))
+            parts.append(tz[0][0] + (_t(' 等 {0} 种', len(tz)) if len(tz) > 1 else ""))
         if r.shifts:
             sh = r.shifts.most_common()
-            parts.append("校正 " + "/".join(shift_label(s) or "时区" for s, _ in sh[:2]))
+            parts.append(_t("校正 ") + "/".join(shift_label(s) or _t("时区") for s, _ in sh[:2]))
         return "  ".join(parts) or "—"
 
     def data(self, idx, role=Qt.ItemDataRole.DisplayRole):
@@ -83,15 +84,15 @@ class DayModel(QAbstractTableModel):
             if c == 3:
                 return self._cams(r)
             if c == 4:
-                return r.main_place or "（未知）"
+                return r.main_place or _t("（未知）")
             if c == 5:
                 return r.source_text
             return self._zone(r)
         if role == Qt.ItemDataRole.ToolTipRole:
             if c == 4 and r.places:
-                return "<br>".join(f"{k}：{v} 张" for k, v in r.places.most_common(12))
+                return "<br>".join(_t('{0}：{1} 张', k, v) for k, v in r.places.most_common(12))
             if c == 3 and r.cameras:
-                return "<br>".join(f"{k}：{v} 张" for k, v in r.cameras.most_common())
+                return "<br>".join(_t('{0}：{1} 张', k, v) for k, v in r.cameras.most_common())
             return None
         if role == Qt.ItemDataRole.FontRole:
             if c in (0, 2, 6):
@@ -114,9 +115,9 @@ class DayModel(QAbstractTableModel):
 class TimePlacePage(Page):
     page_id = "timeplace"
     index = "02"
-    title = "时间与地点"
+    title = _t("时间与地点")
     en = "Time & place // dates, zones, locations"
-    sub = "按天检查拍摄时间与地点：补全 GPS、手动指定地点、校正时间。修改只保存在软件里，照片文件不变（可选写入 XMP）。"
+    sub = _t("按天检查拍摄时间与地点：补全 GPS、手动指定地点、校正时间。修改只保存在软件里，照片文件不变（可选写入 XMP）。")
 
     def __init__(self, ctx, parent=None):
         super().__init__(ctx, parent)
@@ -129,12 +130,12 @@ class TimePlacePage(Page):
         # ---- 概览卡片 ----
         cards = QHBoxLayout()
         cards.setSpacing(8)
-        self.c_total = StatCard("照片", "Photos")
-        self.c_loc = StatCard("已知地点", "Located", accent=p.ok)
-        self.c_track = StatCard("轨迹 / 参考匹配", "Track match", accent=p.accent2)
-        self.c_manual = StatCard("手动指定", "Manual", accent=p.ink2)
-        self.c_none = StatCard("没有地点", "Unknown", accent=p.warn)
-        self.c_fix = StatCard("时间已校正", "Time shifted", accent=p.accent)
+        self.c_total = StatCard(_t("照片"), "Photos")
+        self.c_loc = StatCard(_t("已知地点"), "Located", accent=p.ok)
+        self.c_track = StatCard(_t("轨迹 / 参考匹配"), "Track match", accent=p.accent2)
+        self.c_manual = StatCard(_t("手动指定"), "Manual", accent=p.ink2)
+        self.c_none = StatCard(_t("没有地点"), "Unknown", accent=p.warn)
+        self.c_fix = StatCard(_t("时间已校正"), "Time shifted", accent=p.accent)
         for c in (self.c_total, self.c_loc, self.c_track, self.c_manual, self.c_none, self.c_fix):
             cards.addWidget(c)
         self.root.addLayout(cards)
@@ -145,7 +146,7 @@ class TimePlacePage(Page):
         # ======== 左：按天列表 + 当天照片 ========
         vsplit = QSplitter(Qt.Orientation.Vertical)
         vsplit.setChildrenCollapsible(False)
-        dp = Panel("按天查看", "Day ledger", "")
+        dp = Panel(_t("按天查看"), "Day ledger", "")
         self.day_panel = dp
         self.day_model = DayModel(self)
         self.days = QTableView()
@@ -158,25 +159,26 @@ class TimePlacePage(Page):
         self.days.setAlternatingRowColors(True)
         self.days.setWordWrap(False)
         h = self.days.horizontalHeader()
-        for col, w in ((0, 118), (1, 44), (2, 96), (3, 112), (5, 112), (6, 128)):
+        wide = 1 if is_en() else 0          # 英文表头更长
+        for col, w in ((0, 118), (1, 44 + 20 * wide), (2, 96), (3, 112), (5, 112), (6, 128 + 24 * wide)):
             h.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
             h.resizeSection(col, w)
         h.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.days.selectionModel().selectionChanged.connect(self._days_selected)
         dp.body.addWidget(self.days, 1)
         dr = QHBoxLayout()
-        b_all = TacButton("全选日期", "secondary", height=28)
-        b_unk = TacButton("选中有未知地点的天", "secondary", height=28)
+        b_all = TacButton(_t("全选日期"), "secondary", height=28)
+        b_unk = TacButton(_t("选中有未知地点的天"), "secondary", height=28)
         b_all.clicked.connect(self.days.selectAll)
         b_unk.clicked.connect(self._select_unknown_days)
         dr.addWidget(b_all)
         dr.addWidget(b_unk)
         dr.addStretch(1)
-        dr.addWidget(caption("按住 Ctrl / Shift 多选；下方照片也可单独挑选。", "faint", 8.5))
+        dr.addWidget(caption(_t("按住 Ctrl / Shift 多选；下方照片也可单独挑选。"), "faint", 8.5))
         dp.body.addLayout(dr)
         vsplit.addWidget(dp)
 
-        gp = Panel("所选日期的照片", "Photos of selected days", "")
+        gp = Panel(_t("所选日期的照片"), "Photos of selected days", "")
         self.grid_panel = gp
         self.grid = ThumbGrid()
         self.grid.set_cell_width(132)
@@ -192,7 +194,7 @@ class TimePlacePage(Page):
         right.setContentsMargins(0, 0, 6, 0)
         right.setSpacing(10)
 
-        tgt = Panel("操作对象", "Target")
+        tgt = Panel(_t("操作对象"), "Target")
         self.target_lab = QLabel("")
         self.target_lab.setFont(font("cn", 10, 700))
         self.target_lab.setWordWrap(True)
@@ -200,14 +202,16 @@ class TimePlacePage(Page):
         right.addWidget(tgt)
 
         # ---- 指定地点 ----
-        pp = Panel("指定地点", "Manual place")
+        pp = Panel(_t("指定地点"), "Manual place")
         self.place_edit = QLineEdit()
-        self.place_edit.setPlaceholderText("例如：日本/京都、湖南/邵阳、日本/箱根（输入时有候选）")
+        self.place_edit.setPlaceholderText(_t("例如：日本/京都、湖南/邵阳、日本/箱根（输入时有候选）"))
         self.place_edit.setClearButtonEnabled(True)
         pp.body.addWidget(self.place_edit)
         self.place_res = caption("", "dim", 9)
         pp.body.addWidget(self.place_res)
         self.place_scope = QComboBox()
+        self.place_scope.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.place_scope.setMinimumContentsLength(16)
         for k, v in PLACE_SCOPES:
             self.place_scope.addItem(v, k)
         self.place_scope.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -216,24 +220,24 @@ class TimePlacePage(Page):
         self.place_count = caption("", "faint", 8.5)
         pp.body.addWidget(self.place_count)
         r = QHBoxLayout()
-        self.b_place = TacButton("应用到操作对象", "primary", en="ASSIGN", height=32)
-        self.b_place_clear = TacButton("清除手动地点", "secondary", height=32)
+        self.b_place = TacButton(_t("应用到操作对象"), "primary", en="ASSIGN", height=32)
+        self.b_place_clear = TacButton(_t("清除手动地点"), "secondary", height=32)
         r.addWidget(self.b_place, 1)
         r.addWidget(self.b_place_clear)
         pp.body.addLayout(r)
-        self.b_itin = TacButton("按行程批量指定…", "secondary", height=30)
+        self.b_itin = TacButton(_t("按行程批量指定…"), "secondary", height=30)
         pp.body.addWidget(self.b_itin)
         right.addWidget(pp)
 
         # ---- GPS 补全 ----
-        fp = Panel("GPS 补全", "Fill from track / phone")
-        self.cb_fill = QCheckBox("按拍摄时间匹配，给没有 GPS 的照片补上位置")
+        fp = Panel(_t("GPS 补全"), "Fill from track / phone")
+        self.cb_fill = QCheckBox(_t("按拍摄时间匹配，给没有 GPS 的照片补上位置"))
         self.cb_fill.setChecked(bool(ctx.settings.get("gps_fill", True)))
         fp.body.addWidget(self.cb_fill)
-        self.cb_lib = QCheckBox("用本批照片中自带 GPS 的照片（如手机拍的）作参考")
+        self.cb_lib = QCheckBox(_t("用本批照片中自带 GPS 的照片（如手机拍的）作参考"))
         self.cb_lib.setChecked(bool(ctx.settings.get("gps_fill_library", True)))
         fp.body.addWidget(self.cb_lib)
-        fp.body.addWidget(caption("参考照片文件夹（如手机照片；只读取，不会移动）：", "dim", 8.5))
+        fp.body.addWidget(caption(_t("参考照片文件夹（如手机照片；只读取，不会移动）："), "dim", 8.5))
         self.ref_dirs = QListWidget()
         self.ref_dirs.setFixedHeight(54)
         self.ref_dirs.setFont(font("mono", 8))
@@ -241,15 +245,15 @@ class TimePlacePage(Page):
             self.ref_dirs.addItem(d)
         fp.body.addWidget(self.ref_dirs)
         r = QHBoxLayout()
-        b1 = TacButton("添加文件夹", "secondary", height=26)
-        b2 = TacButton("移除", "secondary", height=26)
+        b1 = TacButton(_t("添加文件夹"), "secondary", height=26)
+        b2 = TacButton(_t("移除"), "secondary", height=26)
         b1.clicked.connect(self._add_ref_dir)
         b2.clicked.connect(lambda: self._remove_selected(self.ref_dirs, "gps_ref_dirs"))
         r.addWidget(b1)
         r.addWidget(b2)
         r.addStretch(1)
         fp.body.addLayout(r)
-        fp.body.addWidget(caption("GPS 轨迹文件（GPX / KML）：", "dim", 8.5))
+        fp.body.addWidget(caption(_t("GPS 轨迹文件（GPX / KML）："), "dim", 8.5))
         self.tracks = QListWidget()
         self.tracks.setFixedHeight(54)
         self.tracks.setFont(font("mono", 8))
@@ -257,8 +261,8 @@ class TimePlacePage(Page):
             self.tracks.addItem(t)
         fp.body.addWidget(self.tracks)
         r = QHBoxLayout()
-        b3 = TacButton("添加轨迹", "secondary", height=26)
-        b4 = TacButton("移除", "secondary", height=26)
+        b3 = TacButton(_t("添加轨迹"), "secondary", height=26)
+        b4 = TacButton(_t("移除"), "secondary", height=26)
         b3.clicked.connect(self._add_tracks)
         b4.clicked.connect(lambda: self._remove_selected(self.tracks, "gps_track_files"))
         r.addWidget(b3)
@@ -267,14 +271,14 @@ class TimePlacePage(Page):
         fp.body.addLayout(r)
         g = QGridLayout()
         g.setHorizontalSpacing(8)
-        g.addWidget(QLabel("时间相差不超过"), 0, 0)
+        g.addWidget(QLabel(_t("时间相差不超过")), 0, 0)
         self.sp_window = QSpinBox()
         self.sp_window.setRange(1, 720)
-        self.sp_window.setSuffix(" 分钟")
+        self.sp_window.setSuffix(_t(" 分钟"))
         self.sp_window.setValue(int(ctx.settings.get("gps_fill_minutes", 30)))
         g.addWidget(self.sp_window, 0, 1)
-        g.addWidget(QLabel("照片没有时区时按"), 1, 0)
-        self.cb_deftz = self._tz_combo("未知（只与同样没有时区的参考比较）")
+        g.addWidget(QLabel(_t("照片没有时区时按")), 1, 0)
+        self.cb_deftz = self._tz_combo(_t("未知（只与同样没有时区的参考比较）"))
         self._set_tz_combo(self.cb_deftz, ctx.settings.get("camera_tz_default") or None)
         g.addWidget(self.cb_deftz, 1, 1)
         g.setColumnStretch(1, 1)
@@ -282,22 +286,22 @@ class TimePlacePage(Page):
         self.fill_status = caption("", "dim", 8.5)
         self.fill_status.setTextFormat(Qt.TextFormat.RichText)
         fp.body.addWidget(self.fill_status)
-        self.b_fill = TacButton("读取参考并重新匹配", "primary", en="MATCH", height=32)
+        self.b_fill = TacButton(_t("读取参考并重新匹配"), "primary", en="MATCH", height=32)
         fp.body.addWidget(self.b_fill)
-        fp.body.addWidget(caption("带时区的照片按 UTC 比对，所以相机设的是北京时间、手机是当地时间也能对上；"
-                                  "相机时钟本身不准时，先在下面“时间校正”里修正。", "faint", 8))
+        fp.body.addWidget(caption(_t("带时区的照片按 UTC 比对，所以相机设的是北京时间、手机是当地时间也能对上；"
+                                  "相机时钟本身不准时，先在下面“时间校正”里修正。"), "faint", 8))
         right.addWidget(fp)
 
         # ---- 时间校正 ----
-        tp = Panel("时间校正", "Time shift")
+        tp = Panel(_t("时间校正"), "Time shift")
         r = QHBoxLayout()
         r.setSpacing(4)
         self.sh_dir = QComboBox()
-        self.sh_dir.addItem("推后 ＋", 1)
-        self.sh_dir.addItem("提前 －", -1)
+        self.sh_dir.addItem(_t("推后 ＋"), 1)
+        self.sh_dir.addItem(_t("提前 －"), -1)
         r.addWidget(self.sh_dir)
         self.sh = []
-        for suffix, mx in ((" 天", 3650), (" 时", 23), (" 分", 59), (" 秒", 59)):
+        for suffix, mx in ((_t(" 天"), 3650), (_t(" 时"), 23), (_t(" 分"), 59), (_t(" 秒"), 59)):
             sp = QSpinBox()
             sp.setRange(0, mx)
             sp.setSuffix(suffix)
@@ -307,13 +311,13 @@ class TimePlacePage(Page):
             r.addWidget(sp)
         tp.body.addLayout(r)
         r = QHBoxLayout()
-        r.addWidget(QLabel("实际时区"))
-        self.sh_tz = self._tz_combo("保持照片原有时区")
+        r.addWidget(QLabel(_t("实际时区")))
+        self.sh_tz = self._tz_combo(_t("保持照片原有时区"))
         r.addWidget(self.sh_tz, 1)
         tp.body.addLayout(r)
         r = QHBoxLayout()
         r.setSpacing(4)
-        r.addWidget(caption("相机时区设错了：", "dim", 8.5))
+        r.addWidget(caption(_t("相机时区设错了："), "dim", 8.5))
         self.cv_from = self._tz_combo(None)
         self.cv_to = self._tz_combo(None)
         self._set_tz_combo(self.cv_from, "+08:00")
@@ -321,28 +325,28 @@ class TimePlacePage(Page):
         r.addWidget(self.cv_from, 1)
         r.addWidget(QLabel("→"))
         r.addWidget(self.cv_to, 1)
-        b = TacButton("换算", "secondary", height=28)
+        b = TacButton(_t("换算"), "secondary", height=28)
         b.clicked.connect(self._convert_tz)
         r.addWidget(b)
         tp.body.addLayout(r)
         r = QHBoxLayout()
-        self.b_shift = TacButton("预览并应用…", "primary", en="SHIFT", height=32)
-        self.b_shift_clear = TacButton("清除时间校正", "secondary", height=32)
+        self.b_shift = TacButton(_t("预览并应用…"), "primary", en="SHIFT", height=32)
+        self.b_shift_clear = TacButton(_t("清除时间校正"), "secondary", height=32)
         r.addWidget(self.b_shift, 1)
         r.addWidget(self.b_shift_clear)
         tp.body.addLayout(r)
-        tp.body.addWidget(caption("例：相机设成北京时间（+08:00）去了日本（+09:00），选“+08:00 → +09:00”点换算，"
-                                  "即推后 1 小时并把时区改为 +09:00。只改软件里使用的时间，不改照片文件。", "faint", 8))
+        tp.body.addWidget(caption(_t("例：相机设成北京时间（+08:00）去了日本（+09:00），选“+08:00 → +09:00”点换算，"
+                                  "即推后 1 小时并把时区改为 +09:00。只改软件里使用的时间，不改照片文件。"), "faint", 8))
         right.addWidget(tp)
 
         # ---- 写回 XMP ----
-        xp = Panel("写回 XMP 附属文件", "Write-back (optional)")
-        self.x_gps = QCheckBox("GPS 坐标（轨迹 / 参考照片匹配到的）")
-        self.x_place = QCheckBox("地点名称（手动指定 / 匹配）")
-        self.x_time = QCheckBox("校正后的拍摄时间")
-        self.x_rating = QCheckBox("星级 / 色标 / 弃用（在「挑片」页打的）")
-        self.x_kw = QCheckBox("AI 关键词（场景 / 已命名的人物 / 旅行名）")
-        self.x_update = QCheckBox("更新已有的 .xmp（先备份，只改这几项）")
+        xp = Panel(_t("写回 XMP 附属文件"), "Write-back (optional)")
+        self.x_gps = QCheckBox(_t("GPS 坐标（轨迹 / 参考照片匹配到的）"))
+        self.x_place = QCheckBox(_t("地点名称（手动指定 / 匹配）"))
+        self.x_time = QCheckBox(_t("校正后的拍摄时间"))
+        self.x_rating = QCheckBox(_t("星级 / 色标 / 弃用（在「挑片」页打的）"))
+        self.x_kw = QCheckBox(_t("AI 关键词（场景 / 已命名的人物 / 旅行名）"))
+        self.x_update = QCheckBox(_t("更新已有的 .xmp（先备份，只改这几项）"))
         for cb, key in ((self.x_gps, "xmp_write_gps"), (self.x_place, "xmp_write_place"),
                         (self.x_time, "xmp_write_time"), (self.x_rating, "xmp_write_rating"),
                         (self.x_kw, "xmp_write_keywords"),
@@ -350,10 +354,10 @@ class TimePlacePage(Page):
             cb.setChecked(bool(ctx.settings.get(key, True)))
             cb.toggled.connect(lambda v, k=key: ctx.settings.set(k, bool(v)))
             xp.body.addWidget(cb)
-        self.b_xmp = TacButton("生成 XMP…", "secondary", en="SIDECAR", height=32)
+        self.b_xmp = TacButton(_t("生成 XMP…"), "secondary", en="SIDECAR", height=32)
         xp.body.addWidget(self.b_xmp)
-        xp.body.addWidget(caption("只为 RAW 写“文件名.xmp”供 Lightroom / Bridge 读取，不改原片；已有 .xmp 时"
-                                  "可选择更新（其余修图记录原样保留）或跳过。没有选择对象时处理全部照片。可在「操作记录」页撤销。",
+        xp.body.addWidget(caption(_t("只为 RAW 写“文件名.xmp”供 Lightroom / Bridge 读取，不改原片；已有 .xmp 时"
+                                  "可选择更新（其余修图记录原样保留）或跳过。没有选择对象时处理全部照片。可在「操作记录」页撤销。"),
                                   "faint", 8))
         right.addWidget(xp)
         right.addStretch(1)
@@ -363,7 +367,7 @@ class TimePlacePage(Page):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(rw)
         scroll.setMinimumWidth(400)
-        scroll.setMaximumWidth(470)
+        scroll.setMaximumWidth(520 if is_en() else 470)
         split.addWidget(scroll)
         split.setStretchFactor(0, 1)
         split.setStretchFactor(1, 0)
@@ -433,7 +437,7 @@ class TimePlacePage(Page):
         if self._place_index is not None or self._loading_index:
             return
         self._loading_index = True
-        self.place_edit.setPlaceholderText("正在载入地名库…")
+        self.place_edit.setPlaceholderText(_t("正在载入地名库…"))
 
         def job(prog, cancel):
             from ...core.places import PlaceIndex
@@ -450,7 +454,7 @@ class TimePlacePage(Page):
             comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
             comp.setMaxVisibleItems(14)
             self.place_edit.setCompleter(comp)
-            self.place_edit.setPlaceholderText("例如：日本/京都、湖南/邵阳、日本/箱根（输入时有候选）")
+            self.place_edit.setPlaceholderText(_t("例如：日本/京都、湖南/邵阳、日本/箱根（输入时有候选）"))
             self._resolve_place()
 
         self.ctx.run(job, None, done)
@@ -458,20 +462,20 @@ class TimePlacePage(Page):
     def _resolve_place(self):
         text = self.place_edit.text().strip()
         if not text:
-            self.place_res.setText("输入地名后，这里显示识别结果。")
+            self.place_res.setText(_t("输入地名后，这里显示识别结果。"))
             self._update_place_count()
             return
         if self._place_index is None:
-            self.place_res.setText("地名库载入中…")
+            self.place_res.setText(_t("地名库载入中…"))
             return
         r = self._place_index.resolve(text)
         if r and r.get("needs_country"):
-            self.place_res.setText(f"→ 不认识“{text}”，请加上国家，例如“日本/{text}”")
+            self.place_res.setText(_t('→ 不认识“{0}”，请加上国家，例如“日本/{1}”', text, text))
         elif r:
-            known = "（标准地名）" if r.get("cc") else "（不在地名库中，按输入的层级保存）"
+            known = _t("（标准地名）") if r.get("cc") else _t("（不在地名库中，按输入的层级保存）")
             self.place_res.setText("→ " + r["label"].replace("/", " / ") + "  " + known)
         else:
-            self.place_res.setText("→ 无法识别")
+            self.place_res.setText(_t("→ 无法识别"))
         self._update_place_count()
 
     # ---- 刷新 ------------------------------------------------------------
@@ -493,12 +497,12 @@ class TimePlacePage(Page):
             src.update(r.sources)
         located = len(gs) - src.get("none", 0)
         fixed = sum(1 for g in gs if g.feat("date", "corrected"))
-        self.c_total.set(str(len(gs)), None, f"张 · {len([r for r in self._days if r.day])} 天")
-        self.c_loc.set(str(located), located / n, "张")
-        self.c_track.set(str(src.get("track", 0)), src.get("track", 0) / n, "张")
-        self.c_manual.set(str(src.get("manual", 0)), src.get("manual", 0) / n, "张")
-        self.c_none.set(str(src.get("none", 0)), src.get("none", 0) / n, "张")
-        self.c_fix.set(str(fixed), fixed / n, "张")
+        self.c_total.set(str(len(gs)), None, _t('张 · {0} 天', len([r for r in self._days if r.day])))
+        self.c_loc.set(str(located), located / n, _t("张"))
+        self.c_track.set(str(src.get("track", 0)), src.get("track", 0) / n, _t("张"))
+        self.c_manual.set(str(src.get("manual", 0)), src.get("manual", 0) / n, _t("张"))
+        self.c_none.set(str(src.get("none", 0)), src.get("none", 0) / n, _t("张"))
+        self.c_fix.set(str(fixed), fixed / n, _t("张"))
         self.day_panel.set_meta(f"{len(self._days)} DAYS")
         self._update_fill_status()
         self._days_selected()
@@ -510,20 +514,20 @@ class TimePlacePage(Page):
         for s in lib.ref_sources:
             name = os.path.basename(s["path"].rstrip("\\/")) or s["path"]
             if s.get("error"):
-                lines.append(f"<span style='color:{p.danger}'>■ {name}：{s['error']}</span>")
+                lines.append(_t("<span style='color:{0}'>■ {1}：{2}</span>", p.danger, name, s['error']))
             elif s["kind"] == "track":
-                lines.append(f"● {name}：{s.get('span', '')}")
+                lines.append(_t('● {0}：{1}', name, s.get('span', '')))
             else:
-                extra = f"，其中 {s['naive']} 张没有时区" if s.get("naive") else ""
-                lines.append(f"● {name}：{s.get('photos', 0)} 张照片，{s['points']} 张有 GPS{extra}")
+                extra = _t('，其中 {0} 张没有时区', s['naive']) if s.get("naive") else ""
+                lines.append(_t('● {0}：{1} 张照片，{2} 张有 GPS{3}', name, s.get('photos', 0), s['points'], extra))
         st = lib.fill_stats or {}
         if st.get("matched"):
-            kinds = "、".join(f"{MATCH_KIND_LABELS.get(k, k)} {st[k]}" for k in ("track", "reference", "library")
+            kinds = _t("、").join(f"{MATCH_KIND_LABELS.get(k, k)} {st[k]}" for k in ("track", "reference", "library")
                              if st.get(k))
-            lines.append(f"<b>已匹配 {st['matched']} 张</b>（{kinds}）")
+            lines.append(_t('<b>已匹配 {0} 张</b>（{1}）', st['matched'], kinds))
         elif lib.groups and (lib.ref_sources or any(g.feat("geo", "source") == "gps" for g in lib.groups)):
-            lines.append("暂无匹配：参考数据的时间段与照片不重合，或时间差超过窗口。")
-        self.fill_status.setText("<br>".join(lines) or "还没有参考数据：添加手机照片文件夹或 GPX / KML 轨迹后点“读取参考并重新匹配”。")
+            lines.append(_t("暂无匹配：参考数据的时间段与照片不重合，或时间差超过窗口。"))
+        self.fill_status.setText("<br>".join(lines) or _t("还没有参考数据：添加手机照片文件夹或 GPX / KML 轨迹后点“读取参考并重新匹配”。"))
 
     def selected_days(self) -> list[DayRow]:
         rows = sorted({i.row() for i in self.days.selectionModel().selectedRows()})
@@ -551,13 +555,13 @@ class TimePlacePage(Page):
     def target(self) -> tuple[list[int], str]:
         sel = self.grid.selected_gids()
         if sel:
-            return sel, f"下方已选的 {len(sel)} 张照片"
+            return sel, _t('下方已选的 {0} 张照片', len(sel))
         days = self.selected_days()
         if days:
             gids = [gid for r in days for gid in r.gids]
             if len(days) == 1:
-                return gids, f"{days[0].label.strip()} 的全部 {len(gids)} 张照片"
-            return gids, f"所选 {len(days)} 天的全部 {len(gids)} 张照片"
+                return gids, _t('{0} 的全部 {1} 张照片', days[0].label.strip(), len(gids))
+            return gids, _t('所选 {0} 天的全部 {1} 张照片', len(days), len(gids))
         return [], ""
 
     def _update_target(self):
@@ -566,7 +570,7 @@ class TimePlacePage(Page):
             self.target_lab.setText("▶ " + text)
             self.target_lab.setStyleSheet("")
         else:
-            self.target_lab.setText("先在左侧选择日期（Ctrl / Shift 多选），或在下方挑选照片。")
+            self.target_lab.setText(_t("先在左侧选择日期（Ctrl / Shift 多选），或在下方挑选照片。"))
             self.target_lab.setStyleSheet(f"color: {theme.current().ink3};")
         for b in (self.b_place, self.b_place_clear, self.b_shift, self.b_shift_clear):
             b.setEnabled(bool(gids) and not self._is_busy)
@@ -580,13 +584,13 @@ class TimePlacePage(Page):
         lib = self.ctx.library
         scope = self.place_scope.currentData()
         n = sum(1 for gid in gids if (g := lib.by_gid(gid)) is not None and would_apply(g, scope))
-        self.place_count.setText(f"将指定 {n} 张；跳过 {len(gids) - n} 张（自带 GPS 或已有轨迹地点，取决于上面的范围）。")
+        self.place_count.setText(_t('将指定 {0} 张；跳过 {1} 张（自带 GPS 或已有轨迹地点，取决于上面的范围）。', n, len(gids) - n))
 
     # ---- 后台重新整理 ------------------------------------------------------
     def _reanalyze(self, message: str, reload: bool = False, after=None):
         lib = self.ctx.library
         self._busy(True)
-        self.ctx.status.emit("正在重新整理日期与地点…")
+        self.ctx.status.emit(_t("正在重新整理日期与地点…"))
 
         def job(prog, cancel):
             if reload:
@@ -603,7 +607,7 @@ class TimePlacePage(Page):
 
         def err(tb):
             self._busy(False)
-            info(self, "出错了", f"<pre style='font-size:8pt'>{tb[-1500:]}</pre>", "ERROR")
+            info(self, _t("出错了"), f"<pre style='font-size:8pt'>{tb[-1500:]}</pre>", "ERROR")
 
         self.ctx.run(job, None, done, err)
 
@@ -613,29 +617,29 @@ class TimePlacePage(Page):
         if not gids:
             return
         if self._place_index is None:
-            info(self, "请稍候", "地名库还在载入，几秒后再试。")
+            info(self, _t("请稍候"), _t("地名库还在载入，几秒后再试。"))
             return
         raw = self.place_edit.text().strip()
         place = self._place_index.resolve(raw) if raw else None
         if not place:
-            info(self, "缺少地点", "请先输入地点，例如“日本/京都”。")
+            info(self, _t("缺少地点"), _t("请先输入地点，例如“日本/京都”。"))
             return
         if place.get("needs_country"):
-            info(self, "请加上国家", f"地名库里没有“{raw}”，无法确定是哪个国家。<br>请写成“国家/地名”，例如“日本/{raw}”。")
+            info(self, _t("请加上国家"), _t('地名库里没有“{0}”，无法确定是哪个国家。<br>请写成“国家/地名”，例如“日本/{1}”。', raw, raw))
             return
         over_gps, over_track = scope_flags(self.place_scope.currentData())
         n = self.ctx.library.set_manual_place(gids, place, over_gps, over_track)
-        self._reanalyze(f"已把 {n} 张照片的地点指定为：{place['label']}")
+        self._reanalyze(_t('已把 {0} 张照片的地点指定为：{1}', n, place['label']))
 
     def _clear_place(self):
         gids, _ = self.target()
         if gids:
             n = self.ctx.library.set_manual_place(gids, None)
-            self._reanalyze(f"已清除 {n} 张照片的手动地点")
+            self._reanalyze(_t('已清除 {0} 张照片的手动地点', n))
 
     def _itinerary(self):
         if self._place_index is None:
-            info(self, "请稍候", "地名库还在载入，几秒后再试。")
+            info(self, _t("请稍候"), _t("地名库还在载入，几秒后再试。"))
             return
         years = Counter(r.day.year for r in self._days if r.day for _ in range(r.count))
         year = years.most_common(1)[0][0] if years else None
@@ -646,7 +650,7 @@ class TimePlacePage(Page):
         total = 0
         for gids, place, _ in dlg.result:
             total += self.ctx.library.set_manual_place(gids, place, over_gps, over_track)
-        self._reanalyze(f"已按行程给 {total} 张照片指定地点（{len(dlg.result)} 段）")
+        self._reanalyze(_t('已按行程给 {0} 张照片指定地点（{1} 段）', total, len(dlg.result)))
 
     # ---- GPS 补全 --------------------------------------------------------
     def _fill_setting(self, key, value):
@@ -659,17 +663,17 @@ class TimePlacePage(Page):
 
     def _add_ref_dir(self):
         start = (self._list_items(self.ref_dirs) or [os.path.expanduser("~")])[-1]
-        d = QFileDialog.getExistingDirectory(self, "选择参考照片文件夹（例如手机照片）", start)
+        d = QFileDialog.getExistingDirectory(self, _t("选择参考照片文件夹（例如手机照片）"), start)
         if d:
             d = os.path.normpath(d)
             if d not in self._list_items(self.ref_dirs):
                 self.ref_dirs.addItem(d)
             self.ctx.settings.set("gps_ref_dirs", self._list_items(self.ref_dirs))
-            self.fill_status.setText("已添加，点“读取参考并重新匹配”生效。")
+            self.fill_status.setText(_t("已添加，点“读取参考并重新匹配”生效。"))
 
     def _add_tracks(self):
-        files, _ = QFileDialog.getOpenFileNames(self, "选择 GPS 轨迹文件", os.path.expanduser("~"),
-                                                "GPS 轨迹 (*.gpx *.kml);;所有文件 (*)")
+        files, _ = QFileDialog.getOpenFileNames(self, _t("选择 GPS 轨迹文件"), os.path.expanduser("~"),
+                                                _t("GPS 轨迹 (*.gpx *.kml);;所有文件 (*)"))
         if files:
             have = self._list_items(self.tracks)
             for f in files:
@@ -677,7 +681,7 @@ class TimePlacePage(Page):
                 if f not in have:
                     self.tracks.addItem(f)
             self.ctx.settings.set("gps_track_files", self._list_items(self.tracks))
-            self.fill_status.setText("已添加，点“读取参考并重新匹配”生效。")
+            self.fill_status.setText(_t("已添加，点“读取参考并重新匹配”生效。"))
 
     def _remove_selected(self, lw: QListWidget, key: str):
         for it in lw.selectedItems():
@@ -687,15 +691,15 @@ class TimePlacePage(Page):
     def _rematch(self, reload: bool):
         if not self.ctx.library.groups:
             if reload:
-                info(self, "还没有照片", "请先在「资源接入」页扫描照片。")
+                info(self, _t("还没有照片"), _t("请先在「资源接入」页扫描照片。"))
             return
         lib = self.ctx.library
 
         def msg():
             st = lib.fill_stats or {}
-            self.ctx.status.emit(f"GPS 补全完成：匹配到 {st.get('matched', 0)} 张")
+            self.ctx.status.emit(_t('GPS 补全完成：匹配到 {0} 张', st.get('matched', 0)))
 
-        self._reanalyze("GPS 补全完成", reload=reload, after=msg)
+        self._reanalyze(_t("GPS 补全完成"), reload=reload, after=msg)
 
     # ---- 时间校正 --------------------------------------------------------
     def _shift_seconds(self) -> int:
@@ -719,23 +723,23 @@ class TimePlacePage(Page):
         tzv = self.sh_tz.currentData()
         tz = format_offset(tzv) if tzv is not None else None
         if not seconds and not tz:
-            info(self, "没有要校正的内容", "请设置要推后 / 提前的时间，或选择实际时区。")
+            info(self, _t("没有要校正的内容"), _t("请设置要推后 / 提前的时间，或选择实际时区。"))
             return
         rows = self.ctx.library.preview_time_shift(gids, seconds, tz)
         if not rows:
-            info(self, "无法校正", "所选照片都没有可用的拍摄时间。")
+            info(self, _t("无法校正"), _t("所选照片都没有可用的拍摄时间。"))
             return
         dlg = TimeShiftDialog(self, rows, seconds, tz)
         if dlg.exec() != TimeShiftDialog.DialogCode.Accepted:
             return
         n = self.ctx.library.set_time_shift([g.gid for g, _, _ in rows], seconds, tz)
-        self._reanalyze(f"已校正 {n} 张照片的时间（{shift_label(seconds) or '仅时区'}）", reload=False)
+        self._reanalyze(_t('已校正 {0} 张照片的时间（{1}）', n, shift_label(seconds) or _t('仅时区')), reload=False)
 
     def _clear_shift(self):
         gids, _ = self.target()
         if gids:
             n = self.ctx.library.set_time_shift(gids, None)
-            self._reanalyze(f"已清除 {n} 张照片的时间校正")
+            self._reanalyze(_t('已清除 {0} 张照片的时间校正', n))
 
     # ---- 写回 XMP --------------------------------------------------------
     def _write_xmp(self):
@@ -747,7 +751,7 @@ class TimePlacePage(Page):
             scope_text = text
         else:
             groups = [g for g in lib.groups if g.files]
-            scope_text = f"全部 {len(groups)} 张照片"
+            scope_text = _t('全部 {0} 张照片', len(groups))
         run_xmp_flow(self.ctx, self, groups, scope_text, gps=self.x_gps.isChecked(), place=self.x_place.isChecked(),
                      time=self.x_time.isChecked(), rating=self.x_rating.isChecked(),
                      update_existing=self.x_update.isChecked(), keywords=self.x_kw.isChecked())

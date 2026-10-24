@@ -23,6 +23,7 @@ import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+from .i18n import t as _t
 
 log = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ def load_plugins(dirs: list[str] | list[Path], headless: bool = False) -> list[P
                 mod_name = f"photocrate_plugin_{f.stem}"
                 spec = importlib.util.spec_from_file_location(mod_name, f)
                 if spec is None or spec.loader is None:
-                    raise ImportError("无法加载")
+                    raise ImportError(_t("无法加载"))
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules[mod_name] = mod
                 spec.loader.exec_module(mod)

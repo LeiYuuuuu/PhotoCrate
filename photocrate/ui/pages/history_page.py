@@ -16,11 +16,12 @@ from ..theme import font
 from ..widgets.deco import Panel, TacButton, caption
 from ..widgets.thumbgrid import open_folder
 from .base import Page
+from ...i18n import t as _t
 
 
 class OpsModel(QAbstractTableModel):
     """文件清单（可能有上千行）：用数据模型按需绘制，避免逐格创建控件导致界面卡顿。"""
-    HEAD = ["状态", "源路径", "目标路径", "备注"]
+    HEAD = [_t("状态"), _t("源路径"), _t("目标路径"), _t("备注")]
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -62,17 +63,17 @@ class OpsModel(QAbstractTableModel):
 class HistoryPage(Page):
     page_id = "history"
     index = "10"
-    title = "操作记录"
+    title = _t("操作记录")
     en = "Operation log // undo"
-    sub = "每次执行前都会先写日志。选中一个批次即可查看清单、撤销（把文件移回原处）或导出。"
+    sub = _t("每次执行前都会先写日志。选中一个批次即可查看清单、撤销（把文件移回原处）或导出。")
 
     def __init__(self, ctx, parent=None):
         super().__init__(ctx, parent)
         split = QSplitter(Qt.Orientation.Vertical)
-        bp = Panel("批次", "Batches", "")
+        bp = Panel(_t("批次"), "Batches", "")
         self.bpanel = bp
         self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(["#", "时间", "操作", "分区规则", "照片 / 文件", "大小", "状态"])
+        self.table.setHorizontalHeaderLabels(["#", _t("时间"), _t("操作"), _t("分区规则"), _t("照片 / 文件"), _t("大小"), _t("状态")])
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -85,10 +86,10 @@ class HistoryPage(Page):
         self.table.itemSelectionChanged.connect(self._load_ops)
         bp.body.addWidget(self.table, 1)
         row = QHBoxLayout()
-        row.addWidget(caption("撤销会按日志逆序把文件移回原位置；原位置已有同名文件时会改名恢复，不会覆盖。", "faint", 8.5), 1)
-        self.b_export = TacButton("导出清单 CSV", "secondary", height=32)
-        self.b_folder = TacButton("打开目标文件夹", "secondary", height=32)
-        self.b_undo = TacButton("撤销此批次", "danger", en="UNDO", height=34)
+        row.addWidget(caption(_t("撤销会按日志逆序把文件移回原位置；原位置已有同名文件时会改名恢复，不会覆盖。"), "faint", 8.5), 1)
+        self.b_export = TacButton(_t("导出清单 CSV"), "secondary", height=32)
+        self.b_folder = TacButton(_t("打开目标文件夹"), "secondary", height=32)
+        self.b_undo = TacButton(_t("撤销此批次"), "danger", en="UNDO", height=34)
         self.b_export.clicked.connect(self._export)
         self.b_folder.clicked.connect(self._open)
         self.b_undo.clicked.connect(self._undo)
@@ -97,7 +98,7 @@ class HistoryPage(Page):
         bp.body.addLayout(row)
         split.addWidget(bp)
 
-        op = Panel("文件清单", "Manifest", "")
+        op = Panel(_t("文件清单"), "Manifest", "")
         self.opanel = op
         self.ops_model = OpsModel(self)
         self.ops = QTableView()
@@ -137,7 +138,7 @@ class HistoryPage(Page):
         for r, b in enumerate(self._batches):
             opname = OPERATION_LABELS.get(b["operation"], b["operation"])
             if b["operation"] == "copy" and '"import"' in (b.get("note") or ""):
-                opname = "导入"
+                opname = _t("导入")
             vals = [f"{b['id']}", (b["created"] or "").replace("T", " "), opname,
                     b["spec"] or "", f"{b['groups']} / {b['total']}", human_size(b["bytes"] or 0),
                     STATUS_LABELS.get(b["status"], b["status"])]
@@ -190,10 +191,10 @@ class HistoryPage(Page):
         b = self._current()
         if not b:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "导出清单", f"批次{b['id']}.csv", "CSV (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(self, _t("导出清单"), _t('批次{0}.csv', b['id']), "CSV (*.csv)")
         if path:
             self.ctx.journal.export_csv(b["id"], path)
-            self.ctx.status.emit(f"已导出：{path}")
+            self.ctx.status.emit(_t('已导出：{0}', path))
 
     def _open(self):
         b = self._current()
@@ -204,26 +205,24 @@ class HistoryPage(Page):
         b = self._current()
         if not b:
             return
-        op = {"copy": "删除复制 / 导入出来的文件（放入回收站；存储卡上的原文件不受影响）",
-              "xmp": "把这一批新建的 .xmp 附属文件放入回收站、更新过的 .xmp 换回修改前的备份"
-                     "（之后若在 Lightroom 等软件里又改过它们，那些改动也会被撤掉）",
-              "delete": "从系统回收站把这些文件放回原来的位置（如果回收站已清空或文件已被手动还原，会跳过并标注）",
-              "rename": "把文件名改回原来的名字",
-              }.get(b["operation"], "把文件移回原来的位置")
+        op = {"copy": _t("删除复制 / 导入出来的文件（放入回收站；存储卡上的原文件不受影响）"),
+              "xmp": _t("把这一批新建的 .xmp 附属文件放入回收站、更新过的 .xmp 换回修改前的备份"
+                     "（之后若在 Lightroom 等软件里又改过它们，那些改动也会被撤掉）"),
+              "delete": _t("从系统回收站把这些文件放回原来的位置（如果回收站已清空或文件已被手动还原，会跳过并标注）"),
+              "rename": _t("把文件名改回原来的名字"),
+              }.get(b["operation"], _t("把文件移回原来的位置"))
         deps = self.ctx.journal.later_dependents(b["id"]) if b["operation"] in ("move", "rename") else []
         chain = [b["id"]]
         if deps:
             # 这批照片之后又被移动 / 改名过：必须从新到旧依次撤销，文件才能一路回到最初的位置
-            names = "、".join(f"#{d}" for d in reversed(deps))
-            if choose(self, f"撤销批次 #{b['id']}",
-                      f"这一批照片之后又被批次 {names} 移动或改名过，单独撤销 #{b['id']} 找不到文件。<br><br>"
-                      f"将按从新到旧的顺序依次撤销 {names} 和 #{b['id']}，照片回到 #{b['id']} 之前的位置。",
-                      [("cancel", "取消", "secondary"), ("all", f"依次撤销 {len(deps) + 1} 个批次", "danger")],
+            names = _t("、").join(f"#{d}" for d in reversed(deps))
+            if choose(self, _t('撤销批次 #{0}', b['id']),
+                      _t('这一批照片之后又被批次 {0} 移动或改名过，单独撤销 #{1} 找不到文件。<br><br>将按从新到旧的顺序依次撤销 {2} 和 #{3}，照片回到 #{4} 之前的位置。', names, b['id'], names, b['id'], b['id']),
+                      [("cancel", _t("取消"), "secondary"), ("all", _t('依次撤销 {0} 个批次', len(deps) + 1), "danger")],
                       en="UNDO CHAIN") != "all":
                 return
             chain = sorted(deps, reverse=True) + [b["id"]]
-        elif not ask(self, f"撤销批次 #{b['id']}", f"将{op}，共 {b['done'] or b['total']} 个文件。<br>"
-                     "如果之后手动改动过这些文件，相关文件会被跳过并在清单里标注。", ok="撤销", danger=True, en="UNDO"):
+        elif not ask(self, _t('撤销批次 #{0}', b['id']), _t('将{0}，共 {1} 个文件。<br>如果之后手动改动过这些文件，相关文件会被跳过并在清单里标注。', op, b['done'] or b['total']), ok=_t("撤销"), danger=True, en="UNDO"):
             return
         mover = self.ctx.mover
 
@@ -235,10 +234,10 @@ class HistoryPage(Page):
                 out.append(mover.undo(bid, lambda d, t, c: prog((d, t, c)), cancel))
             return out
 
-        results, tb = run_with_progress(self.ctx, self, "正在撤销", "ROLLBACK", job)
+        results, tb = run_with_progress(self.ctx, self, _t("正在撤销"), "ROLLBACK", job)
         if tb or not results:
             self.refresh()
-            info(self, "撤销出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
+            info(self, _t("撤销出错"), f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
             return
         for r in results[:-1]:                      # 依次套用每一步的路径变化
             self.ctx.library.apply_moves(r.mapping)
@@ -263,7 +262,7 @@ class HistoryPage(Page):
             self.ctx.run(lambda prog, cancel: lib.run_meta_analyzers(), None,
                          lambda _: self.ctx.library_changed.emit())
         self.ctx.files_changed.emit()
-        msg = f"已恢复 {res.done_files} 个文件。"
+        msg = _t('已恢复 {0} 个文件。', res.done_files)
         if res.errors:
             msg += "<br><br>" + "<br>".join(res.errors[:10])
-        info(self, "撤销完成", msg, "ROLLBACK COMPLETE")
+        info(self, _t("撤销完成"), msg, "ROLLBACK COMPLETE")

@@ -13,14 +13,15 @@ import os
 from dataclasses import dataclass, field
 
 from .planner import Plan, PlanItem, PlanOp
+from ..i18n import t as _t
 
 RAW_SIDECAR_EXT = (".xmp", ".pp3", ".dop", ".cos", ".cof", ".arp", ".on1")
-TRASH_DST = "（回收站）"
+TRASH_DST = _t("（回收站）")
 
 MODES = {
-    "keep_jpg": "只保留 JPG（删除有 JPG 配对的 RAW）",
-    "unrated_raw": "删除没打星的 RAW",
-    "rejected": "删除标记为“弃用”的照片（整组）",
+    "keep_jpg": _t("只保留 JPG（删除有 JPG 配对的 RAW）"),
+    "unrated_raw": _t("删除没打星的 RAW"),
+    "rejected": _t("删除标记为“弃用”的照片（整组）"),
 }
 
 
@@ -38,7 +39,7 @@ def _has_other_image(g) -> bool:
 
 
 def build_cleanup_plan(groups, mode: str, include_raw_only: bool = False) -> Plan:
-    plan = Plan(spec_text=f"清理：{MODES.get(mode, mode)}", target_root="", operation="delete")
+    plan = Plan(spec_text=_t('清理：{0}', MODES.get(mode, mode)), target_root="", operation="delete")
     skipped_only_raw = 0
     skipped_kept = 0
     dirs = set()
@@ -83,12 +84,12 @@ def build_cleanup_plan(groups, mode: str, include_raw_only: bool = False) -> Pla
         except ValueError:
             plan.target_root = sorted(dirs)[0]
     if skipped_only_raw:
-        plan.warnings.append(f"{skipped_only_raw} 张照片只有 RAW、没有 JPG，未删除"
-                             + ("（可勾选“也删除没有 JPG 的 RAW”）。" if mode == "unrated_raw" else "。"))
+        plan.warnings.append(_t('{0} 张照片只有 RAW、没有 JPG，未删除', skipped_only_raw)
+                             + (_t("（可勾选“也删除没有 JPG 的 RAW”）。") if mode == "unrated_raw" else _t("。")))
     if skipped_kept:
-        plan.warnings.append(f"{skipped_kept} 张已打星或标记“留用”的照片保留。")
+        plan.warnings.append(_t('{0} 张已打星或标记“留用”的照片保留。', skipped_kept))
     if not plan.items:
-        plan.warnings.append("没有符合条件的文件。")
+        plan.warnings.append(_t("没有符合条件的文件。"))
     return plan
 
 

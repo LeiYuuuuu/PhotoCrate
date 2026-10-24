@@ -14,6 +14,8 @@ def main(samples: str, out: str, theme_name: str = "light") -> None:
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
+    from photocrate import i18n
+    i18n.set_language(os.environ.get("PHOTOCRATE_LANG"))   # 要在导入界面模块之前
     from photocrate.bootstrap import bootstrap
     from photocrate.config import Settings
     from photocrate.core.library import Library

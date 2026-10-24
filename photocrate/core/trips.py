@@ -25,6 +25,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from .places import _core
+from ..i18n import t as _t
 
 # ---------------------------------------------------------------------------
 # 常住地
@@ -254,11 +255,13 @@ def segment_trips(groups, homes: list[Home] | None = None, gap_hours: float = 36
         top = sorted((p for p, _ in pc.most_common(3)), key=lambda p: first[p])
         if domestic:
             pcount = Counter(geo.get("province") for geo in geos if geo.get("province"))
-            main = "·".join(p for p, _ in pcount.most_common(2)) or (countries[0] if countries else "")
-            top = [p for p in top if p not in main]
+            provs = [p for p, _ in pcount.most_common(2)]
+            main_raw = "·".join(provs) or (countries[0] if countries else "")
+            top = [p for p in top if p not in main_raw]
+            main = "·".join(_t(p) for p in provs) or (_t(countries[0]) if countries else "")
         else:
-            main = "·".join(countries[:2])
-        title = " ".join(x for x in (main, "·".join(top)) if x)
+            main = "·".join(_t(c) for c in countries[:2])
+        title = " ".join(x for x in (main, "·".join(_t(p) for p in top)) if x)     # 地名按界面语言
         auto = f"{start:%Y-%m-%d} {title}".strip()
         base_key = f"{start:%Y-%m-%d}"
         used_keys[base_key] += 1
@@ -276,7 +279,7 @@ def segment_trips(groups, homes: list[Home] | None = None, gap_hours: float = 36
 
 def day_label(day: int, days: int | None = None, pad: bool = True) -> str:
     n = f"{day:02d}" if pad and (days or 0) >= 10 else str(day)
-    return f"第{n}天"
+    return _t('第{0}天', n)
 
 
 # ---------------------------------------------------------------------------

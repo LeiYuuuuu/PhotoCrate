@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 import traceback
+from .i18n import t as _t
 
 
 def _excepthook(etype, value, tb):
@@ -14,8 +16,7 @@ def _excepthook(etype, value, tb):
         from .ui.dialogs import info
         from PySide6.QtWidgets import QApplication
         if QApplication.instance():
-            info(None, "程序出错", f"<pre style='font-size:8pt'>{text[-2000:]}</pre>"
-                 "<br>详细信息已写入日志（设置 → 打开日志文件夹）。", "ERROR")
+            info(None, _t("程序出错"), _t("<pre style='font-size:8pt'>{0}</pre><br>详细信息已写入日志（设置 → 打开日志文件夹）。", text[-2000:]), "ERROR")
     except Exception:
         pass
 
@@ -25,8 +26,15 @@ def run() -> int:
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtWidgets import QApplication
 
-    from .bootstrap import bootstrap, setup_logging
+    # 界面语言要在导入界面 / 分析器模块之前确定（它们的模块级文字在导入时翻译）
+    from . import i18n
     from .config import Settings
+    settings = Settings()
+    lang = i18n.set_language(i18n.resolve(settings))
+    if settings.get("ui_language") not in ("zh", "en") and not os.environ.get("PHOTOCRATE_LANG"):
+        settings.set("ui_language", lang)              # 记下来：以后添加了文件夹也不会因为“老用户”判断而变
+
+    from .bootstrap import bootstrap, setup_logging
     from .core.library import Library
     from .ops.journal import Journal, journal_path
 
@@ -37,7 +45,7 @@ def run() -> int:
     app.setApplicationName("PhotoCrate")
     app.setOrganizationName("PhotoCrate")
 
-    settings = bootstrap(Settings())
+    settings = bootstrap(settings)
     from .ui import theme
     theme.apply(app, settings.get("theme"))
 

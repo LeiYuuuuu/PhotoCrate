@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 from ..config import find_resource, user_data_dir
+from ..i18n import t as _t
 
 HF = "https://huggingface.co"
 HF_MIRROR = "https://hf-mirror.com"
@@ -39,11 +40,11 @@ FILES: dict[str, tuple[list[str], int]] = {
 }
 
 MODELS = {
-    "clip": {"label": "中文 CLIP（场景识别 · 文字搜图）", "files": ["chinese_clip_vitb16_q8.onnx"],
-             "optional": ["chinese_clip_vocab.txt"], "license": "Chinese-CLIP：MIT；ONNX 转换：Xenova"},
-    "face": {"label": "人脸检测 + 识别（YuNet · SFace）",
+    "clip": {"label": _t("中文 CLIP（场景识别 · 文字搜图）"), "files": ["chinese_clip_vitb16_q8.onnx"],
+             "optional": ["chinese_clip_vocab.txt"], "license": _t("Chinese-CLIP：MIT；ONNX 转换：Xenova")},
+    "face": {"label": _t("人脸检测 + 识别（YuNet · SFace）"),
              "files": ["face_detection_yunet_2023mar.onnx", "face_recognition_sface_2021dec.onnx"],
-             "optional": [], "license": "OpenCV Zoo：MIT / Apache 2.0"},
+             "optional": [], "license": _t("OpenCV Zoo：MIT / Apache 2.0")},
 }
 
 
@@ -87,10 +88,10 @@ def onnxruntime_ok() -> bool:
 
 def status_text(model: str) -> str:
     if model == "clip" and not onnxruntime_ok():
-        return "缺少 onnxruntime：请重新运行 run.bat 自动安装（或 pip install onnxruntime）"
+        return _t("缺少 onnxruntime：请重新运行 run.bat 自动安装（或 pip install onnxruntime）")
     if ready(model):
-        return "已就绪"
-    return f"未下载（约 {download_size(model) / 1e6:.0f} MB）"
+        return _t("已就绪")
+    return _t('未下载（约 {0:.0f} MB）', download_size(model) / 1e6)
 
 
 ProgressFn = Callable[[int, int, str], None]
@@ -115,7 +116,7 @@ def _fetch(url: str, dst: Path, done_before: int, total: int, label: str, progre
         last = 0.0
         while True:
             if cancel is not None and cancel.is_set():
-                raise InterruptedError("已取消")
+                raise InterruptedError(_t("已取消"))
             chunk = r.read(1 << 18)
             if not chunk:
                 break
@@ -126,11 +127,11 @@ def _fetch(url: str, dst: Path, done_before: int, total: int, label: str, progre
                 last = now
                 progress(done_before + got, max(total, done_before + size), f"{label}  {got / 1e6:.1f} MB")
     if size and os.path.getsize(tmp) != size:
-        raise IOError(f"下载不完整（{os.path.getsize(tmp)} / {size} 字节）")
+        raise IOError(_t('下载不完整（{0} / {1} 字节）', os.path.getsize(tmp), size))
     with open(tmp, "rb") as f:
         head = f.read(64)
     if head.lstrip().startswith((b"<", b"version https://git-lfs")):
-        raise IOError("下载到的是网页或 LFS 指针，不是模型文件")
+        raise IOError(_t("下载到的是网页或 LFS 指针，不是模型文件"))
     os.replace(tmp, dst)
 
 
@@ -152,13 +153,13 @@ def download(model: str, progress: ProgressFn | None = None, cancel: threading.E
             except InterruptedError:
                 raise
             except Exception as e:
-                errors.append(f"{url.split('/')[2]}：{e}")
+                errors.append(_t('{0}：{1}', url.split('/')[2], e))
         if errors:
             if name in MODELS[model]["optional"]:
                 continue
-            raise IOError(f"{name} 下载失败：\n" + "\n".join(errors))
+            raise IOError(_t('{0} 下载失败：\n', name) + "\n".join(errors))
         done += FILES[name][1]
         got.append(name)
     if progress:
-        progress(total, total, "完成")
+        progress(total, total, _t("完成"))
     return got

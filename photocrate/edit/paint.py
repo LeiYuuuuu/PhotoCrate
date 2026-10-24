@@ -17,6 +17,7 @@ import math
 import numpy as np
 
 from .document import Document, Layer, crop_canvas, mask_bbox, over
+from ..i18n import t as _t
 
 
 def dab(radius: float, hardness: float) -> np.ndarray:
@@ -47,7 +48,7 @@ class Stroke:
         self.color = np.array(color[:3], np.float32) / 255.0
         self.gray = float(np.dot(color[:3], (0.299, 0.587, 0.114)))
         self.offset = (int(clone_offset[0]), int(clone_offset[1]))
-        self.name = name or {"paint": "画笔", "erase": "橡皮擦", "clone": "仿制图章", "heal": "污点修复"}.get(mode, "画笔")
+        self.name = name or {"paint": _t("画笔"), "erase": _t("橡皮擦"), "clone": _t("仿制图章"), "heal": _t("污点修复")}.get(mode, _t("画笔"))
         self.state_before = None
         if not self.to_mask and layer.kind == "text":     # 在文字上画 = 先栅格化（换新数组，旧状态里的像素不受影响）
             self.state_before = doc.state()
@@ -401,7 +402,7 @@ def apply_gradient(doc: Document, layer: Layer, p0, p1, c0, c1, radial: bool, op
     if sel is not None:
         a = a * sel
     new = over(layer.pixels, g[..., :3], a)
-    doc.replace_pixels(layer.id, new, "渐变")
+    doc.replace_pixels(layer.id, new, _t("渐变"))
 
 
 def apply_bucket(doc: Document, layer: Layer, cx: int, cy: int, color, tolerance: float, contiguous: bool,
@@ -422,5 +423,5 @@ def apply_bucket(doc: Document, layer: Layer, cx: int, cy: int, color, tolerance
     if not m.any():
         return False
     new = over(layer.pixels, np.array(color[:3], np.float32) / 255.0, m * opacity)
-    doc.replace_pixels(layer.id, new, "油漆桶")
+    doc.replace_pixels(layer.id, new, _t("油漆桶"))
     return True

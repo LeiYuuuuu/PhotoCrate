@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComb
 
 from ...ops.pathsafe import human_size
 from ...ops.planner import build_plan
-from ...partition.base import DIMENSIONS, PartitionContext, all_tokens, member_format
+from ...partition.base import DIMENSIONS, TOKEN_ALIASES, PartitionContext, all_tokens, member_format
 from ...partition.engine import BUILTIN_PRESETS, PartitionSpec, Rule, build_tree, unknown_tokens
 from ...plugins import PRESETS
 from .. import theme
@@ -22,6 +22,7 @@ from ..theme import font
 from ..widgets.deco import IconButton, Panel, TacButton, caption, micro_label
 from ..widgets.thumbgrid import ThumbGrid, open_folder
 from .base import Page
+from ...i18n import is_en, is_unknown, t as _t
 
 MAX_LEVELS = 4
 
@@ -71,9 +72,9 @@ class RuleRow(QFrame):
         i = self.dim.findData(rule.dim)
         self.dim.setCurrentIndex(max(0, i))
         top.addWidget(self.dim, 1)
-        for kind, tip, cb in (("up", "上移", lambda: self.move.emit(self, -1)),
-                              ("down", "下移", lambda: self.move.emit(self, 1)),
-                              ("close", "删除这一级", lambda: self.remove.emit(self))):
+        for kind, tip, cb in (("up", _t("上移"), lambda: self.move.emit(self, -1)),
+                              ("down", _t("下移"), lambda: self.move.emit(self, 1)),
+                              ("close", _t("删除这一级"), lambda: self.remove.emit(self))):
             b = IconButton(kind, tip, 28)
             b.clicked.connect(cb)
             top.addWidget(b)
@@ -181,9 +182,9 @@ class CountDelegate(QStyledItemDelegate):
 class PartitionPage(Page):
     page_id = "partition"
     index = "03"
-    title = "分区编排"
+    title = _t("分区编排")
     en = "Partition matrix // preview & execute"
-    sub = "按顺序叠加分区条件，右侧实时预览文件夹结构；确认计划后才会真正移动文件。"
+    sub = _t("按顺序叠加分区条件，右侧实时预览文件夹结构；确认计划后才会真正移动文件。")
 
     def __init__(self, ctx, parent=None):
         super().__init__(ctx, parent)
@@ -203,10 +204,10 @@ class PartitionPage(Page):
         left.setContentsMargins(0, 0, 6, 0)
         left.setSpacing(10)
 
-        cond = Panel("分区条件", "Conditions")
+        cond = Panel(_t("分区条件"), "Conditions")
         mode_row = QHBoxLayout()
-        self.m_rules = QRadioButton("条件组合")
-        self.m_tpl = QRadioButton("高级模板")
+        self.m_rules = QRadioButton(_t("条件组合"))
+        self.m_tpl = QRadioButton(_t("高级模板"))
         bg = QButtonGroup(self)
         bg.addButton(self.m_rules)
         bg.addButton(self.m_tpl)
@@ -217,11 +218,11 @@ class PartitionPage(Page):
         pr = QHBoxLayout()
         pr.addWidget(micro_label("preset"))
         self.preset = shrinkable(QComboBox())
-        self.preset.addItem("— 快速预设 —", None)
+        self.preset.addItem(_t("— 快速预设 —"), None)
         for ps in BUILTIN_PRESETS:
             self.preset.addItem(ps["name"], ps)
         for ps in PRESETS:
-            self.preset.addItem("插件：" + ps.name, {"name": ps.name, "rules": ps.rules, "template": ps.template})
+            self.preset.addItem(_t("插件：") + ps.name, {"name": ps.name, "rules": ps.rules, "template": ps.template})
         pr.addWidget(self.preset, 1)
         cond.body.addLayout(pr)
 
@@ -233,7 +234,7 @@ class PartitionPage(Page):
         self.rows_layout = QVBoxLayout()
         self.rows_layout.setSpacing(6)
         rb.addLayout(self.rows_layout)
-        self.b_add = TacButton("＋ 添加下一级条件", "secondary", height=30)
+        self.b_add = TacButton(_t("＋ 添加下一级条件"), "secondary", height=30)
         self.b_add.clicked.connect(self._add_row)
         rb.addWidget(self.b_add)
         cond.body.addWidget(self.rules_box)
@@ -242,17 +243,20 @@ class PartitionPage(Page):
         self.tpl_box = QWidget()
         tb = QVBoxLayout(self.tpl_box)
         tb.setContentsMargins(0, 0, 0, 0)
-        self.tpl = QLineEdit(ctx.settings.get("partition_template") or "{年}/{年}-{月}")
+        self.tpl = QLineEdit(_t(ctx.settings.get("partition_template") or "{年}/{年}-{月}"))
         self.tpl.setFont(font("mono", 10))
         tb.addWidget(self.tpl)
-        tb.addWidget(caption("用 / 分隔文件夹层级；{市|省|未知地点} 表示依次尝试，都没有时用最后的文字。点击下面的占位符插入：", "faint", 8))
+        tb.addWidget(caption(_t("用 / 分隔文件夹层级；{市|省|未知地点} 表示依次尝试，都没有时用最后的文字。点击下面的占位符插入："), "faint", 8))
         chips = QGridLayout()
         chips.setSpacing(4)
-        for i, name in enumerate(sorted(all_tokens(), key=_token_order)):
-            b = QPushButton(name)
+        zh2en = {zh: en for en, zh in TOKEN_ALIASES.items()}
+        names = [n for n in all_tokens() if n not in TOKEN_ALIASES]      # 中文原名（含插件的占位符）
+        for i, name in enumerate(sorted(names, key=_token_order)):
+            shown = zh2en.get(name, name) if is_en() else name            # 英文界面插入英文写法 {year}
+            b = QPushButton(shown)
             b.setFont(font("cn", 8.5))
             b.setFixedHeight(24)
-            b.clicked.connect(lambda _=None, n=name: self._insert_token(n))
+            b.clicked.connect(lambda _=None, n=shown: self._insert_token(n))
             chips.addWidget(b, i // 5, i % 5)
         tb.addLayout(chips)
         self.tpl_warn = caption("", "warn", 8.5)
@@ -261,25 +265,25 @@ class PartitionPage(Page):
         left.addWidget(cond)
 
         # 执行参数
-        ex = Panel("执行参数", "Execution")
+        ex = Panel(_t("执行参数"), "Execution")
         g = QGridLayout()
         g.setHorizontalSpacing(8)
         g.setVerticalSpacing(8)
-        g.addWidget(self._lab("目标文件夹"), 0, 0)
+        g.addWidget(self._lab(_t("目标文件夹")), 0, 0)
         trow = QHBoxLayout()
         self.target = QLineEdit(ctx.settings.get("target_dir") or "")
         self.target.setMinimumWidth(80)
         self.target.setFont(font("mono", 8.5))
-        self.target.setPlaceholderText("整理后的照片放到哪里")
-        bt = QPushButton("浏览")
+        self.target.setPlaceholderText(_t("整理后的照片放到哪里"))
+        bt = QPushButton(_t("浏览"))
         bt.clicked.connect(self._pick_target)
         trow.addWidget(self.target, 1)
         trow.addWidget(bt)
         g.addLayout(trow, 0, 1)
-        g.addWidget(self._lab("操作方式"), 1, 0)
+        g.addWidget(self._lab(_t("操作方式")), 1, 0)
         orow = QHBoxLayout()
-        self.op_move = QRadioButton("移动")
-        self.op_copy = QRadioButton("复制（保留原文件）")
+        self.op_move = QRadioButton(_t("移动"))
+        self.op_copy = QRadioButton(_t("复制（保留原文件）"))
         ob = QButtonGroup(self)
         ob.addButton(self.op_move)
         ob.addButton(self.op_copy)
@@ -288,23 +292,23 @@ class PartitionPage(Page):
         orow.addWidget(self.op_copy)
         orow.addStretch(1)
         g.addLayout(orow, 1, 1)
-        g.addWidget(self._lab("重名处理"), 2, 0)
+        g.addWidget(self._lab(_t("重名处理")), 2, 0)
         self.conflict = shrinkable(QComboBox())
-        self.conflict.addItem("自动加编号（推荐）", "rename")
-        self.conflict.addItem("跳过该照片", "skip")
+        self.conflict.addItem(_t("自动加编号（推荐）"), "rename")
+        self.conflict.addItem(_t("跳过该照片"), "skip")
         self.conflict.setCurrentIndex(max(0, self.conflict.findData(ctx.settings.get("conflict"))))
         g.addWidget(self.conflict, 2, 1)
-        g.addWidget(self._lab("RAW 拆分"), 3, 0)
+        g.addWidget(self._lab(_t("RAW 拆分")), 3, 0)
         self.split = shrinkable(QComboBox())
-        self.split.addItem("不拆分（RAW 与 JPG 放一起）", "none")
-        self.split.addItem("RAW 放进 RAW 子文件夹", "raw_sub")
-        self.split.addItem("RAW → RAW/，其他按格式 JPG/ HEIC/ PNG/", "both_sub")
+        self.split.addItem(_t("不拆分（RAW 与 JPG 放一起）"), "none")
+        self.split.addItem(_t("RAW 放进 RAW 子文件夹"), "raw_sub")
+        self.split.addItem(_t("RAW → RAW/，其他按格式 JPG/ HEIC/ PNG/"), "both_sub")
         self.split.setCurrentIndex(max(0, self.split.findData(ctx.settings.get("split_raw_jpg"))))
         g.addWidget(self.split, 3, 1)
-        g.addWidget(self._lab("处理范围"), 4, 0)
+        g.addWidget(self._lab(_t("处理范围")), 4, 0)
         srow = QHBoxLayout()
-        self.sc_all = QRadioButton("全部")
-        self.sc_sel = QRadioButton("仅已选")
+        self.sc_all = QRadioButton(_t("全部"))
+        self.sc_sel = QRadioButton(_t("仅已选"))
         sb = QButtonGroup(self)
         sb.addButton(self.sc_all)
         sb.addButton(self.sc_sel)
@@ -327,11 +331,11 @@ class PartitionPage(Page):
         split.addWidget(scroll)
 
         # ======== 中：预览树 ========
-        tp = Panel("目标结构预览", "Target tree", "")
+        tp = Panel(_t("目标结构预览"), "Target tree", "")
         self.tree_panel = tp
         self.tree = QTreeWidget()
         self.tree.setColumnCount(3)
-        self.tree.setHeaderLabels(["文件夹", "照片", "大小"])
+        self.tree.setHeaderLabels([_t("文件夹"), _t("照片"), _t("大小")])
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         self.tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -348,7 +352,7 @@ class PartitionPage(Page):
         split.addWidget(tp)
 
         # ======== 右：文件夹内容 ========
-        gp = Panel("文件夹内容", "Folder content", "")
+        gp = Panel(_t("文件夹内容"), "Folder content", "")
         self.grid_panel = gp
         self.grid = ThumbGrid(selectable=False)
         self.grid.set_cell_width(140)
@@ -367,13 +371,13 @@ class PartitionPage(Page):
         bar.setStyleSheet(f"#ActionBar {{ background: {p.slab}; }} #ActionBar QLabel {{ color: {p.slab_ink}; }}")
         bl = QHBoxLayout(bar)
         bl.setContentsMargins(16, 8, 10, 8)
-        self.summary = QLabel("请先在「资源接入」页扫描照片。")
+        self.summary = QLabel(_t("请先在「资源接入」页扫描照片。"))
         self.summary.setFont(font("cn", 9.5))
         bl.addWidget(self.summary, 1)
-        self.b_open = TacButton("打开目标文件夹", "dark", height=34)
+        self.b_open = TacButton(_t("打开目标文件夹"), "dark", height=34)
         self.b_open.clicked.connect(lambda: self.target.text() and os.path.isdir(self.target.text())
                                     and open_folder(self.target.text()))
-        self.b_plan = TacButton("生成执行计划", "primary", en="DRY RUN", height=38)
+        self.b_plan = TacButton(_t("生成执行计划"), "primary", en="DRY RUN", height=38)
         self.b_plan.clicked.connect(self.make_plan)
         bl.addWidget(self.b_open)
         bl.addWidget(self.b_plan)
@@ -420,8 +424,8 @@ class PartitionPage(Page):
         lib = self.ctx.library
         n_all = sum(1 for g in lib.groups if g.files)
         n_sel = len(lib.selected)
-        self.sc_all.setText(f"全部（{n_all}）")
-        self.sc_sel.setText(f"仅已选（{n_sel}）")
+        self.sc_all.setText(_t('全部（{0}）', n_all))
+        self.sc_sel.setText(_t('仅已选（{0}）', n_sel))
         self.sc_sel.setEnabled(n_sel > 0)
         if n_sel == 0 and self.sc_sel.isChecked():
             self.sc_all.setChecked(True)
@@ -432,7 +436,7 @@ class PartitionPage(Page):
         self.tpl.setFocus()
 
     def _pick_target(self):
-        d = QFileDialog.getExistingDirectory(self, "选择目标文件夹", self.target.text() or os.path.expanduser("~"))
+        d = QFileDialog.getExistingDirectory(self, _t("选择目标文件夹"), self.target.text() or os.path.expanduser("~"))
         if d:
             self.target.setText(os.path.normpath(d))
             self._target_edited()
@@ -542,14 +546,14 @@ class PartitionPage(Page):
         if self.m_tpl.isChecked():
             self.ctx.settings.set("partition_template", self.tpl.text().strip())
             bad = unknown_tokens(self.tpl.text())
-            self.tpl_warn.setText(("▲ 未识别的占位符：" + "、".join(bad) + "（会被当作文字）") if bad else "")
+            self.tpl_warn.setText((_t("▲ 未识别的占位符：") + _t("、").join(bad) + _t("（会被当作文字）")) if bad else "")
         groups = self.groups()
         spec = self.spec()
         ctxp = PartitionContext(self.ctx.settings.snapshot())
         root, _ = build_tree(groups, spec, ctxp)
         self.tree_root = root
         self.tree.clear()
-        tgt = self.target.text().strip() or "（未选择目标文件夹）"
+        tgt = self.target.text().strip() or _t("（未选择目标文件夹）")
         top = QTreeWidgetItem([os.path.basename(tgt.rstrip("\\/")) or tgt, "", human_size(root.size)])
         top.setData(0, NodeRole, root)
         top.setData(1, NodeRole, root)
@@ -565,17 +569,16 @@ class PartitionPage(Page):
         self.tree_panel.set_meta(f"{n_folders} DIRS")
         notes = []
         if root.guess:
-            notes.append(f"{root.guess} 张日期为推测（文件名/修改时间），缩略图上有橙色标记")
-        unk = [c for c in root.children.values() if c.name.startswith("未知")]
+            notes.append(_t('{0} 张日期为推测（文件名/修改时间），缩略图上有橙色标记', root.guess))
+        unk = [c for c in root.children.values() if is_unknown(c.name)]
         if unk:
-            notes.append("、".join(f"{c.name} {c.count} 张" for c in unk))
-        self.tree_note.setText("；".join(notes))
-        op = "复制" if self.op_copy.isChecked() else "移动"
+            notes.append(_t("、").join(_t('{0} {1} 张', c.name, c.count) for c in unk))
+        self.tree_note.setText(_t("；").join(notes))
+        op = _t("复制") if self.op_copy.isChecked() else _t("移动")
         if groups:
-            self.summary.setText(f"{spec.describe()}   ·   {root.count} 组照片 → {n_folders} 个文件夹   ·   "
-                                 f"{human_size(root.size)}   ·   操作：{op}")
+            self.summary.setText(_t('{0}   ·   {1} 组照片 → {2} 个文件夹   ·   {3}   ·   操作：{4}', spec.describe(), root.count, n_folders, human_size(root.size), op))
         else:
-            self.summary.setText("请先在「资源接入」页扫描照片。")
+            self.summary.setText(_t("请先在「资源接入」页扫描照片。"))
         self.b_plan.setEnabled(bool(groups))
 
     def _fill(self, item, node, mx, depth):
@@ -585,7 +588,7 @@ class PartitionPage(Page):
             it.setData(1, NodeRole, c)
             it.setData(1, NodeRole + 1, c.count / mx if mx else 0)
             it.setFont(2, font("mono", 8))
-            if c.name.startswith(("未知", "日期待确认", "无法")):
+            if is_unknown(c.name):
                 it.setForeground(0, QColor(theme.current().warn))
             item.addChild(it)
             cmx = max([k.count for k in c.children.values()] or [1])
@@ -615,7 +618,7 @@ class PartitionPage(Page):
                         labels[g.gid] = {"name": m.name, "tag": fmt}
                         break
         self.grid.set_groups(gs, labels)
-        path = "/".join(node.path) or "（根目录）"
+        path = "/".join(node.path) or _t("（根目录）")
         self.grid_panel.set_meta(f"{len(gs)} ITEMS")
         self.grid_panel.setToolTip(path)
 
@@ -623,7 +626,7 @@ class PartitionPage(Page):
     def make_plan(self):
         target = self.target.text().strip()
         if not target:
-            info(self, "缺少目标文件夹", "请先选择整理后的照片要放到哪个文件夹（可以就是原文件夹）。")
+            info(self, _t("缺少目标文件夹"), _t("请先选择整理后的照片要放到哪个文件夹（可以就是原文件夹）。"))
             return
         self._save_exec()
         groups = self.groups()
@@ -633,7 +636,7 @@ class PartitionPage(Page):
         conflict = self.conflict.currentData()
         split = self.split.currentData()
         self.b_plan.setEnabled(False)
-        self.ctx.status.emit("正在生成执行计划（模拟运行，不会改动文件）…")
+        self.ctx.status.emit(_t("正在生成执行计划（模拟运行，不会改动文件）…"))
 
         def job(prog, cancel):
             return build_plan(groups, spec, PartitionContext(s), target, op, conflict, split)
@@ -642,11 +645,11 @@ class PartitionPage(Page):
 
     def _plan_error(self, tb):
         self.b_plan.setEnabled(True)
-        info(self, "生成计划失败", f"<pre style='font-size:8pt'>{tb[-1500:]}</pre>", "ERROR")
+        info(self, _t("生成计划失败"), f"<pre style='font-size:8pt'>{tb[-1500:]}</pre>", "ERROR")
 
     def _show_plan(self, plan):
         self.b_plan.setEnabled(True)
-        self.ctx.status.emit("计划已生成，等待确认")
+        self.ctx.status.emit(_t("计划已生成，等待确认"))
         dlg = PlanDialog(self, plan)
         if dlg.exec() != PlanDialog.DialogCode.Accepted:
             return
@@ -662,12 +665,12 @@ class PartitionPage(Page):
         def job(prog, cancel):
             return mover.execute(plan, lambda d, t, c: prog((d, t, c)), cancel, extra, keep_roots=keep)
 
-        res, tb = run_with_progress(self.ctx, self, "正在" + ("复制" if plan.operation == "copy" else "移动") + "照片",
+        res, tb = run_with_progress(self.ctx, self, _t("正在") + (_t("复制") if plan.operation == "copy" else _t("移动")) + _t("照片"),
                                     "EXECUTING", job)
         if tb or res is None:
             self.ctx.busy = False
             self.ctx.files_changed.emit()
-            info(self, "执行出错", f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
+            info(self, _t("执行出错"), f"<pre style='font-size:8pt'>{(tb or '')[-1500:]}</pre>", "ERROR")
             return
         self._done(res, plan)
 
@@ -676,12 +679,12 @@ class PartitionPage(Page):
         lib = self.ctx.library
         lib.apply_moves(res.mapping)
         self.ctx.files_changed.emit()
-        op = "复制" if plan.operation == "copy" else "移动"
-        msg = [f"已{op} <b>{res.done_groups}</b> 组照片（{res.done_files} 个文件）。"]
+        op = _t("复制") if plan.operation == "copy" else _t("移动")
+        msg = [_t('已{0} <b>{1}</b> 组照片（{2} 个文件）。', op, res.done_groups, res.done_files)]
         if res.cancelled:
-            msg.append("操作已取消，剩余照片未处理。")
+            msg.append(_t("操作已取消，剩余照片未处理。"))
         if res.failed_groups:
-            msg.append(f"<span style='color:{theme.current().danger}'>{res.failed_groups} 组失败（已整组退回原处）：</span><br>"
+            msg.append(_t("<span style='color:{0}'>{1} 组失败（已整组退回原处）：</span><br>", theme.current().danger, res.failed_groups)
                        + "<br>".join(res.errors[:8]))
         if plan.operation == "move" and res.done_files:
             from ...ops.planner import sources_after_move
@@ -694,12 +697,12 @@ class PartitionPage(Page):
                     src.set_dirs(new)
                 else:
                     self.ctx.settings.set("source_dirs", new)
-                msg.append(f"已把目标文件夹 {plan.target_root} 加入「资源接入」的数据源，以后重新扫描会从那里读取。")
+                msg.append(_t('已把目标文件夹 {0} 加入「资源接入」的数据源，以后重新扫描会从那里读取。', plan.target_root))
         if res.pruned_dirs:
-            msg.append(f"清理了 {len(res.pruned_dirs)} 个搬空的旧文件夹（撤销时会重新建出来）。")
-        msg.append(f"批次编号 #{res.batch_id}，可随时在「记录」页撤销。")
-        self.ctx.status.emit(f"完成：已{op} {res.done_files} 个文件（批次 #{res.batch_id}）")
-        if ask(self, "执行完成", "<br><br>".join(msg), ok="打开目标文件夹", cancel="关闭", en="COMPLETE"):
+            msg.append(_t('清理了 {0} 个搬空的旧文件夹（撤销时会重新建出来）。', len(res.pruned_dirs)))
+        msg.append(_t('批次编号 #{0}，可随时在「记录」页撤销。', res.batch_id))
+        self.ctx.status.emit(_t('完成：已{0} {1} 个文件（批次 #{2}）', op, res.done_files, res.batch_id))
+        if ask(self, _t("执行完成"), "<br><br>".join(msg), ok=_t("打开目标文件夹"), cancel=_t("关闭"), en="COMPLETE"):
             open_folder(plan.target_root)
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import logging
 from typing import Any
+from ..i18n import t as _t
 
 log = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ def load_video_frame(path: str, max_side: int = 1024, at: float = 0.12):
     cap = cv2.VideoCapture(path)
     try:
         if not cap.isOpened():
-            raise IOError("无法打开视频（缺少解码器或文件损坏）")
+            raise IOError(_t("无法打开视频（缺少解码器或文件损坏）"))
         n = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
         fps = cap.get(cv2.CAP_PROP_FPS) or 0
         dur = (n / fps) if n > 0 and fps > 0 else None
@@ -143,7 +144,7 @@ def load_video_frame(path: str, max_side: int = 1024, at: float = 0.12):
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ok, frame = cap.read()
             if not ok or frame is None:
-                raise IOError("读不到视频画面")
+                raise IOError(_t("读不到视频画面"))
         im = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         return _finish(im, max_side), (dur, im.width, im.height)
     finally:
