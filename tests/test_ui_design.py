@@ -18,6 +18,16 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
+def _wait_until(cond, ms: int = 1500) -> bool:
+    """等到条件成立（最多 ms 毫秒）。不用固定的等待时间：16 ms 一次的动画定时器在机器忙时会晚一拍，
+    固定等 30 / 250 ms 再断言会时好时坏。"""
+    for _ in range(ms // 10):
+        if cond():
+            return True
+        QTest.qWait(10)
+    return bool(cond())
+
+
 def test_motion_finishes_when_hidden_or_disabled(app):
     widget = QWidget()
     widget.show()
@@ -25,8 +35,8 @@ def test_motion_finishes_when_hidden_or_disabled(app):
     motion.set_enabled(True)
     value = motion.Motion(widget, duration=200)
     value.to(1)
-    QTest.qWait(30)
-    assert 0 < value.value < 1
+    assert _wait_until(lambda: value.value > 0, 150)
+    assert value.value < 1
     widget.hide()
     assert value.value == 1
     assert value.animation.state() == QAbstractAnimation.State.Stopped
@@ -119,17 +129,16 @@ def test_native_pages_navigation_and_motion_preference(app, tmp_path, monkeypatc
         window.nav.setFocus()
         QTest.keyClick(window.nav, Qt.Key.Key_Down)
         assert window.stack.currentIndex() == 1
-        QTest.qWait(250)
-        assert not window.stack.findChildren(motion.PageVeil)
+        no_veil = lambda: not window.stack.findChildren(motion.PageVeil)   # noqa: E731
+        assert _wait_until(no_veil)
         # 快速切换后只留下最终页面，不留下旧截图遮住交互。
         window.go(2)
         window.go(4)
-        QTest.qWait(250)
+        assert _wait_until(no_veil)
         assert window.stack.currentIndex() == 4
-        assert not window.stack.findChildren(motion.PageVeil)
         page = window.page("settings")
         window.go(window.page_ids.index("settings"))
-        QTest.qWait(200)
+        assert _wait_until(no_veil)
         page.motion_toggle.click()
         assert settings.get("ui_motion") is False
         assert Settings(tmp_path / "settings.json").get("ui_motion") is False
