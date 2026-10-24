@@ -1,5 +1,7 @@
 # 影匣 PhotoCrate
 
+**中文** | [English](README.en.md)
+
 本地照片分区整理终端（Windows 桌面应用）。在软件里选好分区条件、预览文件夹结构，确认后把照片**真正移动**到对应文件夹；每次操作都有日志，可一键撤销。
 
 > 当前版本 **v1.5.0**（新增类似 Photoshop 的修图窗口）。每个版本的详细更新说明见 **[CHANGELOG.md](CHANGELOG.md)**。
