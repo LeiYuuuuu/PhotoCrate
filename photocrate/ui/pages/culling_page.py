@@ -116,6 +116,8 @@ class CullingPage(Page):
         self.b_view = TacButton(_t("大图查看"), "secondary", en="VIEW", height=32)
         self.b_edit = TacButton(_t("修图…"), "secondary", en="EDIT", height=32)
         self.b_edit.setToolTip(_t("用图层、调整图层、修复画笔、文字等修这张照片（类似 Photoshop）。原片不动，保存为新文件。"))
+        self.b_merge = TacButton(_t("合并曝光…"), "secondary", en="HDR", height=32)
+        self.b_merge.setToolTip(_t("把选中的几张包围曝光（同一场景、不同曝光）合成一张亮部暗部都有细节的照片：自动对齐、去重影。"))
         self.b_export = TacButton(_t("导出分享…"), "primary", en="EXPORT", height=32)
         self.b_xmp = TacButton(_t("写入 XMP…"), "secondary", en="XMP", height=32)
         self.b_rename = TacButton(_t("批量重命名…"), "secondary", en="RENAME", height=32)
@@ -127,7 +129,7 @@ class CullingPage(Page):
         self.b_clean = TacButton(_t("清理 RAW…"), "danger", en="CLEANUP", height=32)
         self.b_dupe = TacButton(_t("查找重复照片…"), "danger", en="DUPES", height=32)
         self.b_clear = TacButton(_t("清除标记"), "secondary", height=32)
-        for b in (self.b_clean, self.b_dupe, self.b_clear):
+        for b in (self.b_merge, self.b_clean, self.b_dupe, self.b_clear):
             br.addWidget(b)
         br.addStretch(1)
         mp.body.addLayout(br)
@@ -166,6 +168,7 @@ class CullingPage(Page):
         self.grid.selection_changed.connect(self._sel)
         self.b_view.clicked.connect(self.view)
         self.b_edit.clicked.connect(self.edit)
+        self.b_merge.clicked.connect(self.merge)
         self.b_xmp.clicked.connect(self.write_xmp)
         self.b_clean.clicked.connect(self.cleanup)
         self.b_rename.clicked.connect(self.rename)
@@ -277,6 +280,12 @@ class CullingPage(Page):
             info(self, _t("没有可以修的照片"), _t("先在下方选中一张照片。"))
             return
         self.ctx.open_editor(g, self.window())
+
+    def merge(self) -> None:
+        """合并曝光：选中的几张（视频除外）。"""
+        lib = self.ctx.library
+        gs = [g for gid in self.sel if (g := lib.by_gid(gid)) is not None and g.files and not g.is_video]
+        self.ctx.merge_exposures(gs, self.window())
 
     def clear_marks(self) -> None:
         gs, text = self.scope()

@@ -108,6 +108,23 @@ Press **T**, click on the photo, then type the text and choose the font, size an
 3. **Ctrl+T** free transform: drag the corners to scale, drag outside the box to rotate, Enter to apply.
 4. Use ↑ ↓ in the Layers panel to change the stacking order.
 
+### Merge exposures (HDR): several exposures into one photo
+
+Backlight, sunsets, a window seen from indoors: the sky is bright and the ground is dark, and no single photo gets both. Shoot a **bracket** with your camera's AEB (for example 3 shots at −2 / 0 / +2 EV) and let PhotoCrate combine them into one photo with detail in the clouds and in the shadows, at a normal exposure.
+
+1. In **05 Culling**, Ctrl+click to select the shots and click **Merge HDR…** (or right-click a thumbnail → **Merge Exposures (HDR, 3 photos)…**). For photos that aren't in the library, use **File → Merge Exposures (HDR)…** in the editor and pick the files.
+2. The defaults are usually right; click **Merge**:
+   - **Reference**: the middle exposure is picked automatically. It is never resampled, so its sharpness is kept exactly; anything that moved follows this frame.
+   - **Deghosting**: Normal. Where people, leaves or water moved between shots, only the reference is used, so no see-through "ghosts" appear.
+   - **Auto-align**: handheld shots are a little out of register and get aligned to about 0.1 pixel; tripod shots that didn't move aren't resampled at all.
+   - **Keep the source photos as hidden layers**: leave it on; Fix Ghosting needs them.
+3. The result opens in the editor. The top layer is **Merged result**, with each aligned source below it (the reference visible, the others hidden). Hold `\` to see the reference as shot, for comparison.
+4. Then adjust and retouch as usual, and **Export Image** (named "reference_HDR.jpg" by default) or **Save Project**.
+
+**Still see a ghost?** Draw around it with the Lasso **L** (a little generously), then **Image → Fix Ghosting (from one source photo)…**. Each source gets a preview of how the patch will look; click the cleanest one and choose **Patch**. The patch goes on a new layer with a mask, with its brightness matched to the merged result; refine the edge by painting on the mask, or delete the layer if you don't want it. Skip any source marked "clipped here, no detail".
+
+> Tip: use a tripod or hold steady, and use the camera's burst bracketing (the shorter the gap between shots, the less moves). RAW-only photos are merged from the camera's embedded full-size preview.
+
 ---
 
 ## 5. Saving: two ways, pick what you need

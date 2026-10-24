@@ -105,6 +105,11 @@ class AppContext(QObject):
         from .editor import open_editor
         return open_editor(self, parent, group=group)
 
+    def merge_exposures(self, groups, parent=None):
+        """合并曝光（HDR）：同一场景、不同曝光的几张 → 一张，结果在修图窗口里打开。"""
+        from .editor.merge import merge_groups
+        return merge_groups(self, parent, groups)
+
     def set_setting(self, key: str, value: Any) -> None:
         self.settings.set(key, value)
         if key == "verify_hash":

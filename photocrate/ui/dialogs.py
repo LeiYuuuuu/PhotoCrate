@@ -104,7 +104,7 @@ def choose(parent, title: str, text: str, options: list[tuple[str, str, str]], e
 class ProgressDialog(_Base):
     """执行移动 / 撤销时的进度窗口。"""
 
-    def __init__(self, parent, title: str, en: str = "PROCESSING"):
+    def __init__(self, parent, title: str, en: str = "PROCESSING", note: str | None = None):
         super().__init__(parent, title, en, hazard=True)
         self.setMinimumWidth(520)
         self.bar = SegProgress()
@@ -119,7 +119,7 @@ class ProgressDialog(_Base):
         row.addWidget(self.cur, 1)
         row.addWidget(self.count)
         self.body.addLayout(row)
-        self.body.addWidget(caption(_t("取消会在当前这组照片处理完后停止，不会留下复制了一半的文件。"), "faint", 8.5))
+        self.body.addWidget(caption(note or _t("取消会在当前这组照片处理完后停止，不会留下复制了一半的文件。"), "faint", 8.5))
         self.cancel_btn = TacButton(_t("取消"), "secondary")
         self.buttons.addWidget(self.cancel_btn)
         self.worker = None
@@ -153,13 +153,13 @@ class ProgressDialog(_Base):
         self._cancel()
 
 
-def run_with_progress(ctx, parent, title: str, en: str, job):
+def run_with_progress(ctx, parent, title: str, en: str, job, note: str | None = None):
     """在后台运行 job(prog, cancel)，期间显示进度窗口；返回 (结果, 错误信息)。
 
     结果对话框一定要等进度窗口关闭之后再弹出：任务很快完成时，进度窗口在结果对话框弹出的同时关闭，
     Windows 会把焦点交给别的程序，结果对话框可能落到其他窗口后面、看不见却挡住整个界面。
     """
-    pd = ProgressDialog(parent, title, en)
+    pd = ProgressDialog(parent, title, en, note)
     box: dict = {}
     w = ctx.run(job, lambda v: pd.update_progress(*v), lambda r: box.__setitem__("result", r),
                 lambda tb: box.__setitem__("error", tb))

@@ -56,6 +56,7 @@ class _Hooks(QObject):
         self.rate = None        # fn(gids, change)
         self.open = None        # fn(groups, index, widget)
         self.edit = None        # fn(group)：打开修图窗口
+        self.merge = None       # fn(groups)：合并曝光（HDR）
 
 
 HOOKS = _Hooks()
@@ -427,6 +428,13 @@ class ThumbGrid(QListView):
             ae = QAction(_t("修图（图层 / 调整 / 修复）…"), m)
             ae.triggered.connect(lambda: HOOKS.edit(g))
             acts.insert(1 if HOOKS.open is not None else 0, ae)
+        if HOOKS.merge is not None:
+            sel = [x for x in (self.model_.groups[i.row()] for i in self.selectionModel().selectedIndexes())
+                   if not x.is_video]
+            if len(sel) >= 2 and g in sel:
+                am = QAction(_t("合并曝光（HDR，{0} 张）…", len(sel)), m)
+                am.triggered.connect(lambda: HOOKS.merge(sel))
+                acts.insert(2 if HOOKS.open is not None else 1, am)
         for a in acts:
             m.addAction(a)
         if HOOKS.rate is not None:

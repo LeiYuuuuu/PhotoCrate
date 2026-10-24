@@ -88,6 +88,15 @@ def project_path_for(source_path: str) -> str:
     return os.path.splitext(source_path)[0] + PROJECT_EXT
 
 
+def default_project_path(doc: Document) -> str:
+    """没保存过的文档默认存到哪：原片旁边同名（合并曝光的结果加「_HDR」，不和参考帧那张自己的工程混在一起）。"""
+    if doc.source.project:
+        return doc.source.project
+    if not doc.source.path:
+        return ""
+    return os.path.splitext(doc.source.path)[0] + doc.source.suffix + PROJECT_EXT
+
+
 def suggest_export_path(doc: Document, ext: str = ".jpg") -> str:
     """原片旁边的「原名_修图.jpg」，重名加编号。"""
     src = doc.source.path or doc.source.project
@@ -95,7 +104,7 @@ def suggest_export_path(doc: Document, ext: str = ".jpg") -> str:
     stem = os.path.splitext(os.path.basename(src))[0] if src else _t("未命名")
     n = 0
     while True:
-        p = os.path.join(folder, f"{stem}{_t('_修图')}{'' if n == 0 else f' ({n})'}{ext}")
+        p = os.path.join(folder, f"{stem}{doc.source.suffix or _t('_修图')}{'' if n == 0 else f' ({n})'}{ext}")
         if not os.path.exists(p):
             return p
         n += 1
@@ -198,7 +207,7 @@ def save_project(doc: Document, path: str) -> int:
     s = doc.source
     meta = {"format": "photocrate-edit", "version": 1, "width": doc.width, "height": doc.height,
             "active": doc.index_of(doc.active_id), "layers": layers,
-            "source": {"path": s.path, "name": s.name, "gid": s.gid}}
+            "source": {"path": s.path, "name": s.name, "gid": s.gid, "suffix": s.suffix}}
     tmp = path + ".part"
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as z:
         z.writestr("document.json", json.dumps(meta, ensure_ascii=False, indent=1))
@@ -248,5 +257,5 @@ def load_project(path: str) -> Document:
         doc.source = SourceInfo(path=src.get("path") or "", name=src.get("name") or os.path.basename(path),
                                 exif=z.read("exif.bin") if "exif.bin" in names else None,
                                 icc=z.read("icc.icc") if "icc.icc" in names else None,
-                                gid=src.get("gid"), project=path)
+                                gid=src.get("gid"), project=path, suffix=src.get("suffix") or "")
     return doc

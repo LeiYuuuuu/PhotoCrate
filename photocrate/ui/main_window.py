@@ -287,6 +287,7 @@ class MainWindow(QMainWindow):
         HOOKS.rate = ctx.rate
         HOOKS.open = lambda groups, i, w: ctx.open_viewer(groups, i, self)
         HOOKS.edit = lambda g: ctx.open_editor(g, self)
+        HOOKS.merge = lambda gs: ctx.merge_exposures(gs, self)
         ctx.rescan_requested.connect(self._rescan)
         ctx.ratings_changed.connect(HOOKS.repaint.emit)
         ctx.status.connect(self.status.set_message)

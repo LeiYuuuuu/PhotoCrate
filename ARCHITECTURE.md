@@ -210,6 +210,24 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 | 滤镜 | `filters.py`：每个滤镜 `fn(rgba, scale, **参数)`；对话框里改参数时只在当前显示级别的代理图上算（`Document.previews`），确定后按原尺寸分条应用（每条上下多算一圈），有选区时按选区混合 |
 | 打开 / 保存 | 与「导出分享」共用读图（RAW 用内嵌全尺寸预览）；导出带原片 EXIF（方向改为 1、更新宽高、可去 GPS）与 ICC；整张合成分 512 行一条、多线程并行。`.pcedit` = zip（document.json + 每层 PNG + exif.bin / icc.icc），扩展名加进 `formats.SIDECAR_EXTS`，与原片同名时作为附属文件跟着照片移动 / 改名 |
 
+## 9.6 合并曝光（edit/hdr.py + ui/editor/merge.py）
+
+同一场景、不同曝光的 2–9 张 → 一张。只用 numpy / OpenCV，不新增依赖。目标是**不损失清晰度**，所以每一步都围绕“少重新取样、对得准”来做：
+
+| 步骤 | 实现 |
+|---|---|
+| 参考帧 | 曝光居中的一张（有 EXIF 按 log2(快门 × ISO / 光圈²)，没有按画面亮度；偶数张时中间两张里挑过曝 / 欠曝少的）。参考帧**不做任何重新取样**；移动的物体以它为准 |
+| 粗对齐 | 灰度图按直方图匹配到参考帧的亮度 → SIFT（长边 2400）→ RANSAC 单应矩阵 → 用全部内点最小二乘重拟合。特征太少时退到相位相关（只求平移），再不行用单位矩阵交给精修 |
+| 精修 | `_Tracker`：两张都做**局部对比度归一化**（减去 σ=5 邻域均值、除以邻域标准差），在参考帧上取几千个角点（两张都没过曝 / 欠曝的地方），金字塔 LK 光流跟踪，来回各跟一次、往返误差 > 0.08 px 的扔掉，RANSAC + 最小二乘拟合剩余修正，迭代 3 次（长边 4000）。曝光不同时直接比亮度（ECC、未归一化的 LK、相位相关）都会被色调曲线带偏 0.3–3 px；归一化后，在 4 EV 曝光差、起点偏 12 px 的合成测试里四角误差 ≤ 0.12 px |
+| 串联 | 按 EV 从参考帧往外处理；每张既直接对参考帧，也先对曝光相邻、已对齐的那张再串起来，两个候选都精修，用“对齐后再跟踪一遍的剩余错位中位数”挑小的。对不上、而且 70% 以上都过曝 / 死黑的那张不参与（它能贡献的很少，对不准反而添重影） |
+| 变换 | 位移 < 0.05 px（三脚架）原样使用；否则 `warpPerspective` + Lanczos4，边缘几像素和没画面的地方权重为 0 |
+| 去重影 | 长边 1600 上比较。从曝光离参考帧最近的一张开始，与已确认的几张（参考帧优先）逐通道比：每个通道只用两边都可靠的像素学一张直方图匹配表（单调映射）。两边都没削平：两个方向的差取较小的（暗图提亮会放大噪点，只有两边都对不上才算），超过阈值；一边削平（≥248 或 ≤6）：只在映射学到过的范围内单向比较，“另一张映射过来明显不该被削平”也算——这样参考帧过曝的天空里走过的人也查得出。开运算去噪点、去掉小连通域、闭运算、膨胀、羽化，得到每张的“不参与”蒙版 |
+| 融合 | Mertens：权重 = 拉普拉斯绝对值 × 通道标准差 × Π exp(−(v−0.5)²/0.08)，再乘有效区与去重影蒙版；拉普拉斯金字塔逐级累加（逐级算完就丢、原地累加；5 张 2400 万像素峰值约 2 GB、约 15 秒）。对比度项让更清晰的那张权重更高 |
+| 文档 | `to_document`：参考帧（可见，“看原图”看到的就是它）、其余源图（隐藏，`params.merge_source`）、「合并结果」（`params.merge_result`）。`SourceInfo.suffix = "_HDR"`：导出「参考帧名_HDR.jpg」、工程「参考帧名_HDR.pcedit」，不和参考帧自己的工程混在一起 |
+| 修补重影 | `ghost_patch`：补丁是对齐后源图的原样像素（不再重新取样），只取选区外接矩形；亮度用选区周围一圈（排除羽化带）逐通道直方图匹配到合并结果；蒙版 = 选区羽化，选区内恒为 255。放在合并结果上方的新图层（`params.ghost_fix`），可撤销、可在蒙版上修边 |
+
+测试：`tests/test_hdr.py`（合成的手持包围曝光：对齐误差、锐度不低于参考帧、移动物体处与参考帧一致、静止场景不误判、修补的亮度匹配、工程往返）、`tests/ui_merge.py`（挑片页 → 对话框 → 修图窗口 → 修补重影 → 保存工程）。
+
 ## 10. 安全搬运（ops/）
 
 | 机制 | 实现位置 |
@@ -305,17 +323,18 @@ PhotoCrate/
 │  ├─ partition/   base dimensions engine
 │  ├─ ops/         planner mover journal pathsafe xmpwrite cleanup trashbin renamer
 │  │               importer dedupe exporter
-│  ├─ edit/        document adjust blend paint filters text io（修图核心）
+│  ├─ edit/        document adjust blend paint filters text io hdr（修图核心；hdr = 合并曝光）
 │  └─ ui/          theme context dialogs timeplace_dialogs culling_dialogs workflow_dialogs xmpflow viewer
-│                  main_window  pages/  widgets/（deco thumbgrid mapview）  editor/（window canvas tools panels icons）
+│                  main_window  pages/  widgets/（deco thumbgrid mapview）  editor/（window canvas tools panels icons tutorial merge）
 ├─ data/           geonames_cities1000.csv.gz  place_names_zh.json  clip_vocab_zh.txt
 ├─ assets/         app.ico app.png
 ├─ plugins/        用户插件放这里        plugins_examples/  示例插件
 ├─ tools/          get_exiftool.ps1  make_icon.py  （exiftool/ 运行后自动下载到这里）
 └─ tests/          test_core.py  test_timeplace.py  test_culling.py  test_trips.py  test_ai.py
                    test_workflow.py  test_repartition.py  test_search_rank.py  test_faces_screen.py  test_i18n.py
+                   test_editor.py  test_hdr.py
                    make_samples.py  ui_smoke.py  ui_timeplace.py
-                   ui_culling.py  ui_tier3.py  ui_workflow.py  ui_repartition.py
+                   ui_culling.py  ui_tier3.py  ui_workflow.py  ui_repartition.py  ui_editor.py  ui_merge.py
 ```
 
 ## 14. 界面细节与调试辅助

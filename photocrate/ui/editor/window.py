@@ -694,6 +694,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._act(m, _t("打开图片…"), self.open_image, "Ctrl+O")
         self._act(m, _t("打开工程…"), lambda: self.open_image(project=True))
         self._act(m, _t("置入图片（作为新图层）…"), self.place_image, "Ctrl+Shift+P")
+        self._act(m, _t("合并曝光（HDR）…"), self.merge_exposures)
         m.addSeparator()
         self._act(m, _t("保存工程"), self.save_project, "Ctrl+S")
         self._act(m, _t("工程另存为…"), lambda: self.save_project(ask=True))
@@ -730,6 +731,8 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         m.addSeparator()
         self._act(m, _t("图像大小…"), self.image_size, "Ctrl+Alt+I")
         self._act(m, _t("裁剪到选区"), self.crop_to_selection)
+        m.addSeparator()
+        self._act(m, _t("修补重影（从某一张源图取）…"), self.fix_ghost)
         sub = m.addMenu(_t("图像旋转"))
         self._act(sub, _t("顺时针 90°"), lambda: d().rotate(1))
         self._act(sub, _t("逆时针 90°"), lambda: d().rotate(3))
@@ -1227,6 +1230,17 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         if p:
             open_editor(self.ctx, self.parent(), path=p)
 
+    def merge_exposures(self) -> None:
+        from .merge import merge_paths
+        start = os.path.dirname(self.doc.source.path or "") or os.path.expanduser("~")
+        ps, _ = QFileDialog.getOpenFileNames(self, _t("选择同一场景、不同曝光的几张照片"), start, eio.OPEN_FILTER)
+        if ps:
+            merge_paths(self.ctx, self.parent() or self, [p for p in ps if not p.lower().endswith(eio.PROJECT_EXT)])
+
+    def fix_ghost(self) -> None:
+        from .merge import fix_ghost
+        fix_ghost(self)
+
     def place_image(self) -> None:
         from PIL import Image, ImageOps
         start = os.path.dirname(self.doc.source.path or "") or os.path.expanduser("~")
@@ -1245,7 +1259,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
 
     def save_project(self, ask: bool = False) -> bool:
         d = self.doc
-        path = d.source.project or (eio.project_path_for(d.source.path) if d.source.path else "")
+        path = eio.default_project_path(d)
         if ask or not path:
             path, _ = QFileDialog.getSaveFileName(self, _t("保存工程"), path or os.path.expanduser(_t("~/未命名.pcedit")),
                                                   _t("修图工程 (*.pcedit)"))
@@ -1356,12 +1370,13 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
 _open: set = set()
 
 
-def open_editor(ctx, parent=None, group=None, path: str | None = None) -> EditorWindow | None:
-    """从照片库的一张照片（group）或一个文件（path）打开修图窗口。"""
+def open_editor(ctx, parent=None, group=None, path: str | None = None, doc=None) -> EditorWindow | None:
+    """从照片库的一张照片（group）、一个文件（path）或已经做好的文档（doc，例如合并曝光的结果）打开修图窗口。"""
     exiftool = ctx.library.exiftool_path if ctx is not None else None
-    doc = None
     try:
-        if group is not None:
+        if doc is not None:
+            pass
+        elif group is not None:
             if getattr(group, "is_video", False):
                 info(parent, _t("不能修图"), _t("视频不能在这里修图。"), "NOTICE")
                 return None

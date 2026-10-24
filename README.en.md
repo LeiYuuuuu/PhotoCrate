@@ -4,7 +4,7 @@
 
 A local photo-organizing workstation for Windows. Choose how you want your photos sorted, preview the resulting folder tree, and only then are the files **actually moved** into place. Every operation is journaled and can be undone with one click.
 
-> Current version **v1.6.0**: the whole interface is now available in **English** as well as Simplified Chinese, including the editor's guided tour and an English [editor tutorial](docs/editor-tutorial.en.md). Detailed notes for every release are in **[CHANGELOG.md](CHANGELOG.md)** (in Chinese) and on the [Releases](https://github.com/LeiYuuuuu/PhotoCrate/releases) page.
+> Current version **v1.7.0**: the editor can now **merge exposures (HDR)** — combine a bracket into one photo with automatic sub-pixel alignment and deghosting. v1.6.0 added the full **English** interface and an English [editor tutorial](docs/editor-tutorial.en.md). Detailed notes for every release are in **[CHANGELOG.md](CHANGELOG.md)** (in Chinese) and on the [Releases](https://github.com/LeiYuuuuu/PhotoCrate/releases) page.
 
 ## Language
 
@@ -39,6 +39,7 @@ A local photo-organizing workstation for Windows. Choose how you want your photo
   - Adjustments: exposure, contrast, highlights, shadows, white balance, curves, levels, HSL, split toning, clarity, sharpen, noise reduction, vignette and grain, plus 14 one-click presets (Film, Japanese airy, Cinematic…).
   - Filters with live preview: Gaussian and motion blur, unsharp mask, high pass and more.
   - Unlimited undo with a History panel.
+  - **Merge exposures (HDR):** combine 2–9 shots of the same scene at different exposures into one photo with detail in highlights and shadows. Handheld shots are aligned to about 0.1 pixel and the reference frame is never resampled, so sharpness is kept; moving people, leaves or water are deghosted automatically, and any leftovers can be selected and patched from one of the source photos.
   - **Originals are read-only:** export writes a new file (EXIF kept), or you can save a `.pcedit` project to continue later.
 - **Also:** statistics overview (click any bar to see its photos), blur detection, History with undo, crash recovery, plugins, **F12 screenshot**, and window position memory across multiple monitors.
 - **Interface:** industrial sci-fi terminal style with two themes, light "Endfield" and dark "Ark". Short UI animations can be switched off in Settings → Appearance.
@@ -52,6 +53,7 @@ A local photo-organizing workstation for Windows. Choose how you want your photo
 ![Overview](docs/screenshots/en/overview_light.png)
 ![Editor: adjustment layer + curves](docs/screenshots/en/editor_adjust.png)
 ![Editor: free transform (dark)](docs/screenshots/en/editor_dark.png)
+![Merge exposures (HDR)](docs/screenshots/en/editor_hdr.png)
 
 ---
 
@@ -124,6 +126,7 @@ The card is only read, never modified. Anything imported before is skipped autom
 | Cut out / composite | Object Selection Q around the subject → Ctrl+J copies it to a new layer. Add another image with **File → Place Image…**, or paste with Ctrl+V. Then use Ctrl+T to scale and rotate, and change the blend mode. |
 | Crop and straighten | Crop C: pick a ratio and drag the box. Hold Ctrl and drag along the horizon to straighten automatically. Press Enter to apply. |
 | Add text | Text T: click to place text. Font, size, color, stroke and shadow can all be changed later. |
+| Merge exposures (HDR) | Select a bracket on the Culling page → **Merge HDR…** (or right-click a thumbnail; in the editor, **File → Merge Exposures (HDR)…** picks files from disk). The middle exposure becomes the reference (never resampled); the others are aligned and deghosted, then blended with Mertens exposure fusion. The result opens in the editor with the sources kept as hidden layers. Ghost left? Select it → **Image → Fix Ghosting…**, click the preview of the cleanest source, and it's patched on a new masked layer with matched brightness. |
 | Save | **Export Image…** (Ctrl+Shift+S) flattens to JPG / PNG / TIFF / WebP, saved by default next to the original as `name_edited.jpg`. Capture time and other EXIF are kept (GPS can be removed), and exporting into a library folder triggers a rescan. **Save Project** (Ctrl+S) keeps all layers as `<name>.pcedit`; next time you edit that photo you're asked whether to continue it. |
 
 On large images the view is computed from scaled-down proxies. While you drag a slider a low-resolution preview appears first, and a sharp frame follows when you stop. Hold `\` to see the original (background layer only).
@@ -178,6 +181,8 @@ Exports only write new files; originals are never touched.
 - **What do XMP keywords look like in Lightroom?** Plain keywords are scene names (e.g. "Night scenes"), people and trip names. Hierarchical keywords are like `Scenes|City & architecture|Night scenes`, `People|<name>` and `Trips|<trip name>`, in the app language at the time of writing. Only names this app recognized or you assigned are written; existing keywords are kept and nothing is duplicated.
 - **Want to re-sort differently later (date first, camera or rating later)?** Change the conditions on Partition and generate a new plan; the target can be the same folder as before. When you move into a folder outside your sources, it's added to Sources automatically, so photos don't "disappear" on the next scan. Empty folders left behind (like `2026-01-05`) are removed, but source folders themselves are kept, and photos already in place are skipped. Ratings, manual places, time corrections and AI results follow the photos, so nothing is recomputed.
 - **Sorted twice and want to undo the first?** Select the first batch in History → Undo. You'll be told it was moved again by batch #N; confirm, and both are undone newest to oldest. Photos return to where they were before the first sort, and removed empty folders are recreated.
+- **Does merging exposures soften the photo?** No. The reference frame (the middle exposure) is not resampled at all. The others are aligned to about 0.05–0.1 pixel in the synthetic tests, and tripod shots that didn't move aren't resampled either; the blend favors whichever frame is sharper. In the tests the merged result is at least as sharp as the reference (`tests/test_hdr.py`).
+- **What about ghosts when merging?** Deghosting is on by default: wherever something moved between shots, only the reference is used — including areas the reference has clipped but the other frames show. Anything left can be selected with the Lasso and patched via **Image → Fix Ghosting…**.
 - **Does editing change the original?** No. Everything in the editor happens in memory. Export writes a new file and refuses to overwrite the original; Save Project writes a `.pcedit`. A `.pcedit` with the same name as the original is treated as a sidecar and moves and renames with the photo.
 - **What is a `.pcedit`?** A zip with `document.json` (layer structure, adjustment settings, text) plus one PNG per layer. Open it with any unzip tool to get individual layers.
 - **Can I edit RAW?** RAW files open, but from the camera's embedded full-size JPEG preview (the same as Export & share), not a fresh RAW decode. Highlight / shadow recovery headroom is therefore the same as a JPG. For maximum RAW latitude, develop in Lightroom or similar first.
@@ -190,7 +195,7 @@ Exports only write new files; originals are never touched.
 - Interface text: Chinese source strings are wrapped in `t()` (`photocrate/i18n.py`); English lives in `photocrate/locale_en.py` (`EN` table, keyed by the Chinese text, with `{0}` placeholders). A missing entry simply shows the Chinese text.
 - Example plugins: `plugins_examples\` (a file-size partition with a custom page, and an AI scene-classifier skeleton).
 - Tests: `.venv\Scripts\python -m pytest tests -q` (`tests\test_i18n.py` covers the English table and English folder / template output). XMP write-back cases need the environment variable `PHOTOCRATE_TEST_EXIFTOOL` pointing to `exiftool.exe`.
-- UI automation: `tests\ui_timeplace.py`, `tests\ui_culling.py`, `tests\ui_tier3.py`, `tests\ui_workflow.py`, `tests\ui_repartition.py` and `tests\ui_editor.py` (the editor; its core unit tests are in `tests\test_editor.py`; run with `PHOTOCRATE_LANG=en` to exercise the English UI). Face cases need `PHOTOCRATE_TEST_MODELS` pointing to a folder with the YuNet / SFace models. The real-model "not a human face" case also needs `PHOTOCRATE_TEST_CLIP` pointing to a folder with the Chinese CLIP model.
+- UI automation: `tests\ui_timeplace.py`, `tests\ui_culling.py`, `tests\ui_tier3.py`, `tests\ui_workflow.py`, `tests\ui_repartition.py` and `tests\ui_editor.py` (the editor; its core unit tests are in `tests\test_editor.py`), `tests\ui_merge.py` (merge exposures; engine tests in `tests\test_hdr.py`; run with `PHOTOCRATE_LANG=en` to exercise the English UI). Face cases need `PHOTOCRATE_TEST_MODELS` pointing to a folder with the YuNet / SFace models. The real-model "not a human face" case also needs `PHOTOCRATE_TEST_CLIP` pointing to a folder with the Chinese CLIP model.
 - Generate test photos: `.venv\Scripts\python tests\make_samples.py D:\TestPhotos`
 
 ## 7. Data & third-party licenses
