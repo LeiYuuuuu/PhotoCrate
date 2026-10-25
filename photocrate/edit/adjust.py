@@ -15,6 +15,7 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
+from . import coloradj
 from ..i18n import is_en, t as _t
 
 HSL_BANDS = [("red", _t("红"), 0.0), ("orange", _t("橙"), 30.0), ("yellow", _t("黄"), 60.0), ("green", _t("绿"), 120.0),
@@ -69,6 +70,7 @@ def default_params() -> dict:
     p["curve"] = {c: [list(pt) for pt in IDENTITY_CURVE] for c, _ in CURVE_CHANNELS}
     p["hsl"] = {k: [0.0, 0.0, 0.0] for k, _, _ in HSL_BANDS}
     p["invert"] = False
+    p.update(coloradj.defaults())
     return p
 
 
@@ -80,8 +82,11 @@ def normalize(params: dict | None) -> dict:
             p["curve"].update({c: [list(pt) for pt in pts] for c, pts in v.items() if c in p["curve"]})
         elif k == "hsl" and isinstance(v, dict):
             p["hsl"].update({b: list(x) for b, x in v.items() if b in p["hsl"]})
+        elif k in coloradj.DEFAULTS:
+            continue
         else:
             p[k] = v
+    coloradj.normalize_into(p, params or {})
     return p
 
 
@@ -97,6 +102,8 @@ def is_identity(p: dict) -> bool:
     if any(not _curve_is_identity(v) for v in (p.get("curve") or {}).values()):
         return False
     if any(any(abs(float(x)) > 1e-6 for x in v) for v in (p.get("hsl") or {}).values()):
+        return False
+    if coloradj.active(p):
         return False
     return not p.get("invert")
 
@@ -381,6 +388,9 @@ def develop(rgb: np.ndarray, p: dict, rc: RenderCtx | None = None) -> np.ndarray
             t = _hue_rgb(g("sp_sh_hue"))
             t = t - (t @ np.array([0.2126, 0.7152, 0.0722], np.float32))
             out += (ss * 0.3 * np.power(1 - L, 1.5 + bal))[..., None] * t
+
+    if coloradj.active(p):                       # 黑白、通道混合器、可选颜色、照片滤镜、渐变映射、色彩平衡
+        out = coloradj.apply(out, p)
 
     if p.get("invert"):
         out = 1 - np.clip(out, 0, 1)

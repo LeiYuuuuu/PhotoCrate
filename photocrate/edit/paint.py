@@ -20,11 +20,12 @@ import math
 import numpy as np
 
 from .document import Document, Layer, crop_canvas, from_float, mask_bbox, maxval, over, to8, to_float
-from ..i18n import t as _t
+from ..i18n import is_en, t as _t
 
 TONE_MODES = ("dodge", "burn", "sponge", "blur", "sharpen")
+BLUR = "Blur" if is_en() else "模糊"                  # 英文表里的「模糊」是挑片的 Blurry，这里是工具名
 MODE_NAMES = {"paint": _t("画笔"), "erase": _t("橡皮擦"), "clone": _t("仿制图章"), "heal": _t("污点修复"),
-              "dodge": _t("减淡"), "burn": _t("加深"), "sponge": _t("海绵"), "blur": _t("模糊"), "sharpen": _t("锐化"),
+              "dodge": _t("减淡"), "burn": _t("加深"), "sponge": _t("海绵"), "blur": BLUR, "sharpen": _t("锐化"),
               "smudge": _t("涂抹")}
 
 
@@ -74,7 +75,7 @@ class Stroke:
     def __init__(self, doc: Document, layer: Layer, mode: str, *, color=(0, 0, 0), size: float = 30,
                  hardness: float = 0.8, opacity: float = 1.0, clone_offset: tuple[int, int] = (0, 0),
                  to_mask: bool = False, name: str = "", strength: float = 0.5, tone_range: str = "midtones",
-                 sat_up: bool = False):
+                 sat_up: bool = False, record: bool = True):
         self.doc, self.layer, self.mode = doc, layer, mode
         self.to_mask = to_mask and layer.mask is not None
         if self.to_mask and mode not in ("paint", "erase"):      # 修饰类工具只改像素；在蒙版上没有意义
@@ -88,6 +89,7 @@ class Stroke:
         self.strength = float(np.clip(strength, 0, 1))
         self.tone_range = tone_range
         self.sat_up = bool(sat_up)
+        self.record = record                                       # False：不记历史（快速蒙版由调用方记）
         self.pickup = None                                         # 涂抹：手指上沾着的颜色（笔刷大小的 float RGBA）
         self.name = name or MODE_NAMES.get(mode, _t("画笔"))
         self.state_before = None
@@ -172,6 +174,8 @@ class Stroke:
         else:
             b = self.bbox
             self.bbox = [min(b[0], rx0), min(b[1], ry0), max(b[2], rx1), max(b[3], ry1)]
+        if not self.to_mask and self.layer.locked_alpha and self.mode != "heal":    # 锁定透明像素：只改颜色
+            self.arr[ry0:ry1, rx0:rx1, 3] = self.before[ry0:ry1, rx0:rx1, 3]
         rect = (rx0, ry0, rx1 - rx0, ry1 - ry0)
         if self.to_mask:
             self.layer.touch_mask(rect)
@@ -277,7 +281,9 @@ class Stroke:
             x0, y0, x1, y1 = hx0, hy0, hx1, hy1
             self.layer.touch((x0, y0, x1 - x0, y1 - y0))
         rect = (x0, y0, x1 - x0, y1 - y0)
-        if self.state_before is not None:
+        if not self.record:
+            pass
+        elif self.state_before is not None:
             self.doc.history.push_state(self.name, self.state_before)
         else:
             self.doc.history.push_patch(self.name, self.layer.id, "mask" if self.to_mask else "pixels", rect,
@@ -354,6 +360,71 @@ def inpaint(rgba: np.ndarray, mask: np.ndarray, feather: np.ndarray | None = Non
     out = rgba.copy()
     out[..., :3] = np.clip(rgb.astype(np.float32) + (res - rgb.astype(np.float32)) * a[..., None] + 0.5,
                            0, 255).astype(np.uint8)
+    return out
+
+
+def patch(rgba: np.ndarray, mask: np.ndarray, dx: int, dy: int) -> np.ndarray | None:
+    """修补工具：选区里的内容换成 (dx, dy) 处的画面，用泊松融合（cv2.seamlessClone）让边缘的颜色和亮度
+    自然过渡。mask：uint8、与 rgba 同尺寸。16 位图层在 8 位上算好，只把差值加回去。"""
+    import cv2
+    if rgba.dtype != np.uint8:
+        r8 = to8(rgba)
+        out8 = patch(r8, mask, dx, dy)
+        if out8 is None:
+            return None
+        d = out8[..., :3].astype(np.int32) - r8[..., :3].astype(np.int32)
+        out = rgba.copy()
+        out[..., :3] = np.clip(rgba[..., :3].astype(np.int32) + d * 257, 0, 65535).astype(np.uint16)
+        return out
+    h, w = mask.shape
+    hard = (mask > 127).astype(np.uint8) * 255
+    bb = mask_bbox(hard)
+    if bb is None:
+        return None
+    x, y, bw, bh = bb
+    if x + dx < 1 or y + dy < 1 or x + dx + bw > w - 1 or y + dy + bh > h - 1 or x < 1 or y < 1 \
+            or x + bw > w - 1 or y + bh > h - 1:
+        return None                                       # 源或目标碰到图层边缘：seamlessClone 不收
+    src = np.ascontiguousarray(rgba[y + dy:y + dy + bh, x + dx:x + dx + bw, :3])
+    m = np.ascontiguousarray(hard[y:y + bh, x:x + bw])
+    m[0, :] = m[-1, :] = 0
+    m[:, 0] = m[:, -1] = 0
+    dst = np.ascontiguousarray(rgba[..., :3])
+    center = (int(x + bw // 2), int(y + bh // 2))
+    try:
+        res = cv2.seamlessClone(src, dst, m, center, cv2.NORMAL_CLONE)
+    except cv2.error:
+        return None
+    a = cv2.GaussianBlur(mask.astype(np.float32) / 255, (0, 0), 1.0)[..., None]
+    out = rgba.copy()
+    out[..., :3] = np.clip(dst + (res.astype(np.float32) - dst) * a + 0.5, 0, 255).astype(np.uint8)
+    return out
+
+
+def red_eye(rgba: np.ndarray, cx: float, cy: float, radius: float, darken: float = 0.5) -> np.ndarray | None:
+    """红眼：在 (cx, cy) 半径 radius 的圆里，把明显偏红的像素换成暗的中性色（瞳孔）。"""
+    h, w = rgba.shape[:2]
+    r = max(2.0, float(radius))
+    x0, y0, x1, y1 = max(0, int(cx - r)), max(0, int(cy - r)), min(w, int(cx + r) + 1), min(h, int(cy + r) + 1)
+    if x0 >= x1 or y0 >= y1:
+        return None
+    f = to_float(rgba[y0:y1, x0:x1])
+    R, G, B = f[..., 0], f[..., 1], f[..., 2]
+    red = np.clip((R - np.maximum(G, B)) / np.maximum(R, 1e-3) - 0.25, 0, None) / 0.35
+    yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
+    circ = np.clip((r - np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)) / max(1.0, r * 0.25), 0, 1)
+    k = np.clip(red, 0, 1) * circ
+    if not (k > 0.05).any():
+        return None
+    import cv2
+    k = cv2.GaussianBlur(k.astype(np.float32), (0, 0), max(0.6, r * 0.04))
+    gray = (G + B) / 2 * (1 - float(darken) * 0.8)
+    out_f = f.copy()
+    for i in range(3):
+        target = gray if i == 0 else f[..., i] * (1 - float(darken) * 0.5)
+        out_f[..., i] = f[..., i] + (target - f[..., i]) * k
+    out = rgba.copy()
+    out[y0:y1, x0:x1] = from_float(out_f, rgba.dtype)
     return out
 
 

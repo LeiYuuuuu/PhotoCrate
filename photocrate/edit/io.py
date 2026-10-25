@@ -398,7 +398,8 @@ def save_project(doc: Document, path: str) -> int:
         d = {"kind": l.kind, "name": l.name, "x": l.x, "y": l.y, "visible": l.visible, "opacity": l.opacity,
              "blend": l.blend, "mask_enabled": l.mask_enabled, "params": l.params, "pixels": None, "mask": None,
              "clip": l.clip, "parent": doc.index_of(l.parent) if l.parent is not None else None,
-             "collapsed": l.collapsed}
+             "collapsed": l.collapsed, "fill": l.fill, "style": l.style,
+             "locks": [l.lock_alpha, l.lock_pixels, l.lock_pos, l.lock_all]}
         if l.pixels is not None:
             d["pixels"] = f"layers/{i:03d}.png"
             d["depth"] = 16 if l.pixels.dtype == np.uint16 else 8
@@ -407,8 +408,13 @@ def save_project(doc: Document, path: str) -> int:
             d["mask"] = f"masks/{i:03d}.png"
             files[d["mask"]] = _png(l.mask)
         layers.append(d)
+    chans = []
+    for i, (name, arr) in enumerate(doc.channels.items()):
+        f = f"channels/{i:03d}.png"
+        files[f] = _png(arr)
+        chans.append({"name": name, "file": f})
     s = doc.source
-    meta = {"format": "photocrate-edit", "version": 2, "width": doc.width, "height": doc.height, "depth": doc.depth,
+    meta = {"channels": chans, "format": "photocrate-edit", "version": 2, "width": doc.width, "height": doc.height, "depth": doc.depth,
             "active": doc.index_of(doc.active_id), "layers": layers,
             "source": {"path": s.path, "name": s.name, "gid": s.gid, "suffix": s.suffix}}
     tmp = path + ".part"
@@ -449,6 +455,8 @@ def load_project(path: str) -> Document:
             l.blend = d.get("blend") or "normal"
             l.mask_enabled = bool(d.get("mask_enabled", True))
             l.clip, l.collapsed = bool(d.get("clip", False)), bool(d.get("collapsed", False))
+            l.fill, l.style = float(d.get("fill", 1.0)), dict(d.get("style") or {})
+            l.lock_alpha, l.lock_pixels, l.lock_pos, l.lock_all = (list(d.get("locks") or []) + [False] * 4)[:4]
             if l.kind == "adjust":
                 from .adjust import normalize
                 l.params = normalize(l.params)
@@ -468,6 +476,11 @@ def load_project(path: str) -> Document:
                 l.parent = allp[pi][0].id
         if not doc.layers:
             raise ValueError(_t("工程文件里没有图层"))
+        for c in meta.get("channels") or []:
+            if c.get("file") in names:
+                arr = _unpng(z.read(c["file"]), "L")
+                if arr.shape == (doc.height, doc.width):
+                    doc.channels[str(c.get("name") or c["file"])] = arr
         a = int(meta.get("active", -1))
         doc.active_id = doc.layers[a if 0 <= a < len(doc.layers) else -1].id
         src = meta.get("source") or {}

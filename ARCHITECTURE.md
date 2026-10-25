@@ -244,6 +244,20 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 
 测试：`tests/test_editor_pro.py`（16 位精度与各操作保持位深、16 位 PNG / TIFF / 工程往返、RAW 白平衡与吸管、剪贴与组的合成结果、组的移动 / 复制 / 合并 / 取消、hot 缓存、透视与变形的预览 = 提交、六种修饰工具）、`tests/ui_editor_pro.py`。
 
+## 9.8 修图进阶第二档（v1.9.0）
+
+| 部分 | 实现 |
+|---|---|
+| 新调整 | `edit/coloradj.py`：调整参数里的 6 个子字典（`{"on": …}`），在分离色调之后、反相之前按 色彩平衡 → 可选颜色 → 通道混合器 → 照片滤镜 → 黑白 → 渐变映射 应用。黑白 / 可选颜色用同一种颜色分解：最小通道 = 白色成分，次大 − 最小 = 二次色（黄 / 青 / 洋红，由最小通道决定），最大 − 次大 = 主色；黑白默认权重 40/60/40/60/20/80 与 Photoshop 一致。色彩平衡用 GIMP 的三段平滑权重 |
+| 选区 | `edit/select.py`：色彩范围 = Lab 距离（取样）或色相 / 亮度权重（预设）；选择并遮住 = 在选区边缘带（膨胀 − 腐蚀，半径 r）里做导向滤波（灰度引导图，ε = 1e-4，大图降采样），带外保持原选区，再平滑 / 羽化 / 对比度 / 移动边缘。存储的选区 = `Document.channels`（名称 → uint8），进历史状态，裁剪 / 旋转 / 翻转 / 改尺寸时一起变换，工程里存 `channels/NNN.png`。快速蒙版：画笔对一个临时的“蒙版图层”（内容 = 选区）画，松开时 `set_selection` 记一步历史；画布在没选中的地方叠红色 |
+| 滤镜 | `edit/filters2.py`：`FilterSpec` 加 `whole`（扭曲类按整个图层的几何中心算，原尺寸应用时不分条）、`margin`（分条时每条多算几像素）、`choices`（下拉选项）。扭曲 = 算好源坐标后一次 `remap`（预乘 alpha、三次插值）；镜头模糊 = 圆盘卷积（伽马 2.2 线性化、亮部按“镜面高光”放大） |
+| 液化 | `edit/liquify.py`：预览（长边 ≤1400）上的位移场 D；每一笔 D'(x) = D(x + δ(x)) + δ(x)（对 D 自己 remap，来回推不会越推越糊）；重建 = D 按笔刷衰减。应用时把 D 放大到原尺寸、分 1024 行一条 remap 原图——只重新取样一次 |
+| 修补 / 红眼 | `paint.patch`：`cv2.seamlessClone`（泊松融合）把拖到的那块融进选区；16 位在 8 位上算、只加回差值。`paint.red_eye`：圆内“红色程度”=(R − max(G,B))/R 作权重，红通道换成 (G+B)/2 并压暗 |
+| 图层样式 | `edit/styles.py`：由图层 alpha（含蒙版）加边距算出一串平面（颜色 + alpha + 混合模式）：投影 / 外发光在图层下面，图层本身（× 填充），然后渐变 / 颜色叠加、内发光、内阴影、斜面浮雕（高度图 = 模糊后的 alpha，按光源方向打光，高光滤色、阴影正片叠底），最后描边（距离变换）。每个级别按 (版本, 样式) 缓存，按区域叠加；`_pixel_bounds` 把样式边距算进合并范围；向下合并后样式清空（已经合进像素） |
+| 锁定 / 填充 | `Layer.lock_alpha / lock_pixels / lock_pos / lock_all`：锁像素时 `_editable()` 返回空（填充、滤镜、修复都不动），锁位置时 `translate()` 和变换工具拒绝，锁透明像素时画笔 / 填充 / `replace_pixels` 保留原 alpha。`Layer.fill` 只乘在图层自己的像素上，不乘样式 |
+
+测试：`tests/test_editor_pro2.py`、`tests/ui_editor_pro2.py`。
+
 ## 10. 安全搬运（ops/）
 
 | 机制 | 实现位置 |
@@ -348,7 +362,7 @@ PhotoCrate/
 ├─ tools/          get_exiftool.ps1  make_icon.py  （exiftool/ 运行后自动下载到这里）
 └─ tests/          test_core.py  test_timeplace.py  test_culling.py  test_trips.py  test_ai.py
                    test_workflow.py  test_repartition.py  test_search_rank.py  test_faces_screen.py  test_i18n.py
-                   test_editor.py  test_editor_pro.py  test_hdr.py
+                   test_editor.py  test_editor_pro.py  test_editor_pro2.py  test_hdr.py
                    make_samples.py  ui_smoke.py  ui_timeplace.py
                    ui_culling.py  ui_tier3.py  ui_workflow.py  ui_repartition.py  ui_editor.py  ui_merge.py
 ```

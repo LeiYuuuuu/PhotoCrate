@@ -140,6 +140,9 @@ class Layer:
         self.mask_enabled = True
         self.params: dict = params if params is not None else {}
         self.clip = False                          # 剪贴蒙版：只在下面那个“基底”图层有像素的地方显示 / 生效
+        self.fill = 1.0                            # 填充不透明度：只影响图层自己的像素，不影响图层样式
+        self.style: dict = {}                      # 图层样式（styles.py）：投影、描边、发光…
+        self.lock_alpha = self.lock_pixels = self.lock_pos = self.lock_all = False
         self.parent: int | None = None             # 所在图层组的 id（None = 不在组里）
         self.collapsed = False                     # 图层组在面板里是否折叠
         self.version = 0
@@ -217,7 +220,21 @@ class Layer:
         return {"id": self.id, "kind": self.kind, "name": self.name, "pixels": self.pixels, "x": self.x, "y": self.y,
                 "visible": self.visible, "opacity": self.opacity, "blend": self.blend, "mask": self.mask,
                 "mask_enabled": self.mask_enabled, "params": copy.deepcopy(self.params), "clip": self.clip,
-                "parent": self.parent, "collapsed": self.collapsed}
+                "parent": self.parent, "collapsed": self.collapsed, "fill": self.fill,
+                "style": copy.deepcopy(self.style), "locks": (self.lock_alpha, self.lock_pixels, self.lock_pos,
+                                                             self.lock_all)}
+
+    @property
+    def locked_pixels(self) -> bool:
+        return self.lock_pixels or self.lock_all
+
+    @property
+    def locked_pos(self) -> bool:
+        return self.lock_pos or self.lock_all
+
+    @property
+    def locked_alpha(self) -> bool:
+        return self.lock_alpha or self.lock_all
 
 
 @dataclass
@@ -429,6 +446,8 @@ class Document:
         self.layers: list[Layer] = []           # 自下而上
         self.active_id: int | None = None
         self.selection: np.ndarray | None = None
+        self.channels: dict[str, np.ndarray] = {}    # 存储的选区（Alpha 通道）：名称 → 与画布同尺寸的 uint8
+        self.quick_mask = False                       # 快速蒙版模式（界面状态，不进历史）
         self.mask_edit = False                  # True = 画笔画在当前图层的蒙版上
         self.history = History(self)
         self.source = SourceInfo()
@@ -478,7 +497,7 @@ class Document:
     # ---- 状态 / 历史 ----
     def state(self) -> dict:
         return {"w": self.width, "h": self.height, "active": self.active_id, "sel": self.selection,
-                "depth": self.depth, "layers": [l.snapshot() for l in self.layers]}
+                "depth": self.depth, "channels": dict(self.channels), "layers": [l.snapshot() for l in self.layers]}
 
     def restore(self, st: dict) -> None:
         size_changed = (self.width, self.height) != (st["w"], st["h"])
@@ -498,6 +517,8 @@ class Document:
             for k in ("kind", "name", "pixels", "x", "y", "visible", "opacity", "blend", "mask", "mask_enabled"):
                 setattr(l, k, s[k])
             l.clip, l.parent, l.collapsed = s.get("clip", False), s.get("parent"), s.get("collapsed", False)
+            l.fill, l.style = s.get("fill", 1.0), copy.deepcopy(s.get("style") or {})
+            l.lock_alpha, l.lock_pixels, l.lock_pos, l.lock_all = s.get("locks", (False,) * 4)
             l.params = copy.deepcopy(s["params"])
             l.xform = None
             l.version += 1
@@ -505,6 +526,7 @@ class Document:
             layers.append(l)
         self.layers = layers
         self.selection = st["sel"]
+        self.channels = dict(st.get("channels") or {})
         self._sel_proxy.clear()
         self.active_id = st["active"] if self.layer(st["active"]) else (layers[-1].id if layers else None)
         if self.active is None or self.active.mask is None:
@@ -680,6 +702,8 @@ class Document:
                   src.x, src.y, copy.deepcopy(src.params))
         l.visible, l.opacity, l.blend, l.mask_enabled = src.visible, src.opacity, src.blend, src.mask_enabled
         l.clip, l.parent, l.collapsed = src.clip, src.parent, src.collapsed
+        l.fill, l.style = src.fill, copy.deepcopy(src.style)
+        l.lock_alpha, l.lock_pixels, l.lock_pos, l.lock_all = src.lock_alpha, src.lock_pixels, src.lock_pos, src.lock_all
         l.mask = None if src.mask is None else src.mask.copy()
         return l
 
@@ -780,7 +804,7 @@ class Document:
     def translate(self, lid: int, dx: int, dy: int, before: dict | None = None) -> None:
         """移动图层。before 不为空时说明界面已经边拖边改好了位置，这里只记一步历史。"""
         l = self.layer(lid)
-        if l is None or l.kind == "adjust":
+        if l is None or l.kind == "adjust" or l.locked_pos:
             return
         st = before or self.state()
         if before is None:
@@ -883,6 +907,37 @@ class Document:
             out = (dist > -px).astype(np.uint8) * 255
         self.set_selection(out, _t("扩展选区") if px > 0 else _t("收缩选区"))
 
+    def save_selection(self, name: str) -> str:
+        """选择 → 存储选区：存成一个 Alpha 通道（同名覆盖）。返回实际用的名称。"""
+        if self.selection is None:
+            return ""
+        name = (name or "").strip() or _t('Alpha {0}', len(self.channels) + 1)
+        with self.edit(_t('存储选区「{0}」', name), kind="selection"):
+            self.channels = dict(self.channels)
+            self.channels[name] = self.selection.copy()
+        return name
+
+    def load_selection(self, name: str, mode: str = "new", invert: bool = False) -> None:
+        """选择 → 载入选区：mode = new / add / sub / and。"""
+        ch = self.channels.get(name)
+        if ch is None:
+            return
+        m = 255 - ch if invert else ch
+        old = self.selection
+        if mode == "add" and old is not None:
+            m = np.maximum(old, m)
+        elif mode == "sub":
+            m = np.minimum(old, 255 - m) if old is not None else np.zeros_like(m)
+        elif mode == "and":
+            m = np.minimum(old, m) if old is not None else np.zeros_like(m)
+        self.set_selection(m.copy(), _t('载入选区「{0}」', name))
+
+    def delete_channel(self, name: str) -> None:
+        if name not in self.channels:
+            return
+        with self.edit(_t('删除通道「{0}」', name), kind="selection"):
+            self.channels = {k: v for k, v in self.channels.items() if k != name}
+
     def selection_bbox(self):
         return mask_bbox(self.selection)
 
@@ -896,7 +951,7 @@ class Document:
     # ---- 像素操作（都在选区内，没有选区 = 整个图层）----
     def _editable(self, lid: int) -> Layer | None:
         l = self.layer(lid)
-        if l is None or l.canvas_sized:
+        if l is None or l.canvas_sized or l.locked_pixels:
             return None
         return l
 
@@ -935,7 +990,10 @@ class Document:
         a = np.full((l.h, l.w), opacity * rgba[3] / 255.0, np.float32) if sel is None else sel * opacity * rgba[3] / 255
         with self.edit(_t("填充")):
             l.kind = "pixel"
-            l.pixels = over(l.pixels, np.array(rgba[:3], np.float32) / 255.0, a)
+            new = over(l.pixels, np.array(rgba[:3], np.float32) / 255.0, a)
+            if l.locked_alpha:                                  # 锁定透明像素：只在已有的像素上填色
+                new[..., 3] = l.pixels[..., 3]
+            l.pixels = new
             l.touch()
 
     def layer_via_copy(self, cut: bool = False) -> Layer | None:
@@ -971,6 +1029,9 @@ class Document:
         l = self.layer(lid)
         if l is None:
             return
+        if l.locked_alpha and l.pixels is not None and new.shape == l.pixels.shape:   # 锁定透明像素：alpha 不变
+            new = new.copy()
+            new[..., 3] = convert(l.pixels, new.dtype)[..., 3]
         with self.edit(name):
             if l.mask is not None and new.shape[:2] != l.pixels.shape[:2] and x is not None:
                 l.mask = crop_canvas(l.mask, int(x) - l.x, int(y) - l.y, new.shape[1], new.shape[0], 255)
@@ -1013,9 +1074,13 @@ class Document:
                 return out
         else:
             fn = lambda rgba, scale: run(fid, rgba, scale, p)          # noqa: E731
+        from .filters import FILTERS
+        spec = FILTERS.get(fid)
         radius = max([float(p.get(k, 0) or 0) for k in ("radius", "distance")] + [0])
         m = int(math.ceil(radius * 2)) + 12 if fid in ("gaussian", "motion", "unsharp", "highpass", "denoise") else 0
-        step = 768
+        if spec is not None and spec.margin is not None:
+            m = int(math.ceil(spec.margin(p)))
+        step = H if spec is not None and spec.whole else 768
         if fid == "mosaic":
             c = max(1, int(round(float(p.get("cell", 16)))))
             step = max(c, (768 // c) * c)
@@ -1038,7 +1103,7 @@ class Document:
         if lid is not None and fid:
             from .filters import run
             p = dict(params or {})
-            key = (fid, tuple(sorted((k, float(v)) for k, v in p.items())))
+            key = (fid, tuple(sorted((k, v if isinstance(v, str) else float(v)) for k, v in p.items())))
             self.previews[lid] = (key, lambda rgba, scale: run(fid, rgba, scale, p))
         self.version += 1
         self.emit("pixels", None)
@@ -1074,7 +1139,13 @@ class Document:
         return out
 
     def _pixel_bounds(self, layers: list[Layer]):
-        boxes = [l.bounds(self) for l in layers if not l.canvas_sized and l.pixels is not None]
+        from .styles import pad
+        boxes = []
+        for l in layers:
+            if not l.canvas_sized and l.pixels is not None:
+                x, y, w, h = l.bounds(self)
+                p = pad(l.style) if l.style else 0
+                boxes.append((x - p, y - p, w + 2 * p, h + 2 * p))
         if not boxes:
             return 0, 0, self.width, self.height
         return (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[0] + b[2] for b in boxes),
@@ -1091,16 +1162,13 @@ class Document:
         lo = self.layers[i - 1]
         if lo.canvas_sized or lo.parent != up.parent:
             return
-        lx, ly, lw, lh = lo.bounds(self)
-        x0, y0, x1, y1 = lx, ly, lx + lw, ly + lh
-        if not up.canvas_sized and up.visible:
-            ux, uy, uw, uh = up.bounds(self)
-            x0, y0, x1, y1 = min(x0, ux), min(y0, uy), max(x1, ux + uw), max(y1, uy + uh)
+        x0, y0, x1, y1 = self._pixel_bounds([lo] + ([up] if up.visible else []))
         base = self._view(lo, opacity=1.0, blend="normal", visible=True, mask_enabled=True, clip=False, parent=None)
         top = self._view(up, clip=up.clip, parent=None)
         pix = self.compose_rect([base, top], x0, y0, x1 - x0, y1 - y0)
         with self.edit(_t("向下合并")):
             lo.kind, lo.pixels, lo.x, lo.y, lo.mask = "pixel", pix, x0, y0, None
+            lo.style, lo.fill = {}, 1.0                     # 样式已经合进像素
             lo.touch()
             lo.touch_mask()
             self.layers.pop(i)
@@ -1182,6 +1250,7 @@ class Document:
                 l.touch()
             self.width, self.height = w, h
             self.selection = None
+            self.channels = {k: _warp(v, M, w, h, inverse=True, fill=0) for k, v in self.channels.items()}
         self.emit("canvas")
 
     def _crop_straight(self, x: int, y: int, w: int, h: int) -> None:
@@ -1209,6 +1278,7 @@ class Document:
                 l.touch()
             self.width, self.height = w, h
             self.selection = None if self.selection is None else crop_canvas(self.selection, x, y, w, h, 0)
+            self.channels = {k: crop_canvas(v, x, y, w, h, 0) for k, v in self.channels.items()}
         self.emit("canvas")
 
     def rotate(self, k: int) -> None:
@@ -1242,6 +1312,7 @@ class Document:
                 self.width, self.height = H, W
             if self.selection is not None:
                 self.selection = np.ascontiguousarray(np.rot90(self.selection, -k))
+            self.channels = {n: np.ascontiguousarray(np.rot90(v, -k)) for n, v in self.channels.items()}
         self.emit("canvas")
 
     def flip(self, horizontal: bool = True) -> None:
@@ -1267,6 +1338,7 @@ class Document:
                 l.touch()
             if self.selection is not None:
                 self.selection = np.ascontiguousarray(np.flip(self.selection, ax))
+            self.channels = {n: np.ascontiguousarray(np.flip(v, ax)) for n, v in self.channels.items()}
 
     def resize_image(self, w: int, h: int) -> None:
         w, h = max(1, int(w)), max(1, int(h))
@@ -1293,6 +1365,7 @@ class Document:
             self.width, self.height = w, h
             if self.selection is not None:
                 self.selection = _resize(self.selection, w, h)
+            self.channels = {n: _resize(v, w, h) for n, v in self.channels.items()}
         self.emit("canvas")
 
     def transform_layer(self, lid: int, M) -> None:
@@ -1385,7 +1458,8 @@ class Document:
     def _sig(self, layers: list[Layer], level: int, E) -> tuple:
         return (level, E, id(self.selection)) + tuple(
             (l.id, l.version, l.mask_version, l.visible, l.opacity, l.blend, l.x, l.y, l.mask_enabled, l.clip,
-             l.parent, None if l.xform is None else _xf_key(l.xform), self.previews.get(l.id, (None,))[0])
+             l.parent, l.fill, _style_key(l.style), None if l.xform is None else _xf_key(l.xform),
+             self.previews.get(l.id, (None,))[0])
             for l in layers)
 
     def render(self, level: int = 0, rect=None, hot: int | None = None, layers: list[Layer] | None = None):
@@ -1485,6 +1559,10 @@ class Document:
             return self._apply_adjust(l, cb, level, E), ab, empty
         if l.kind == "group":
             return self._group(l, cb, ab, ctx, empty)
+        if l.style and l.xform is None and _style_key(l.style):
+            if self._apply_styled(l, cb, ab, level, E):
+                empty = False
+            return cb, ab, empty
         if self._apply_pixels(l, cb, ab, level, E, empty):
             empty = False
         return cb, ab, empty
@@ -1597,7 +1675,7 @@ class Document:
             warped = warp_any(src, l.xform, f, ex, ey, ew, eh, size)
             if not is_float:
                 warped = to_float(warped)
-            a = warped[..., 3] * l.opacity
+            a = warped[..., 3] * (l.opacity * l.fill)
             if mk is not None:
                 a *= warp_any(mk, l.xform, f, ex, ey, ew, eh, size).astype(np.float32) / 255.0
             if empty:
@@ -1616,7 +1694,7 @@ class Document:
             return False
         s = src[iy0 - ly:iy1 - ly, ix0 - lx:ix1 - lx]
         s = s if is_float else to_float(s)
-        a = s[..., 3] * np.float32(l.opacity)
+        a = s[..., 3] * np.float32(l.opacity * l.fill)
         if mk is not None:
             a *= np.multiply(mk[iy0 - ly:iy1 - ly, ix0 - lx:ix1 - lx], np.float32(1 / 255), dtype=np.float32)
         sl = (slice(iy0 - ey, iy1 - ey), slice(ix0 - ex, ix1 - ex))
@@ -1627,6 +1705,62 @@ class Document:
         co, ao = composite(cb[sl], ab[sl], s[..., :3], a, l.blend)
         cb[sl] = co
         ab[sl] = ao
+        return True
+
+    def _apply_styled(self, l: Layer, cb, ab, level: int, E) -> bool:
+        """带图层样式的图层：整层（加上效果的边距）在这个级别上算好各个效果平面并缓存，再按区域叠上去。"""
+        from . import styles
+        px, mk = l.proxy(level)
+        if px is None:
+            return False
+        f = 1 << level
+        pl = int(math.ceil(styles.pad(l.style) / f)) + 2
+        key = (l.id, l.version, l.mask_version, l.mask_enabled, level, _style_key(l.style),
+               self.previews.get(l.id, (None,))[0], id(self.selection) if l.id in self.previews else None)
+        cache = self.__dict__.setdefault("_style_cache", {})
+        hit = cache.get(l.id)
+        if hit is None or hit[0] != key:
+            src, is_float = self._layer_proxy_f(l, level)
+            s = src if is_float else to_float(src)
+            A = s[..., 3].copy()
+            if mk is not None:
+                A *= mk.astype(np.float32) / 255.0
+            Ap = np.pad(A, pl)
+            planes = styles.planes(Ap, l.style, 1 / f)
+            hit = (key, s[..., :3], A, planes)
+            cache[l.id] = hit
+            if len(cache) > 12:
+                cache.pop(next(iter(cache)))
+        _, rgb, A, planes = hit
+        lx, ly = int(round(l.x / f)), int(round(l.y / f))
+        ph, pw = A.shape
+        ex, ey, ew, eh = E
+        bx, by, bw, bh = lx - pl, ly - pl, pw + 2 * pl, ph + 2 * pl
+        ix0, iy0 = max(ex, bx), max(ey, by)
+        ix1, iy1 = min(ex + ew, bx + bw), min(ey + eh, by + bh)
+        if ix0 >= ix1 or iy0 >= iy1:
+            return False
+        sl = (slice(iy0 - ey, iy1 - ey), slice(ix0 - ex, ix1 - ex))
+        ps = (slice(iy0 - by, iy1 - by), slice(ix0 - bx, ix1 - bx))
+        op = np.float32(l.opacity)
+        c, a = cb[sl], ab[sl]
+        shape = (iy1 - iy0, ix1 - ix0, 3)
+
+        def put(col, alpha, mode):
+            nonlocal c, a
+            col = np.broadcast_to(np.asarray(col, np.float32), shape) if np.ndim(col) == 1 else col[ps]
+            c, a = composite(c, a, col, alpha[ps] * op, mode)
+        for where, col, alpha, mode in planes:
+            if where == "behind":
+                put(col, alpha, mode)
+        rgbp = np.pad(rgb, ((pl, pl), (pl, pl), (0, 0)))
+        Ap = np.pad(A, pl) * np.float32(l.fill)
+        c, a = composite(c, a, rgbp[ps], Ap[ps] * op, l.blend)
+        for where, col, alpha, mode in planes:
+            if where != "behind":
+                put(col, alpha, mode)
+        cb[sl] = c
+        ab[sl] = a
         return True
 
     def render_full(self, dtype=None) -> np.ndarray:
@@ -1672,6 +1806,13 @@ class Document:
         if not l.has_pixels:
             return self.flat_rgba()
         return to8(crop_canvas(l.pixels, -l.x, -l.y, self.width, self.height, 0))
+
+
+def _style_key(style) -> tuple:
+    if not style:
+        return ()
+    from .styles import key
+    return key(style)
 
 
 def _xf_key(xf) -> bytes:

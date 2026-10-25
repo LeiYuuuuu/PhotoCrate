@@ -167,7 +167,7 @@ def main(out: str, theme_name: str = "light") -> int:
         assert ew.tool.id == "burn"                           # 不按 Shift：还是这一格当前的工具
         ew.set_tool("blur")
         drag(cv, [(200 + i * 8, 120) for i in range(30)])
-        assert doc.history.names()[-1] == _t("模糊")
+        assert doc.history.names()[-1] == ("Blur" if os.environ.get("PHOTOCRATE_LANG") == "en" else "模糊")
         log("减淡、加深（Shift+O 轮换、工具栏一格多个工具）、模糊")
 
         # ---- 图层组 / 剪贴蒙版 ----

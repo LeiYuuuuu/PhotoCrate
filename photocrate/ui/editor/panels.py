@@ -37,7 +37,7 @@ class ParamSlider(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
         self.lab = QLabel(label)
-        self.lab.setFixedWidth(70)
+        self.lab.setFixedWidth(min(130, max(70, QFontMetrics(self.lab.font()).horizontalAdvance(label) + 6)))
         self.lab.setToolTip(_t("双击恢复默认值"))
         if color:
             self.lab.setStyleSheet(f"color: {color}; font-weight: 600;")
@@ -353,7 +353,10 @@ class AdjustEditor(QWidget):
     edited = Signal(str, str)           # (键, 中文名)：参数已改到 self.params 里
     preset = Signal(str)
 
-    SECTION_ORDER = ["基本", "颜色", "曲线", "HSL", "细节", "效果", "色阶", "分离色调"]
+    SECTION_ORDER = ["基本", "颜色", "曲线", "HSL", "细节", "效果", "色阶", "分离色调",
+                     "色彩平衡", "可选颜色", "通道混合器", "照片滤镜", "黑白", "渐变映射"]
+    EXTRA = {"色彩平衡": "color_balance", "可选颜色": "selective", "通道混合器": "mixer", "照片滤镜": "photo_filter",
+             "黑白": "bw", "渐变映射": "gradient_map"}
 
     def __init__(self, params: dict, focus: str | None = None, parent=None):
         super().__init__(parent)
@@ -374,14 +377,18 @@ class AdjustEditor(QWidget):
         lay.addLayout(r)
         self.sliders: dict[str, ParamSlider] = {}
         self.sections: dict[str, Section] = {}
+        self._syncers: list = []                      # 撤销 / 重做后把控件同步回参数
         groups = dict(adjust.GROUPS)
         for name in self.SECTION_ORDER:
-            sec = Section(_t(name), expanded=(name == focus) if focus else name in ("基本", "颜色"))
+            on = name in self.EXTRA and self.params[self.EXTRA[name]].get("on")
+            sec = Section(_t(name), expanded=(name == focus) if focus else (name in ("基本", "颜色") or bool(on)))
             self.sections[name] = sec
             if name == "曲线":
                 self._build_curve(sec)
             elif name == "HSL":
                 self._build_hsl(sec)
+            elif name in self.EXTRA:
+                self._build_extra(sec, self.EXTRA[name])
             else:
                 for key in groups[name]:
                     label, lo, hi, dec = adjust.SLIDERS[key]
@@ -472,6 +479,144 @@ class AdjustEditor(QWidget):
         self.cb_invert.blockSignals(False)
         self._show_curve()
         self._show_hsl()
+        for fn in self._syncers:
+            fn()
+
+    # ---- 黑白 / 通道混合器 / 可选颜色 / 照片滤镜 / 渐变映射 / 色彩平衡 ----
+    def _build_extra(self, sec: Section, adj: str) -> None:
+        from ...edit import coloradj as C
+        q = lambda: self.params[adj]                                       # noqa: E731
+        label = C.NAMES[adj]
+        on = QCheckBox(_t("启用"))
+        sec.body.addWidget(on)
+
+        def sync_on():
+            on.blockSignals(True)
+            on.setChecked(bool(q().get("on")))
+            on.blockSignals(False)
+        on.toggled.connect(lambda v: self._set_sub(adj, "on", bool(v), label, sync_on))
+        self._syncers.append(sync_on)
+        sync_on()
+
+        def slider(text, lo, hi, get, put, color=None):
+            s = ParamSlider(text, lo, hi, 0, color=color)
+            s.changed.connect(lambda v: (put(float(v)), self._touch(adj, label, sync_on)))
+            self._syncers.append(lambda: s.set_value(get()))
+            s.set_value(get())
+            sec.body.addWidget(s)
+            return s
+
+        def combo(items, cur_get, on_change):
+            cb = QComboBox()
+            for k, t in items:
+                cb.addItem(t, k)
+            cb.currentIndexChanged.connect(lambda _: on_change(cb.currentData()))
+            sec.body.addWidget(cb)
+            return cb
+
+        def check(text, key):
+            c = QCheckBox(text)
+            c.toggled.connect(lambda v: self._set_sub(adj, key, bool(v), label, sync_on))
+
+            def sync():
+                c.blockSignals(True)
+                c.setChecked(bool(q().get(key)))
+                c.blockSignals(False)
+            self._syncers.append(sync)
+            sync()
+            sec.body.addWidget(c)
+
+        if adj == "bw":
+            for k, t, _ in C.BW_KEYS:
+                slider(t, -200, 300, lambda k=k: q()[k], lambda v, k=k: q().__setitem__(k, v))
+            check(_t("色调"), "tint")
+            slider(_t("色相"), 0, 360, lambda: q()["tint_hue"], lambda v: q().__setitem__("tint_hue", v))
+            slider(_t("饱和度"), 0, 100, lambda: q()["tint_sat"], lambda v: q().__setitem__("tint_sat", v))
+        elif adj == "mixer":
+            st = {"ch": "r"}
+            sl = []
+            names = [_t("红色"), _t("绿色"), _t("蓝色"), _t("常数")]
+            cb = combo([("r", _t("输出：红")), ("g", _t("输出：绿")), ("b", _t("输出：蓝")), ("gray", _t("输出：灰（单色）"))],
+                       None, lambda v: (st.__setitem__("ch", v), [f() for f in self._syncers]))
+            for i, n in enumerate(names):
+                sl.append(slider(n, -200, 200, lambda i=i: q()[st["ch"]][i],
+                                 lambda v, i=i: q()[st["ch"]].__setitem__(i, v)))
+            check(_t("单色（输出灰度）"), "mono")
+            cb.setCurrentIndex(0)
+        elif adj == "selective":
+            st = {"r": "reds"}
+            combo(C.SEL_RANGES, None, lambda v: (st.__setitem__("r", v), [f() for f in self._syncers]))
+            for i, n in enumerate((_t("青色"), _t("洋红"), _t("黄色"), _t("黑色"))):
+                slider(n, -100, 100, lambda i=i: q()[st["r"]][i], lambda v, i=i: q()[st["r"]].__setitem__(i, v))
+            rel = combo([(True, _t("相对")), (False, _t("绝对"))], None,
+                        lambda v: self._set_sub(adj, "relative", bool(v), label, sync_on))
+            self._syncers.append(lambda: (rel.blockSignals(True), rel.setCurrentIndex(0 if q().get("relative", True)
+                                                                                        else 1), rel.blockSignals(False)))
+        elif adj == "photo_filter":
+            r = QHBoxLayout()
+            cb = QComboBox()
+            for c, t in C.PHOTO_FILTERS:
+                cb.addItem(t, c)
+            btn = ColorButton(q().get("color", "#EC8A00"))
+            cb.currentIndexChanged.connect(lambda _: (btn.set_color(cb.currentData()),
+                                                      self._set_sub(adj, "color", cb.currentData(), label, sync_on)))
+            btn.changed.connect(lambda c: self._set_sub(adj, "color", c.name().upper(), label, sync_on))
+            r.addWidget(cb, 1)
+            r.addWidget(btn)
+            sec.body.addLayout(r)
+            self._syncers.append(lambda: btn.set_color(q().get("color", "#EC8A00")))
+            slider(_t("浓度"), 1, 100, lambda: q()["density"], lambda v: q().__setitem__("density", v))
+            check(_t("保留明度"), "preserve")
+        elif adj == "gradient_map":
+            cb = QComboBox()
+            cb.addItem(_t("选择渐变…"), None)
+            for k, t, _ in C.GRADIENTS:
+                cb.addItem(t, k)
+            grads = {k: s for k, _, s in C.GRADIENTS}
+            cb.activated.connect(lambda i: cb.itemData(i) and self._set_sub(
+                adj, "stops", [list(s) for s in grads[cb.itemData(i)]], label, sync_on))
+            sec.body.addWidget(cb)
+            r = QHBoxLayout()
+            r.addWidget(QLabel(_t("暗部")))
+            b0 = ColorButton(q()["stops"][0][1])
+            r.addWidget(b0)
+            r.addWidget(QLabel(_t("亮部")))
+            b1 = ColorButton(q()["stops"][-1][1])
+            r.addWidget(b1)
+            r.addStretch(1)
+            sec.body.addLayout(r)
+
+            def ends(i, c):
+                stops = [list(s) for s in q()["stops"]]
+                stops[0 if i == 0 else -1][1] = c.name().upper()
+                self._set_sub(adj, "stops", stops, label, sync_on)
+            b0.changed.connect(lambda c: ends(0, c))
+            b1.changed.connect(lambda c: ends(1, c))
+            self._syncers.append(lambda: (b0.set_color(q()["stops"][0][1]), b1.set_color(q()["stops"][-1][1])))
+            check(_t("反向"), "reverse")
+        elif adj == "color_balance":
+            st = {"t": "midtones"}
+            cbt = combo(C.TONES, None, lambda v: (st.__setitem__("t", v), [f() for f in self._syncers]))
+            for i, (a, b, col) in enumerate(((_t("青"), _t("红"), "#E5484D"), (_t("洋红"), _t("绿"), "#3FA34D"),
+                                              (_t("黄"), _t("蓝"), "#3A6FE0"))):
+                slider(f"{a} ↔ {b}", -100, 100, lambda i=i: q()[st["t"]][i],
+                       lambda v, i=i: q()[st["t"]].__setitem__(i, v), col)
+            check(_t("保持明度"), "preserve")
+            cbt.setCurrentIndex(1)
+
+    def _touch(self, adj: str, label: str, sync_on) -> None:
+        """改了任何一个控件：自动打开这一项。"""
+        if not self.params[adj].get("on"):
+            self.params[adj]["on"] = True
+            sync_on()
+        self.edited.emit(adj, label)
+
+    def _set_sub(self, adj: str, key: str, v, label: str, sync_on) -> None:
+        self.params[adj][key] = v
+        if key != "on":
+            self.params[adj]["on"] = True
+            sync_on()
+        self.edited.emit(adj, label)
 
     def set_hist(self, h: np.ndarray | None) -> None:
         self.curve.hist = h
@@ -853,6 +998,10 @@ class LayerRow(QWidget):
             parts.append(_t("16 位"))
         if layer.clip:
             parts.append(_t("剪贴"))
+        if layer.style:
+            parts.append("fx")
+        if layer.lock_all or layer.lock_pixels or layer.lock_pos or layer.lock_alpha:
+            parts.append(_t("已锁定"))
         if layer.blend not in ("normal", "pass_through"):
             parts.append(BLEND_NAMES.get(layer.blend, layer.blend))
         if layer.opacity < 0.999:
@@ -908,6 +1057,41 @@ class LayersPanel(QWidget):
         self.op_slider.setRange(0, 100)
         self.op_slider.valueChanged.connect(self.opacity.setValue)
         lay.addWidget(self.op_slider)
+        r = QHBoxLayout()                                  # 锁定 + 填充 + 图层样式
+        r.setSpacing(3)
+        lk = QLabel()
+        lk.setPixmap(icon_pixmap("lock", QColor(theme.current().ink2), 14))
+        lk.setToolTip(_t("锁定"))
+        r.addWidget(lk)
+        self.locks: dict[str, QToolButton] = {}
+        for key, text, tip in (("lock_alpha", "▦", _t("锁定透明像素：只能改有像素的地方的颜色")),
+                               ("lock_pixels", "✎", _t("锁定图像像素：不能画、不能用滤镜")),
+                               ("lock_pos", "✥", _t("锁定位置：不能移动、变换")),
+                               ("lock_all", _t("全"), _t("全部锁定"))):
+            b = QToolButton()
+            b.setText(text)
+            b.setCheckable(True)
+            b.setToolTip(tip)
+            b.setFixedSize(26, 24)
+            b.toggled.connect(lambda on, k=key: self._lock(k, on))
+            self.locks[key] = b
+            r.addWidget(b)
+        r.addStretch(1)
+        r.addWidget(QLabel(_t("填充")))
+        self.fill = QSpinBox()
+        self.fill.setRange(0, 100)
+        self.fill.setSuffix("%")
+        self.fill.setFixedWidth(64)
+        self.fill.setToolTip(_t("填充不透明度：只影响图层自己的像素，不影响投影、描边等图层样式"))
+        self.fill.valueChanged.connect(self._fill)
+        r.addWidget(self.fill)
+        self.fx = QToolButton()
+        self.fx.setIcon(QIcon(icon_pixmap("fx", QColor(theme.current().ink2), 16)))
+        self.fx.setToolTip(_t("图层样式（投影、描边、发光、叠加、斜面和浮雕）"))
+        self.fx.setFixedSize(28, 24)
+        self.fx.clicked.connect(win.layer_style)
+        r.addWidget(self.fx)
+        lay.addLayout(r)
         self.list = QListWidget()
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
@@ -981,7 +1165,32 @@ class LayersPanel(QWidget):
                 w.blockSignals(True)
                 w.setValue(int(round(l.opacity * 100)))
                 w.blockSignals(False)
+            self.fill.blockSignals(True)
+            self.fill.setValue(int(round(l.fill * 100)))
+            self.fill.setEnabled(l.has_pixels)
+            self.fill.blockSignals(False)
+            for k, b in self.locks.items():
+                b.blockSignals(True)
+                b.setChecked(bool(getattr(l, k)))
+                b.setEnabled(not l.canvas_sized)
+                b.blockSignals(False)
+            self.fx.setEnabled(l.has_pixels)
         self._updating = False
+
+    def _lock(self, key: str, on: bool) -> None:
+        if self._updating:
+            return
+        doc = self.win.doc
+        if doc.active is not None:
+            doc.set_props(doc.active_id, name=_t("锁定图层") if on else _t("解锁图层"), **{key: on})
+
+    def _fill(self, v: int) -> None:
+        if self._updating:
+            return
+        doc = self.win.doc
+        if doc.active is not None:
+            self.win.mark_interactive()
+            doc.set_props(doc.active_id, key=f"fill{doc.active_id}", name=_t("填充不透明度"), fill=v / 100)
 
     def update_marks(self) -> None:
         doc = self.win.doc

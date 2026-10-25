@@ -4,7 +4,7 @@
 
 A local photo-organizing workstation for Windows. Choose how you want your photos sorted, preview the resulting folder tree, and only then are the files **actually moved** into place. Every operation is journaled and can be undone with one click.
 
-> Current version **v1.8.0**: the editor gains **Camera Raw** developing, **16-bit** editing, **layer groups and clipping masks**, **perspective / warp** transforms and the **dodge / burn / sponge / blur / sharpen / smudge** tools. v1.7.0 added **merge exposures (HDR)**. v1.6.0 added the full **English** interface and an English [editor tutorial](docs/editor-tutorial.en.md). Detailed notes for every release are in **[CHANGELOG.md](CHANGELOG.md)** (in Chinese) and on the [Releases](https://github.com/LeiYuuuuu/PhotoCrate/releases) page.
+> Current version **v1.9.0**: the editor adds **Select and Mask**, Color Range, Quick Mask, six new adjustments, **Liquify**, **Lens Correction**, Patch / Red Eye and **layer styles**. v1.8.0 brought **Camera Raw** developing, **16-bit** editing, **layer groups and clipping masks**, **perspective / warp** transforms and the **dodge / burn / sponge / blur / sharpen / smudge** tools. v1.7.0 added **merge exposures (HDR)**. v1.6.0 added the full **English** interface and an English [editor tutorial](docs/editor-tutorial.en.md). Detailed notes for every release are in **[CHANGELOG.md](CHANGELOG.md)** (in Chinese) and on the [Releases](https://github.com/LeiYuuuuu/PhotoCrate/releases) page.
 
 ## Language
 
@@ -40,7 +40,7 @@ A local photo-organizing workstation for Windows. Choose how you want your photo
   - Filters with live preview: Gaussian and motion blur, unsharp mask, high pass and more.
   - Unlimited undo with a History panel.
   - **Merge exposures (HDR):** combine 2–9 shots of the same scene at different exposures into one photo with detail in highlights and shadows. Handheld shots are aligned to about 0.1 pixel and the reference frame is never resampled, so sharpness is kept; moving people, leaves or water are deghosted automatically, and any leftovers can be selected and patched from one of the source photos.
-  - **Pro editing:** Camera Raw developing (LibRaw demosaicing, white-balance eyedropper, highlight reconstruction, noise reduction, chromatic aberration); **16-bit** editing with 16-bit PNG / TIFF export; **layer groups** and **clipping masks**; skew / distort / **perspective** / **warp** in Free Transform; dodge, burn, sponge, blur, sharpen and smudge tools.
+  - **Pro editing:** Camera Raw developing (LibRaw demosaicing, white-balance eyedropper, highlight reconstruction, noise reduction, chromatic aberration); **16-bit** editing with 16-bit PNG / TIFF export; **layer groups** and **clipping masks**; skew / distort / **perspective** / **warp** in Free Transform; dodge, burn, sponge, blur, sharpen and smudge tools; **Select and Mask** (hair cut-outs), Color Range, Quick Mask and saved selections; Black & White, Channel Mixer, Selective Color, Photo Filter, Gradient Map and Color Balance; **Liquify**, **Lens Correction**, surface / lens blur and distort filters; Patch and Red Eye; **layer styles** (shadow, stroke, glow, overlays, bevel & emboss), layer locks and fill opacity.
   - **Originals are read-only:** export writes a new file (EXIF kept), or you can save a `.pcedit` project to continue later.
 - **Also:** statistics overview (click any bar to see its photos), blur detection, History with undo, crash recovery, plugins, **F12 screenshot**, and window position memory across multiple monitors.
 - **Interface:** industrial sci-fi terminal style with two themes, light "Endfield" and dark "Ark". Short UI animations can be switched off in Settings → Appearance.
@@ -57,6 +57,8 @@ A local photo-organizing workstation for Windows. Choose how you want your photo
 ![Merge exposures (HDR)](docs/screenshots/en/editor_hdr.png)
 ![Camera Raw](docs/screenshots/en/editor_raw.png)
 ![Warp grid, groups and clipping masks](docs/screenshots/en/editor_warp.png)
+![Select and Mask](docs/screenshots/en/editor_refine.png)
+![Layer styles, locks and fill](docs/screenshots/en/editor_style.png)
 
 ---
 
@@ -124,15 +126,18 @@ The card is only read, never modified. Anything imported before is skipped autom
 | To… | Do this |
 |---|---|
 | Adjust color (editable later) | **Image → Adjust**, or **◐ Adjust** in the Layers panel: this creates an adjustment layer. Drag exposure, curves, HSL… in Properties on the right. **Apply preset…** at the top applies a look such as Film, Japanese airy or Cinematic. Adjustment layers never change pixels: edit, hide or fade them at any time. |
-| Adjust only part of the photo | Make a selection first (Marquee M, Lasso L, Magic Wand W, or Object Selection Q around the subject), then create the adjustment layer; the selection becomes its mask. Or paint on the mask with a brush or gradient (white shows, black hides). |
+| Adjust only part of the photo | Make a selection first (Marquee M, Lasso L, Magic Wand / Object Selection W around the subject, Color Range, or Quick Mask Q), then create the adjustment layer; the selection becomes its mask. Or paint on the mask with a brush or gradient (white shows, black hides). |
 | Remove spots, dust, wires | Paint over them with the Spot Healing Brush J. For larger objects, select them and use **Edit → Content-Aware Fill** (Shift+Backspace). The Clone Stamp S (Alt+click to sample) suits regular textures. |
-| Cut out / composite | Object Selection Q around the subject → Ctrl+J copies it to a new layer. Add another image with **File → Place Image…**, or paste with Ctrl+V. Then use Ctrl+T to scale and rotate, and change the blend mode. |
+| Cut out / composite | Object Selection W around the subject (refine hair with **Select → Select and Mask**) → Ctrl+J copies it to a new layer. Add another image with **File → Place Image…**, or paste with Ctrl+V. Then use Ctrl+T to scale and rotate, and change the blend mode. |
 | Crop and straighten | Crop C: pick a ratio and drag the box. Hold Ctrl and drag along the horizon to straighten automatically. Press Enter to apply. |
 | Add text | Text T: click to place text. Font, size, color, stroke and shadow can all be changed later. |
 | Merge exposures (HDR) | Select a bracket on the Culling page → **Merge HDR…** (or right-click a thumbnail; in the editor, **File → Merge Exposures (HDR)…** picks files from disk). The middle exposure becomes the reference (never resampled); the others are aligned and deghosted, then blended with Mertens exposure fusion. The result opens in the editor with the sources kept as hidden layers. Ghost left? Select it → **Image → Fix Ghosting…**, click the preview of the cleanest source, and it's patched on a new masked layer with matched brightness. |
 | RAW and 16-bit | RAW-only photos open the **Camera Raw** dialog first: white balance (with an eyedropper), exposure, highlight reconstruction, noise reduction; the result is 16-bit. For photos that also have a JPG, use **File → Re-develop RAW…**. **Image → Mode** switches between 8 and 16 bits; at 16 bits strong grading doesn't band, and PNG / TIFF exports can stay 16-bit. |
 | Groups, clipping masks | Ctrl+G groups layers (collapsible; move or mask the whole group; Pass Through or isolated blending), Ctrl+Shift+G ungroups. Ctrl+Alt+G makes a clipping mask, so an adjustment layer affects only the layer below. |
 | Perspective, warp | After Ctrl+T pick a **Mode** in the options bar: Skew / Distort / Perspective / Warp (4×4 grid). In Free Transform, Ctrl+drag a corner distorts and Ctrl+drag a side skews. |
+| Recolor, black & white | **Image → Adjust**: Black & White, Color Balance, Selective Color, Photo Filter, Channel Mixer, Gradient Map (all adjustment layers). |
+| Reshape, fix the lens | **Filter → Liquify** (forward warp, bloat, pucker…) and **Filter → Lens Correction** (distortion, fringing, vignette); Patch / Red Eye share the healing slot (Shift+J). |
+| Shadows, strokes, glows | **fx** in the Layers panel: layer styles (editable any time); lock transparency / pixels / position; **Fill** fades the layer but not its styles. |
 | Local dodge, burn, skin smoothing | Dodge / Burn / Sponge (O, Shift+O cycles; can target shadows / midtones / highlights); Blur / Sharpen / Smudge (R, Shift+R cycles). |
 | Save | **Export Image…** (Ctrl+Shift+S) flattens to JPG / PNG / TIFF / WebP, saved by default next to the original as `name_edited.jpg`. Capture time and other EXIF are kept (GPS can be removed), and exporting into a library folder triggers a rescan. **Save Project** (Ctrl+S) keeps all layers as `<name>.pcedit`; next time you edit that photo you're asked whether to continue it. |
 
@@ -202,7 +207,7 @@ Exports only write new files; originals are never touched.
 - Interface text: Chinese source strings are wrapped in `t()` (`photocrate/i18n.py`); English lives in `photocrate/locale_en.py` (`EN` table, keyed by the Chinese text, with `{0}` placeholders). A missing entry simply shows the Chinese text.
 - Example plugins: `plugins_examples\` (a file-size partition with a custom page, and an AI scene-classifier skeleton).
 - Tests: `.venv\Scripts\python -m pytest tests -q` (`tests\test_i18n.py` covers the English table and English folder / template output). XMP write-back cases need the environment variable `PHOTOCRATE_TEST_EXIFTOOL` pointing to `exiftool.exe`.
-- UI automation: `tests\ui_timeplace.py`, `tests\ui_culling.py`, `tests\ui_tier3.py`, `tests\ui_workflow.py`, `tests\ui_repartition.py` and `tests\ui_editor.py` (the editor; its core unit tests are in `tests\test_editor.py`), `tests\ui_editor_pro.py` (Camera Raw, 16-bit, groups, perspective / warp, retouching tools; core tests in `tests\test_editor_pro.py`), `tests\ui_merge.py` (merge exposures; engine tests in `tests\test_hdr.py`; run with `PHOTOCRATE_LANG=en` to exercise the English UI). Face cases need `PHOTOCRATE_TEST_MODELS` pointing to a folder with the YuNet / SFace models. The real-model "not a human face" case also needs `PHOTOCRATE_TEST_CLIP` pointing to a folder with the Chinese CLIP model.
+- UI automation: `tests\ui_timeplace.py`, `tests\ui_culling.py`, `tests\ui_tier3.py`, `tests\ui_workflow.py`, `tests\ui_repartition.py` and `tests\ui_editor.py` (the editor; its core unit tests are in `tests\test_editor.py`), `tests\ui_editor_pro.py` (Camera Raw, 16-bit, groups, perspective / warp, retouching tools; core tests in `tests\test_editor_pro.py`), `tests\ui_editor_pro2.py` (Select and Mask, new adjustments, Liquify, Patch, layer styles; core tests in `tests\test_editor_pro2.py`), `tests\ui_merge.py` (merge exposures; engine tests in `tests\test_hdr.py`; run with `PHOTOCRATE_LANG=en` to exercise the English UI). Face cases need `PHOTOCRATE_TEST_MODELS` pointing to a folder with the YuNet / SFace models. The real-model "not a human face" case also needs `PHOTOCRATE_TEST_CLIP` pointing to a folder with the Chinese CLIP model.
 - Generate test photos: `.venv\Scripts\python tests\make_samples.py D:\TestPhotos`
 
 ## 7. Data & third-party licenses

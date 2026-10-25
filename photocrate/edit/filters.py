@@ -19,6 +19,9 @@ class FilterSpec:
     fn: Callable
     params: list[tuple] = field(default_factory=list)      # (键, 名称, 最小, 最大, 默认, 小数位, 单位)
     checks: list[tuple] = field(default_factory=list)      # (键, 名称, 默认)
+    whole: bool = False                                    # 按整个图层的几何算（扭曲类）：原尺寸应用时不分条
+    margin: Callable | None = None                         # 分条应用时每条上下多算几像素：fn(参数) → 像素
+    choices: list[tuple] = field(default_factory=list)     # (键, 名称, [(值, 文字)], 默认)
 
 
 def _premul(rgba):
@@ -170,10 +173,19 @@ FILTERS: dict[str, FilterSpec] = {
 }
 
 
+def _register_more() -> None:
+    from .filters2 import SPECS
+    FILTERS.update(SPECS)
+
+
+_register_more()
+
+
 def defaults(fid: str) -> dict:
     spec = FILTERS[fid]
     d = {k: v for k, _, _, _, v, _, _ in spec.params}
     d.update({k: v for k, _, v in spec.checks})
+    d.update({k: v for k, _, _, v in spec.choices})
     return d
 
 

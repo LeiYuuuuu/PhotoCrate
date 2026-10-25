@@ -20,6 +20,7 @@ from ...edit import adjust
 from ...edit import io as eio
 from ...edit.document import Layer, to8
 from ...edit.filters import FILTERS
+from ...edit.paint import BLUR as P_BLUR
 from .. import theme
 from ..dialogs import _Base, choose, info
 from ..theme import font
@@ -34,7 +35,10 @@ from ...i18n import t as _t
 ADJUSTMENTS = [
     ("亮度 / 对比度", "基本", {}), ("曝光", "基本", {}), ("色阶", "色阶", {}), ("曲线", "曲线", {}),
     ("自然饱和度", "颜色", {}), ("色相 / 饱和度（HSL）", "HSL", {}), ("色温 / 色调", "颜色", {}),
-    ("黑白", "HSL", {"saturation": -100}), ("反相", "效果", {"invert": True}), ("分离色调", "分离色调", {}),
+    ("色彩平衡", "色彩平衡", {"color_balance": {"on": True}}), ("黑白", "黑白", {"bw": {"on": True}}),
+    ("照片滤镜", "照片滤镜", {"photo_filter": {"on": True}}), ("通道混合器", "通道混合器", {"mixer": {"on": True}}),
+    ("可选颜色", "可选颜色", {"selective": {"on": True}}), ("渐变映射", "渐变映射", {"gradient_map": {"on": True}}),
+    ("反相", "效果", {"invert": True}), ("分离色调", "分离色调", {}),
     ("清晰度 / 锐化 / 降噪", "细节", {}), ("暗角 / 颗粒", "效果", {}),
 ]
 
@@ -354,6 +358,16 @@ class FilterDialog(_Base):
             s.set_value(self.params[key])
             s.changed.connect(lambda v, k=key: self._set(k, v))
             self.body.addWidget(s)
+        for key, label, items, dv in spec.choices:
+            r = QHBoxLayout()
+            r.addWidget(QLabel(label))
+            cb = QComboBox()
+            for v, t in items:
+                cb.addItem(t, v)
+            cb.setCurrentIndex(max(0, cb.findData(self.params[key])))
+            cb.currentIndexChanged.connect(lambda _i, k=key, c=cb: self._set(k, c.currentData()))
+            r.addWidget(cb, 1)
+            self.body.addLayout(r)
         for key, label, dv in spec.checks:
             cb = QCheckBox(label)
             cb.setChecked(bool(self.params[key]))
@@ -824,6 +838,9 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._act(m, _t("取消图层编组"), lambda: d().ungroup(), "Ctrl+Shift+G")
         self._act(m, _t("创建 / 释放剪贴蒙版"), lambda: d().toggle_clip(), "Ctrl+Alt+G")
         m.addSeparator()
+        self._act(m, _t("图层样式…"), self.layer_style)
+        self._act(m, _t("清除图层样式"), self.clear_style)
+        m.addSeparator()
         self._act(m, _t("添加图层蒙版"), self.add_mask)
         self._act(m, _t("删除图层蒙版"), lambda: d().delete_mask(d().active_id))
         self._act(m, _t("应用图层蒙版"), lambda: d().apply_mask(d().active_id))
@@ -844,6 +861,13 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._act(m, _t("反选"), lambda: d().invert_selection(), "Ctrl+Shift+I")
         m.addSeparator()
         self._act(m, _t("选择主体（自动）"), self.select_subject)
+        self._act(m, _t("色彩范围…"), self.color_range)
+        self._act(m, _t("选择并遮住…"), self.select_and_mask, "Ctrl+Alt+R")
+        m.addSeparator()
+        self.a_qmask = self._act(m, _t("以快速蒙版模式编辑"), self.toggle_quick_mask, "Q")
+        self.a_qmask.setCheckable(True)
+        self._act(m, _t("存储选区…"), self.save_selection)
+        self._act(m, _t("载入选区…"), self.load_selection)
         m.addSeparator()
         self._act(m, _t("羽化…"), lambda: self._sel_number(_t("羽化选区"), _t("羽化半径"), 8, d().feather_selection), "Shift+F6")
         self._act(m, _t("扩展…"), lambda: self._sel_number(_t("扩展选区"), _t("扩展量"), 4, d().grow_selection))
@@ -853,9 +877,16 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self.a_last_filter = self._act(m, _t("上次滤镜"), self.repeat_filter, "Ctrl+F")
         self.a_last_filter.setEnabled(False)
         m.addSeparator()
-        for fid in ("gaussian", "motion", "unsharp", "denoise", "highpass", "mosaic", "noise", "posterize",
-                    "threshold"):
-            self._act(m, FILTERS[fid].name + "…", lambda f=fid: self.run_filter(f))
+        self._act(m, _t("镜头校正…"), lambda: self.run_filter("lens"), "Ctrl+Shift+R")
+        self._act(m, _t("液化…"), self.liquify, "Ctrl+Shift+X")
+        m.addSeparator()
+        for title, fids in ((P_BLUR, ("gaussian", "motion", "surface", "lensblur")),
+                            (_t("扭曲"), ("twirl", "wave", "ripple", "spherize", "pinch", "polar")),
+                            (_t("锐化"), ("unsharp",)), (_t("杂色"), ("denoise", "noise")),
+                            (_t("其他"), ("highpass", "mosaic", "posterize", "threshold"))):
+            sub = m.addMenu(title)
+            for fid in fids:
+                self._act(sub, FILTERS[fid].name + "…", lambda f=fid: self.run_filter(f))
 
         m = mb.addMenu(_t("视图"))
         self._act(m, _t("放大"), lambda: self.canvas.zoom_step(True), ["Ctrl+=", "Ctrl++"])
@@ -1236,10 +1267,12 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         else:
             d.restore(before)
 
-    def _need_pixels(self, what: str):
+    def _need_pixels(self, what: str, write: bool = True):
         l = self.doc.active
         if l is None or l.canvas_sized:
             self.status_msg(_t('{0}需要一个像素图层：在图层面板里选中它', what))
+            return None
+        if write and self._locked(l, "pixels"):
             return None
         return l
 
@@ -1248,7 +1281,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         if l is None:
             return
         spec = FILTERS[fid]
-        if ask and (spec.params or spec.checks):
+        if ask and (spec.params or spec.checks or spec.choices):
             dlg = FilterDialog(self, fid, params)
             if dlg.exec() != FilterDialog.DialogCode.Accepted:
                 return
@@ -1259,6 +1292,132 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self.a_last_filter.setText(_t('上次滤镜：{0}', spec.name))
         self.a_last_filter.setEnabled(True)
         self.status_msg(_t('已应用：{0}', spec.name))
+
+    # ---- 选区进阶 ----
+    def color_range(self) -> None:
+        from .dialogs2 import ColorRangeDialog
+        self._leave_quick_mask()
+        dlg = ColorRangeDialog(self)
+        if dlg.exec() != ColorRangeDialog.DialogCode.Accepted:
+            return
+        with _Busy(self, _t("正在计算色彩范围…")):
+            m = dlg.full_mask()
+        if not m.any():
+            self.status_msg(_t("没有选中任何像素：把颜色容差调大一点，或换一个取样点"))
+            return
+        self.doc.set_selection(m, _t("色彩范围"))
+
+    def select_and_mask(self) -> None:
+        from .dialogs2 import RefineDialog
+        d = self.doc
+        if d.selection is None:
+            self.status_msg(_t("先做一个大致的选区（选择主体、对象选择、套索…），再「选择并遮住」精修边缘"))
+            return
+        self._leave_quick_mask()
+        dlg = RefineDialog(self)
+        if dlg.exec() != RefineDialog.DialogCode.Accepted:
+            return
+        with _Busy(self, _t("正在精修边缘…")):
+            m = dlg.full_mask()
+        out = dlg.out.currentData()
+        if out == "selection":
+            d.set_selection(m, _t("选择并遮住"))
+            return
+        l = d.active
+        if out == "new_layer" and l is not None and l.has_pixels:
+            nl = d.duplicate_layer(l.id)
+            l = nl
+        if l is None or l.kind == "text":
+            self.status_msg(_t("当前图层不能加蒙版：选中一个像素图层或组"))
+            return
+        x, y, w, h = l.bounds(d)
+        from ...edit.document import crop_canvas
+        with d.edit(_t("选择并遮住")):
+            l.mask = crop_canvas(m, x, y, w, h, 0)
+            l.mask_enabled = True
+            l.touch_mask()
+            d.selection = None
+        d.emit("selection")
+
+    def save_selection(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        d = self.doc
+        if d.selection is None:
+            self.status_msg(_t("先做一个选区，再存储"))
+            return
+        name, ok = QInputDialog.getText(self, _t("存储选区"), _t("通道名称："),
+                                        text=_t('Alpha {0}', len(d.channels) + 1))
+        if ok:
+            n = d.save_selection(name)
+            self.status_msg(_t("已存储为通道「{0}」：「选择 → 载入选区」随时取回；保存工程时一起保存", n))
+
+    def load_selection(self) -> None:
+        from .dialogs2 import LoadSelectionDialog
+        if not self.doc.channels:
+            self.status_msg(_t("还没有存储过选区（「选择 → 存储选区」）"))
+            return
+        dlg = LoadSelectionDialog(self)
+        if dlg.exec() == LoadSelectionDialog.DialogCode.Accepted and dlg.ch.currentData():
+            self.doc.load_selection(dlg.ch.currentData(), dlg.mode.currentData(), dlg.invert.isChecked())
+
+    def toggle_quick_mask(self) -> None:
+        """快速蒙版（Q）：选区变成一层半透明的红色，用画笔 / 橡皮擦 / 渐变直接涂选区（黑 = 不选、白 = 选）。"""
+        d = self.doc
+        if self._tool_busy():
+            self.a_qmask.setChecked(d.quick_mask)
+            return
+        d.quick_mask = not d.quick_mask
+        self.a_qmask.setChecked(d.quick_mask)
+        if d.quick_mask:
+            self.reset_colors()
+            if self.tool is None or self.tool.id not in ("brush", "eraser", "gradient"):
+                self.set_tool("brush")
+            self.status_msg(_t("快速蒙版：红色 = 没选中。用画笔涂白色加选、涂黑色减选（X 交换），再按 Q 回到选区"))
+        else:
+            self.status_msg(_t("已退出快速蒙版"))
+        self.canvas.selection_changed()
+
+    def _leave_quick_mask(self) -> None:
+        if self.doc.quick_mask:
+            self.toggle_quick_mask()
+
+    def layer_style(self) -> None:
+        from .dialogs2 import LayerStyleDialog
+        l = self.doc.active
+        if l is None or not l.has_pixels:
+            self.status_msg(_t("图层样式要用在像素或文字图层上"))
+            return
+        dlg = LayerStyleDialog(self, l)
+        if dlg.exec() == LayerStyleDialog.DialogCode.Accepted:
+            self.doc.set_props(l.id, name=_t("图层样式"), style=dlg.result_style())
+
+    def clear_style(self) -> None:
+        l = self.doc.active
+        if l is not None and l.style:
+            self.doc.set_props(l.id, name=_t("清除图层样式"), style={})
+
+    def liquify(self) -> None:
+        from .liquify_dlg import LiquifyDialog
+        l = self._need_pixels(_t("液化"))
+        if l is None or not l.has_pixels:
+            return
+        if self._locked(l, "pixels"):
+            return
+        self._leave_transform()
+        dlg = LiquifyDialog(self, l.pixels)
+        if dlg.exec() != LiquifyDialog.DialogCode.Accepted or dlg.result is None:
+            return
+        self.doc.replace_pixels(l.id, dlg.result, _t("液化"))
+        self.status_msg(_t("已应用液化"))
+
+    def _locked(self, l, what: str) -> bool:
+        """图层锁定时提示并返回 True。what：pixels（锁定像素）/ position（锁定位置）。"""
+        if l is None:
+            return False
+        if (what == "pixels" and (l.lock_pixels or l.lock_all)) or (what == "position" and (l.lock_pos or l.lock_all)):
+            self.status_msg(_t("图层「{0}」已锁定：在图层面板上方点锁的按钮解锁", l.name))
+            return True
+        return False
 
     def repeat_filter(self) -> None:
         if self._last_filter:
@@ -1350,7 +1509,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
             src = d.flat_rgba()
             ox = oy = 0
         else:
-            l = self._need_pixels(_t("拷贝"))
+            l = self._need_pixels(_t("拷贝"), write=not cut)
             if l is None:
                 return
             src, ox, oy = to8(l.pixels), l.x, l.y
@@ -1484,7 +1643,11 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._tour = TourOverlay(self, done)
 
     def show_help(self) -> None:
-        rows = [("V / M / L / W / Q", _t("移动 / 选框 / 套索 / 魔棒 / 对象选择")),
+        rows = [("V / M / L / W", _t("移动 / 选框 / 套索 / 魔棒、对象选择（Shift+W 轮换）")),
+                ("Q", _t("快速蒙版（用画笔涂选区）")),
+                ("J / Shift+J", _t("污点修复 / 修补 / 红眼（Shift+J 轮换）")),
+                ("Ctrl+Alt+R", _t("选择并遮住（精修头发等边缘）")),
+                ("Ctrl+Shift+X / Ctrl+Shift+R", _t("液化 / 镜头校正")),
                 ("C / I", _t("裁剪（按住 Ctrl 拖线拉直）/ 吸管")),
                 ("J / B / S / E", _t("污点修复 / 画笔 / 仿制图章（Alt 取样）/ 橡皮擦")),
                 ("K / G / T", _t("油漆桶 / 渐变 / 文字")),

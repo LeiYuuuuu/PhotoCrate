@@ -286,6 +286,32 @@ class CanvasView(QWidget):
         self._sel_path = (key, path)
         return path
 
+    def _quick_mask_image(self):
+        """快速蒙版的红色叠加层（按显示级别缩小），画笔正在涂时用工具手里那份正在改的蒙版。"""
+        d = self.doc
+        if d is None or not d.quick_mask:
+            return None
+        from ...edit.document import _downscale
+        t = self._tool()
+        q = getattr(t, "qmask", None) if t is not None and getattr(t, "stroke", None) is not None else None
+        m = q.mask if q is not None else d.selection
+        lv = max(0, min(4, self.level()))
+        key = (id(m), lv, None if q is None else d.version + len(getattr(t.stroke, "points", [])))
+        if getattr(self, "_qm", None) is not None and self._qm[0] == key:
+            return self._qm[1], lv
+        if m is None:
+            small = np.zeros(d.level_size(lv)[::-1], np.uint8)
+        else:
+            small = _downscale(m, lv)
+        h, w = small.shape
+        buf = np.zeros((h, w, 4), np.uint8)
+        buf[..., 0] = 255
+        buf[..., 3] = ((255 - small.astype(np.uint16)) * 128 // 255).astype(np.uint8)
+        buf = np.ascontiguousarray(buf)
+        img = QImage(buf.data, w, h, w * 4, QImage.Format.Format_RGBA8888).copy()
+        self._qm = (key, img)
+        return img, lv
+
     # ---- 事件 ----
     def resizeEvent(self, e):
         if self.fit_mode:
@@ -432,7 +458,16 @@ class CanvasView(QWidget):
             for gy in range(max(0, int(y0)), min(self.doc.height, int(y1) + 1) + 1):
                 p = self.to_widget(0, gy)
                 qp.drawLine(QPointF(max(0, r.left()), p.y()), QPointF(min(self.width(), r.right()), p.y()))
-        path = self._selection_path()
+        qm = self._quick_mask_image()
+        if qm is not None:                                   # 快速蒙版：没选中的地方盖一层半透明红色
+            img, lv = qm
+            f = 1 << lv
+            qp.save()
+            qp.setClipRect(r)
+            qp.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            qp.drawImage(QRectF(r.left(), r.top(), img.width() * f * self.zoom, img.height() * f * self.zoom), img)
+            qp.restore()
+        path = None if self.doc.quick_mask else self._selection_path()
         if path is not None:
             qp.save()
             qp.setTransform(self.canvas_transform())

@@ -44,9 +44,9 @@ The **Histogram** in the top right shows the photo's brightness distribution; it
 | Position | Tool | Shortcut | What it does |
 |---|---|---|---|
 | 1st | Move | V | Drag the current layer (added text, pasted images) |
-| 2nd–4th | Marquee / Lasso / Magic Wand (Object Selection shares its slot) | M / L / W / Q | Mark out an area so the next operations only affect it. **Object Selection** is the easiest: draw a box around a person or object and it's selected along its edges |
+| 2nd–4th | Marquee / Lasso / Magic Wand (Object Selection shares its slot) | M / L / W | Mark out an area so the next operations only affect it. **Object Selection** is the easiest: draw a box around a person or object and it's selected along its edges |
 | 5th | Crop | C | Cut away extra parts, straighten a tilted horizon |
-| 7th | Spot Healing Brush | J | Paint over spots, dust or wires and they're gone |
+| 7th | Spot Healing Brush (Patch and Red Eye share the slot) | J | Paint over spots, dust or wires and they're gone |
 | 8th | Brush | B | Paint with the foreground color; painting on a mask controls where an effect shows |
 | 9th | Clone Stamp | S | Alt+click to sample a spot, then paint it somewhere else |
 | 10th | Eraser | E | Erase to transparency |
@@ -92,7 +92,7 @@ The **Histogram** in the top right shows the photo's brightness distribution; it
 
 ### Adjust only part of the photo (e.g. brighten just a face)
 
-1. Press **Q** and box the person with Object Selection (or draw an area with M / L). The flashing dashed line is the selection.
+1. Press **W** (Shift+W switches to Object Selection) and box the person (or draw an area with M / L). The flashing dashed line is the selection.
 2. Click **◐ Adjust** to create an adjustment layer — the selection automatically becomes the layer's **mask**, so the adjustment only affects the selected area.
 3. Edges too hard? Use **Select → Feather…** (Shift+F6) before creating the adjustment layer.
 
@@ -104,7 +104,7 @@ Press **T**, click on the photo, then type the text and choose the font, size an
 
 ### Cut-outs and compositing
 
-1. Press **Q** to box the subject, then **Ctrl+J**: the subject is copied to a new layer.
+1. Box the subject with Object Selection (**W**, Shift+W to switch), then press **Ctrl+J**: the subject is copied to a new layer.
 2. **File → Place Image (as a new layer)…** (or copy an image elsewhere and press **Ctrl+V**) to bring in another picture.
 3. **Ctrl+T** free transform: drag the corners to scale, drag outside the box to rotate, Enter to apply.
 4. Use ↑ ↓ in the Layers panel to change the stacking order.
@@ -145,6 +145,26 @@ Enter applies, Esc cancels.
 **Dodge / Burn / Sponge (O), Blur / Sharpen / Smudge (R).** These two toolbar slots have a small triangle: right-click to switch tools, or press **Shift+O / Shift+R** to cycle. For portraits: Dodge (Midtones, 15–25% exposure) brightens eyes, Burn deepens outlines, Blur smooths skin, Sharpen crisps lashes.
 
 ![Camera Raw](screenshots/en/editor_raw.png)
+
+### Hair cut-outs, color changes, reshaping: the second batch of pro tools
+
+**Select and Mask (cut out hair).** Roughly select the person with **Select → Select Subject** or Object Selection **W**, then choose **Select → Select and Mask…** (Ctrl+Alt+R). Raise "Edge detection radius" to 10–30 and strands of hair follow the photo's own edges; in the Overlay view, red is what's not selected. Output to "New layer with layer mask" is the safest choice — the original stays untouched.
+
+**Color Range.** To adjust only one color (say, just the blue of the sky): **Select → Color Range…**, click the sky in the preview (Shift+click a few more spots), set Fuzziness, then create an adjustment layer — it affects only the selected colors.
+
+**Quick Mask (Q).** Press **Q** and everything not selected turns red. Paint white to add, black to subtract, then press Q again to get the selection back — much easier than tracing with the lasso. Save selections you'll reuse with **Select → Save Selection…** and bring them back with Load Selection.
+
+**New adjustments.** **Image → Adjust** now has **Black & White** (control how bright each color becomes in gray — far nicer than plain desaturate), **Color Balance**, **Selective Color**, **Photo Filter**, **Channel Mixer** and **Gradient Map**.
+
+**Patch and Red Eye.** In the Spot Healing slot (right-click or Shift+J): **Patch** — circle what to remove, drag it to a clean area and release; **Red Eye** — click on the red eye.
+
+**Liquify (slim a face, tidy hair).** **Filter → Liquify…** (Ctrl+Shift+X): pick Forward Warp, a brush a bit larger than what you're pushing and 20–40% pressure, and push gently; overdone? Paint it back with Reconstruct.
+
+**Lens Correction.** **Filter → Lens Correction…**: "Remove distortion" fixes wide-angle barrel distortion, "Vignette amount" brightens the corners, and the fringe sliders remove purple / green edges on branches.
+
+**Layer styles.** Select a text or cut-out layer and click **fx** in the Layers panel: tick Drop Shadow, Stroke, Outer Glow… and see it on the canvas right away; change it any time. Set **Fill** to 0% to keep only the stroke / shadow while the text itself turns transparent. The lock buttons in the Layers panel protect a layer's position or pixels.
+
+![Select and Mask](screenshots/en/editor_refine.png)
 
 ---
 

@@ -146,6 +146,8 @@ class MoveTool(Tool):
         if l is None or not d.movable(l):
             self.win.status_msg(_t("调整图层不能移动；选中一个像素 / 文字图层再拖"))
             return
+        if self.win._locked(l, "position"):
+            return
         self.drag = (x, y, [(m, m.x, m.y) for m in d.movable(l)], d.state(), l)
 
     def move(self, x, y, e):
@@ -392,8 +394,8 @@ class WandTool(Tool):
 
 
 class ObjectTool(Tool):
-    id, name, shortcut, icon = "object", _t("对象选择"), "Q", "object"
-    tip = _t("对象选择工具（Q）：框住一个物体 / 人，自动沿边缘选出来（GrabCut，几秒钟）。之后可以用 Shift / Alt 补选或减选")
+    id, name, shortcut, icon = "object", _t("对象选择"), "W", "object"
+    tip = _t("对象选择工具（W，Shift+W 和魔棒轮换）：框住一个物体 / 人，自动沿边缘选出来（GrabCut，几秒钟）。之后可以用 Shift / Alt 补选或减选")
 
     def __init__(self, win):
         super().__init__(win)
@@ -751,10 +753,19 @@ class PaintTool(Tool):
 
     def _target(self):
         d = self.doc
+        if d.quick_mask and self.mode in ("paint", "erase"):        # 快速蒙版：画在选区上
+            from ...edit.document import Layer
+            q = Layer("adjust", _t("快速蒙版"))
+            q.mask = d.selection.copy() if d.selection is not None else np.zeros((d.height, d.width), np.uint8)
+            self.qmask = q
+            return q, True
+        self.qmask = None
         l = d.active
         if l is None:
             return None
         to_mask = d.mask_edit and l.mask is not None
+        if not to_mask and self.win._locked(l, "pixels"):
+            return None
         if not to_mask and l.canvas_sized:
             self.win.status_msg(_t("调整图层没有像素：先给它加蒙版，再在蒙版上画（黑色隐藏、白色显示）")
                                 if l.kind == "adjust" else _t("图层组没有像素：选中组里的一个图层，或给组加蒙版后在蒙版上画"))
@@ -789,7 +800,10 @@ class PaintTool(Tool):
         if tg is None:
             return
         l, to_mask = tg
-        self.stroke = P.Stroke(self.doc, l, self.mode, to_mask=to_mask, **self._stroke_kw())
+        kw = self._stroke_kw()
+        if getattr(self, "qmask", None) is not None:
+            kw["record"] = False
+        self.stroke = P.Stroke(self.doc, l, self.mode, to_mask=to_mask, **kw)
         if shift and self.last_end is not None:
             self.stroke.add(*self.last_end)
         r = self.stroke.add(x, y)
@@ -813,6 +827,11 @@ class PaintTool(Tool):
         s, self.stroke = self.stroke, None
         with _Busy(self.win, _t("正在修复…") if self.mode == "heal" else ""):
             r = s.finish()
+        q, self.qmask = getattr(self, "qmask", None), None
+        if q is not None and r:
+            self.doc.set_selection(q.mask.copy() if q.mask.any() else None, _t("快速蒙版"))
+            self.cv.update()
+            r = None
         self.last_end = (x, y)
         if r:
             self.cv.update_canvas_rect(r)
@@ -869,6 +888,137 @@ class HealTool(PaintTool):
             self.win.status_msg(_t("修复画笔只能用在像素上：先在图层面板里点图层缩略图（不是蒙版）"))
             return None
         return tg
+
+
+class PatchTool(Tool):
+    id, name, shortcut, icon = "patch", _t("修补"), "J", "patch"
+    tip = _t("修补工具（J）：先圈出要修掉的地方（或用任何选区工具选好），再把选区拖到干净的地方，松开后用那里的画面补上，"
+             "边缘的颜色和亮度自动过渡")
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.pts: list = []
+        self.drag = None
+
+    def options(self, bar):
+        bar.label(_t("在选区外拖动 = 圈出要修的地方；在选区里拖动 = 拖到用来补的干净区域"))
+
+    def busy(self):
+        return bool(self.pts) or self.drag is not None
+
+    def deactivate(self):
+        self.pts, self.drag = [], None
+
+    def _inside(self, x, y) -> bool:
+        sel = self.doc.selection
+        return sel is not None and 0 <= int(x) < sel.shape[1] and 0 <= int(y) < sel.shape[0] and sel[int(y), int(x)] > 127
+
+    def press(self, x, y, e):
+        if self._inside(x, y):
+            self.drag = [(x, y), (x, y)]
+        else:
+            self.pts = [(x, y)]
+
+    def move(self, x, y, e):
+        if self.drag is not None:
+            self.drag[1] = (x, y)
+        elif self.pts:
+            lx, ly = self.pts[-1]
+            if math.hypot(x - lx, y - ly) * self.cv.zoom >= 1.5:
+                self.pts.append((x, y))
+
+    def release(self, x, y, e):
+        d = self.doc
+        if self.pts:
+            pts, self.pts = self.pts, []
+            if len(pts) >= 3:
+                d.set_selection(P.polygon_mask(d.width, d.height, pts, 0), _t("修补：选区"))
+            return
+        if self.drag is None:
+            return
+        (x0, y0), (x1, y1) = self.drag
+        self.drag = None
+        dx, dy = int(round(x1 - x0)), int(round(y1 - y0))
+        if abs(dx) + abs(dy) < 2:
+            return
+        l = d.active
+        if l is None or not l.has_pixels or self.win._locked(l, "pixels"):
+            self.win.status_msg(_t("修补要用在像素图层上：在图层面板里选中它"))
+            return
+        sel = d.sel_local(l)
+        m = (sel * 255).astype(np.uint8)
+        with _Busy(self.win, _t("正在修补…")):
+            out = P.patch(l.pixels, m, dx, dy)
+        if out is None:
+            self.win.status_msg(_t("修补失败：拖到的位置超出了图层，或选区碰到了图层边缘"))
+            return
+        d.replace_pixels(l.id, out, _t("修补"))
+        self.win.status_msg(_t("已修补：不满意 Ctrl+Z，换个地方再拖"))
+
+    def paint(self, qp):
+        pen = (_dash_pen(), _dash_pen(True))
+        if self.pts:
+            poly = QPolygonF([self.cv.to_widget(*p) for p in self.pts])
+            for p in pen:
+                qp.setPen(p)
+                qp.drawPolyline(poly)
+        if self.drag is not None and self.doc.selection is not None:
+            bb = self.doc.selection_bbox()
+            if bb:
+                (x0, y0), (x1, y1) = self.drag
+                r = QRectF(self.cv.to_widget(bb[0] + x1 - x0, bb[1] + y1 - y0),
+                           self.cv.to_widget(bb[0] + bb[2] + x1 - x0, bb[1] + bb[3] + y1 - y0))
+                qp.setPen(QPen(QColor("#1EC6E6"), 1.5, Qt.PenStyle.DashLine))
+                qp.drawRect(r)
+
+
+class RedEyeTool(Tool):
+    id, name, shortcut, icon = "redeye", _t("红眼"), "J", "redeye"
+    tip = _t("红眼工具（J）：在红眼上单击（或拖一个框框住眼睛），把发红的瞳孔变成自然的暗色")
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.a = self.b = None
+
+    def options(self, bar):
+        bar.spin(_t("瞳孔大小"), "redeye_size", 4, 400, 30, " px")
+        bar.spin(_t("变暗量"), "redeye_dark", 0, 100, 50, "%")
+
+    def busy(self):
+        return self.a is not None
+
+    def press(self, x, y, e):
+        self.a = self.b = (x, y)
+
+    def move(self, x, y, e):
+        if self.a is not None:
+            self.b = (x, y)
+
+    def release(self, x, y, e):
+        if self.a is None:
+            return
+        a, b = self.a, self.b
+        self.a = self.b = None
+        d = self.doc
+        l = d.active
+        if l is None or not l.has_pixels or self.win._locked(l, "pixels"):
+            self.win.status_msg(_t("红眼工具要用在像素图层上"))
+            return
+        if math.hypot(b[0] - a[0], b[1] - a[1]) * self.cv.zoom > 6:
+            cx, cy, r = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, max(abs(b[0] - a[0]), abs(b[1] - a[1])) / 2
+        else:
+            cx, cy, r = a[0], a[1], float(self.opt("redeye_size", 30)) / 2
+        out = P.red_eye(l.pixels, cx - l.x, cy - l.y, r, float(self.opt("redeye_dark", 50)) / 100)
+        if out is None:
+            self.win.status_msg(_t("这里没有找到发红的瞳孔：点准一点，或把「瞳孔大小」调大"))
+            return
+        d.replace_pixels(l.id, out, _t("去红眼"))
+
+    def paint(self, qp):
+        if self.a is None:
+            return
+        qp.setPen(QPen(QColor("#1EC6E6"), 1.5))
+        qp.drawRect(QRectF(self.cv.to_widget(*self.a), self.cv.to_widget(*self.b)).normalized())
 
 
 class CloneTool(PaintTool):
@@ -943,6 +1093,8 @@ class BucketTool(Tool):
         if l is None or not l.has_pixels:
             self.win.status_msg(_t("选中一个像素图层再填充"))
             return
+        if self.win._locked(l, "pixels"):
+            return
         fg = self.win.fg
         with _Busy(self.win):
             ok = P.apply_bucket(self.doc, l, int(x), int(y), (fg.red(), fg.green(), fg.blue()),
@@ -993,8 +1145,13 @@ class GradientTool(Tool):
         c0 = (fg.red(), fg.green(), fg.blue(), 255)
         c1 = (fg.red(), fg.green(), fg.blue(), 0) if self.opt("grad_colors") == "fgclear" else \
             (bg.red(), bg.green(), bg.blue(), 255)
+        if d.quick_mask:
+            self._qmask_gradient(a, b, c0, c1)
+            return
         if l is not None and d.mask_edit and l.mask is not None:
             self._mask_gradient(l, a, b, c0, c1)
+            return
+        if self.win._locked(l, "pixels"):
             return
         if l is None or not l.has_pixels:
             self.win.status_msg(_t("选中一个像素图层（或图层蒙版）再画渐变"))
@@ -1002,6 +1159,15 @@ class GradientTool(Tool):
         with _Busy(self.win):
             P.apply_gradient(d, l, a, b, c0, c1, self.opt("grad_kind") == "radial",
                              float(self.opt("grad_opacity", 100)) / 100)
+
+    def _qmask_gradient(self, a, b, c0, c1):
+        d = self.doc
+        g = P.gradient(d.width, d.height, a, b, c0, c1, self.opt("grad_kind") == "radial")
+        gray = (g[..., 0] * 0.299 + g[..., 1] * 0.587 + g[..., 2] * 0.114) * g[..., 3] * 255
+        op = float(self.opt("grad_opacity", 100)) / 100
+        old = d.selection.astype(np.float32) if d.selection is not None else np.zeros((d.height, d.width), np.float32)
+        new = np.clip(old * (1 - op) + gray * op + 0.5, 0, 255).astype(np.uint8)
+        d.set_selection(new, _t("快速蒙版渐变"))
 
     def _mask_gradient(self, l, a, b, c0, c1):
         """在蒙版上画渐变：灰度 = 颜色的亮度（透明端按黑色算）。"""
@@ -1132,7 +1298,7 @@ class SpongeTool(_RetouchTool):
 
 
 class BlurTool(_RetouchTool):
-    id, name, shortcut, icon = "blur", _t("模糊"), "R", "blur"
+    id, name, shortcut, icon = "blur", P.BLUR, "R", "blur"
     tip = _t("模糊工具（R）：涂抹的地方变柔和（磨皮、虚化背景的一小块）")
     mode = "blur"
 
@@ -1193,6 +1359,10 @@ class TransformTool(Tool):
         if l is None or not l.has_pixels:
             self.layer = None
             self.win.status_msg(_t("自由变换需要一个像素 / 文字图层"))
+            return
+        if l.locked_pos or l.locked_pixels:
+            self.layer = None
+            self.win._locked(l, "position" if l.locked_pos else "pixels")
             return
         self.layer = l
         self.w, self.h = l.w, l.h
@@ -1461,11 +1631,11 @@ class TransformTool(Tool):
         qp.drawEllipse(c, 3, 3)
 
 
-TOOLS = [MoveTool, MarqueeTool, LassoTool, WandTool, ObjectTool, CropTool, EyedropperTool, HealTool, PaintTool,
-         CloneTool, EraserTool, BucketTool, GradientTool, DodgeTool, BurnTool, SpongeTool, BlurTool, SharpenTool,
+TOOLS = [MoveTool, MarqueeTool, LassoTool, WandTool, ObjectTool, CropTool, EyedropperTool, HealTool, PatchTool,
+         RedEyeTool, PaintTool, CloneTool, EraserTool, BucketTool, GradientTool, DodgeTool, BurnTool, SpongeTool, BlurTool, SharpenTool,
          SmudgeTool, TextTool, HandTool, ZoomTool]
 
 # 工具栏的格子：同一格里的工具共用一个按钮（右键 / 长按换），和 Photoshop 一样按住 Shift + 快捷键在组里轮换
 TOOL_SLOTS = [["move"], ["marquee"], ["lasso"], ["wand", "object"], ["crop"], ["eyedropper"],
-              ["heal"], ["brush"], ["clone"], ["eraser"], ["gradient", "bucket"], ["blur", "sharpen", "smudge"],
+              ["heal", "patch", "redeye"], ["brush"], ["clone"], ["eraser"], ["gradient", "bucket"], ["blur", "sharpen", "smudge"],
               ["dodge", "burn", "sponge"], ["text"], ["hand"], ["zoom"]]
