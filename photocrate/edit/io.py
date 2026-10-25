@@ -19,7 +19,7 @@ from ..i18n import t as _t
 
 PROJECT_EXT = ".pcedit"
 EXPORT_FORMATS = {"jpg": "JPEG", "jpeg": "JPEG", "png": "PNG", "tif": "TIFF", "tiff": "TIFF", "webp": "WEBP"}
-OPEN_FILTER = _t("图片 (*.jpg *.jpeg *.png *.tif *.tiff *.webp *.bmp *.heic *.heif *.gif *.dng *.arw *.cr2 *.cr3 *.nef *.raf *.orf *.rw2 *.pef *.srw);;修图工程 (*.pcedit);;所有文件 (*.*)")
+OPEN_FILTER = _t("图片 (*.jpg *.jpeg *.png *.tif *.tiff *.webp *.bmp *.heic *.heif *.gif *.psd *.dng *.arw *.cr2 *.cr3 *.nef *.raf *.orf *.rw2 *.pef *.srw);;修图工程 (*.pcedit);;所有文件 (*.*)")
 
 
 def _rgba(im) -> np.ndarray:
@@ -121,6 +121,9 @@ def open_file(path: str, exiftool: str | None = None, raw_opts=None) -> Document
     from ..core.formats import file_kind
     if path.lower().endswith(PROJECT_EXT):
         return load_project(path)
+    if path.lower().endswith((".psd", ".psb")):
+        from .psd import read
+        return read(path)
     kind = file_kind(path)
     if kind == "raw":
         try:
@@ -300,7 +303,7 @@ def _tiff_tags(doc: Document) -> dict:
 
 
 def export_image(doc: Document, path: str, quality: int = 92, keep_exif: bool = True, strip_gps: bool = False,
-                 rgba: np.ndarray | None = None, deep: bool | None = None) -> int:
+                 rgba: np.ndarray | None = None, deep: bool | None = None, cmyk=None) -> int:
     """把合成结果存成一张图（格式看扩展名）。返回文件大小。
     deep：存 16 位（只有 PNG / TIFF 可以；None = 文档是 16 位时就存 16 位）。"""
     from PIL import Image
@@ -317,7 +320,13 @@ def export_image(doc: Document, path: str, quality: int = 92, keep_exif: bool = 
         return _export16(doc, path, fmt, keep_exif, strip_gps, rgba)
     rgba = doc.render_full(np.uint8) if rgba is None else to8(rgba)
     transparent = int(rgba[..., 3].min()) < 255
-    if fmt == "JPEG" or not transparent:
+    cmyk_icc = None
+    if cmyk and fmt in ("JPEG", "TIFF"):                     # 印刷用：按配置文件转成 CMYK
+        from .color import to_cmyk_image
+        a = rgba[..., 3:4].astype(np.float32) / 255.0
+        rgb = np.clip(rgba[..., :3].astype(np.float32) * a + 255.0 * (1 - a) + 0.5, 0, 255).astype(np.uint8)
+        im, cmyk_icc = to_cmyk_image(rgb, doc.source.icc, cmyk)
+    elif fmt == "JPEG" or not transparent:
         a = rgba[..., 3:4].astype(np.float32) / 255.0
         rgb = rgba[..., :3].astype(np.float32) * a + 255.0 * (1 - a)
         im = Image.fromarray(np.clip(rgb + 0.5, 0, 255).astype(np.uint8), "RGB")
@@ -328,7 +337,9 @@ def export_image(doc: Document, path: str, quality: int = 92, keep_exif: bool = 
         ex = _exif_out(doc, im.width, im.height, strip_gps)
         if ex:
             kw["exif"] = ex
-    if doc.source.icc and fmt in ("JPEG", "PNG", "TIFF", "WEBP"):
+    if cmyk_icc:
+        kw["icc_profile"] = cmyk_icc
+    elif doc.source.icc and fmt in ("JPEG", "PNG", "TIFF", "WEBP"):
         kw["icc_profile"] = doc.source.icc
     if fmt == "JPEG":
         q = int(quality)
@@ -407,6 +418,10 @@ def save_project(doc: Document, path: str) -> int:
         if l.mask is not None:
             d["mask"] = f"masks/{i:03d}.png"
             files[d["mask"]] = _png(l.mask)
+        if l.source is not None:                              # 智能对象的原始像素
+            d["source"] = f"smart/{i:03d}.png"
+            d["source_depth"] = 16 if l.source.dtype == np.uint16 else 8
+            files[d["source"]] = _png(l.source)
         layers.append(d)
     chans = []
     for i, (name, arr) in enumerate(doc.channels.items()):
@@ -414,7 +429,9 @@ def save_project(doc: Document, path: str) -> int:
         files[f] = _png(arr)
         chans.append({"name": name, "file": f})
     s = doc.source
-    meta = {"channels": chans, "format": "photocrate-edit", "version": 2, "width": doc.width, "height": doc.height, "depth": doc.depth,
+    meta = {"channels": chans, "guides": [list(g) for g in doc.guides], "regions": doc.regions,
+            "frames": [{"show": [doc.index_of(i) for i in f.get("show", [])], "delay": f.get("delay", 100)}
+                       for f in doc.frames], "format": "photocrate-edit", "version": 2, "width": doc.width, "height": doc.height, "depth": doc.depth,
             "active": doc.index_of(doc.active_id), "layers": layers,
             "source": {"path": s.path, "name": s.name, "gid": s.gid, "suffix": s.suffix}}
     tmp = path + ".part"
@@ -462,6 +479,16 @@ def load_project(path: str) -> Document:
                 l.params = normalize(l.params)
             elif l.kind == "text" and l.pixels is None:
                 l.render_text()
+            elif l.kind in ("shape", "smart"):
+                if d.get("source") in names:
+                    data = z.read(d["source"])
+                    l.source = decode16(data) if d.get("source_depth") == 16 else None
+                    if l.source is None:
+                        l.source = _unpng(data, "RGBA")
+                if l.kind == "smart" and l.source is None:
+                    l.kind = "pixel"
+                elif l.pixels is None:
+                    l.render()
             elif l.pixels is None and l.kind != "group":
                 parents.append(None)
                 continue
@@ -481,6 +508,10 @@ def load_project(path: str) -> Document:
                 arr = _unpng(z.read(c["file"]), "L")
                 if arr.shape == (doc.height, doc.width):
                     doc.channels[str(c.get("name") or c["file"])] = arr
+        doc.guides = [(str(o), float(v)) for o, v in (meta.get("guides") or []) if o in ("h", "v")]
+        doc.regions = [dict(r) for r in meta.get("regions") or [] if isinstance(r, dict)]
+        doc.frames = [{"show": [doc.layers[i].id for i in f.get("show", []) if 0 <= i < len(doc.layers)],
+                       "delay": int(f.get("delay", 100))} for f in meta.get("frames") or []]
         a = int(meta.get("active", -1))
         doc.active_id = doc.layers[a if 0 <= a < len(doc.layers) else -1].id
         src = meta.get("source") or {}

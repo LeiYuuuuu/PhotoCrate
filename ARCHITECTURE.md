@@ -258,6 +258,24 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 
 测试：`tests/test_editor_pro2.py`、`tests/ui_editor_pro2.py`。
 
+## 9.9 修图进阶第三档（v2.0.0）
+
+| 部分 | 实现 |
+|---|---|
+| 钢笔 / 形状 | `edit/vector.py`：路径 = 子路径列表，锚点带进 / 出控制柄（三次贝塞尔），展平成折线；区域按非零环绕填充，4×4 超采样算覆盖率（画布像素 i 占 [i, i+1)）。形状图层 `kind="shape"`：参数（矩形 / 圆角矩形 / 椭圆 / 多边形 / 直线 / 路径 + 填充 / 描边）→ 像素，像文字图层一样随参数重画；图层被移动后靠参数里的 `rx / ry`（上次渲染位置）把位移并进几何。自由变换 / 改尺寸时变换几何（转成路径），保持矢量 |
+| 智能对象 | `edit/smart.py`：`Layer.source` 存原始像素，`params.H` = source → 画布的 3×3 矩阵，`params.filters` = 智能滤镜列表。渲染总是从 source 一次重新取样（纯平移不重采样、缩小先区域平均），再依次跑启用的滤镜；自由变换把矩阵左乘进 H，改尺寸把缩放并进 H。source 进历史快照、工程里存 `smart/NNN.png` |
+| 参考线 / 吸附 | `Document.guides`（进历史、随工程保存、随裁剪 / 翻转 / 改尺寸变换）。画布在左上画标尺（刻度按缩放取 1/2/5 序列），从标尺拖出参考线、移动工具拖动或拖回标尺删除。`snap_value` 在屏幕 6 像素内吸附到参考线 / 网格 / 画布边和中线；移动图层时取外接框的左中右 / 上中下三条边里离目标最近的那条 |
+| 动作 / 批处理 | `edit/actions.py`：步骤是和界面无关的字典（滤镜、调整图层、尺寸按比例、旋转、翻转、位深、拼合、盖印），`play()` 直接对 Document 执行，所以批处理不需要打开窗口。窗口在执行这些操作时 `_rec()`；停止录制时调整图层换成它最终的参数。动作存在设置里（`editor_actions`） |
+| 全景 / 景深 | `edit/stitch.py`：OpenCV Stitcher（PANORAMA / SCANS）+ 最大连通区域 + 逐边收缩的内接矩形自动裁剪。景深合成：复用合并曝光的对齐，清晰度 = 模糊后的拉普拉斯能量，权重 = 归一化清晰度的 4 次方，拉普拉斯金字塔融合 |
+| 色彩管理 | `edit/color.py`：Pillow 的 LittleCMS。校样 = proof transform（sRGB → 校样配置文件 → sRGB），色域警告 = 往返误差 > 阈值标灰，只在画布显示缓冲上做。转换配置文件：8 位 33³ 网格算查找表，三线性插值作用于 8 / 16 位像素。CMYK 导出 = `profileToProfile(…, outputMode="CMYK")` 并嵌入配置文件 |
+| PSD | `edit/psd.py`：自己写 / 读文件结构（头、ICC 资源 1039、图层记录、通道数据、合成图）。写：通道不压缩；组 = `lsct` 分隔层（组结束分隔层排在子图层下面）；剪贴、填充（`iOpa`）、Unicode 名（`luni`）、蒙版矩形。读：RAW / RLE（借 Pillow 的 packbits 解码器）/ ZIP / 带预测的 ZIP，8 / 16 位 |
+| 画板 / 切片 / 时间轴 | `Document.regions`（画板、切片矩形，进历史、随工程保存），导出时从合成结果裁出；`Document.frames`（每帧显示哪些图层 + 停留时间），`edit/anim.py` 按帧合成（用视图对象，不改真实的显示状态）导出 GIF（Pillow）/ MP4（OpenCV mp4v），视频帧导入用 `cv2.VideoCapture` |
+| 天空替换 / 皮肤平滑 | `edit/sky.py`：缩小图上按“亮 + 低梯度 + 偏蓝 / 偏白 / 暖色”找候选，只留和上边相连的大块，闭运算、外扩后放大，再用选择并遮住的导向滤波精修；替换结果是组（新天空 + 蒙版、照片滤镜只作用于前景）。皮肤平滑 = 肤色范围蒙版里的两次双边滤波 + 按比例加回高频细节 |
+
+没有做的：3D（Photoshop 已移除）、需要大模型的生成式功能、视频剪辑（只做了帧动画）、CMYK / Lab 编辑模式。
+
+测试：`tests/test_editor_pro3.py`、`tests/ui_editor_pro3.py`。
+
 ## 10. 安全搬运（ops/）
 
 | 机制 | 实现位置 |
@@ -362,7 +380,7 @@ PhotoCrate/
 ├─ tools/          get_exiftool.ps1  make_icon.py  （exiftool/ 运行后自动下载到这里）
 └─ tests/          test_core.py  test_timeplace.py  test_culling.py  test_trips.py  test_ai.py
                    test_workflow.py  test_repartition.py  test_search_rank.py  test_faces_screen.py  test_i18n.py
-                   test_editor.py  test_editor_pro.py  test_editor_pro2.py  test_hdr.py
+                   test_editor.py  test_editor_pro.py  test_editor_pro2.py  test_editor_pro3.py  test_hdr.py
                    make_samples.py  ui_smoke.py  ui_timeplace.py
                    ui_culling.py  ui_tier3.py  ui_workflow.py  ui_repartition.py  ui_editor.py  ui_merge.py
 ```

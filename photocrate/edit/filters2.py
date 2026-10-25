@@ -204,6 +204,24 @@ def polar(rgba, scale, mode="to_polar"):
     return _remap(rgba, mx, my)
 
 
+def skin_smooth(rgba, scale, amount=50.0, detail=40.0):
+    """皮肤平滑（人像）：只在肤色区域里做保边磨皮，再按“保留细节”加回一部分细纹理，不会像塑料。"""
+    import cv2
+    from .select import color_range
+    rgb8 = np.clip(rgba[..., :3] * 255 + 0.5, 0, 255).astype(np.uint8)
+    m = color_range(rgb8, "skin").astype(np.float32) / 255
+    m = cv2.GaussianBlur(m, (0, 0), max(1.0, 3 * scale))
+    rgb = np.ascontiguousarray(rgba[..., :3], dtype=np.float32)
+    r = max(1.0, 7 * scale)
+    sm = cv2.bilateralFilter(rgb, int(r * 2) | 1, 0.08, r)
+    sm = cv2.bilateralFilter(sm, int(r * 2) | 1, 0.06, r)
+    fine = rgb - cv2.GaussianBlur(rgb, (0, 0), max(0.6, 0.8 * scale))
+    target = sm + fine * (float(detail) / 100)
+    out = rgba.copy()
+    out[..., :3] = rgb + (target - rgb) * (m * float(amount) / 100)[..., None]
+    return out
+
+
 def _r(key):
     return lambda p: float(p.get(key, 0) or 0) * 2 + 12
 
@@ -233,6 +251,9 @@ SPECS = {
                                             ("wavelength", _t("波长"), 4, 400, 40, 0, " px")], whole=True),
     "spherize": FilterSpec(_t("球面化"), spherize, [("amount", _t("数量"), -100, 100, 60, 0, "%")], whole=True),
     "pinch": FilterSpec(_t("挤压"), pinch, [("amount", _t("数量"), -100, 100, 50, 0, "%")], whole=True),
+    "skin": FilterSpec(_t("皮肤平滑"), skin_smooth, [("amount", _t("平滑度"), 0, 100, 50, 0, "%"),
+                                                  ("detail", _t("保留细节"), 0, 100, 40, 0, "%")],
+                       margin=lambda p: 40),
     "polar": FilterSpec(_t("极坐标"), polar, whole=True,
                         choices=[("mode", _t("方式"), [("to_polar", _t("平面坐标到极坐标")),
                                                       ("to_rect", _t("极坐标到平面坐标"))], "to_polar")]),

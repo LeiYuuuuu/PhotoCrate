@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import os
 
 import numpy as np
 from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
@@ -220,6 +221,153 @@ class RefineDialog(_Base):
 
     def full_mask(self) -> np.ndarray:
         return S.refine(self.doc.flat_rgba(), self.doc.selection, **self.params(1.0))
+
+
+# ---------------------------------------------------------------------------
+# 天空替换
+# ---------------------------------------------------------------------------
+
+class SkyDialog(_Base):
+    def __init__(self, win):
+        super().__init__(win, _t("天空替换"), "SKY REPLACEMENT")
+        self.setModal(True)
+        self.doc = win.doc
+        from ...edit import sky
+        self.small, self.s = _small(self.doc, 700)
+        with_cursor = QApplication.setOverrideCursor
+        with_cursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.mask_small = sky.detect(self.small)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.custom = None
+        row = QHBoxLayout()
+        self.pic = _Pic()
+        row.addWidget(self.pic, 1)
+        side = QVBoxLayout()
+        side.addWidget(QLabel(_t("新天空：")))
+        self.kind = QComboBox()
+        for k, t in sky.PRESETS:
+            self.kind.addItem(t, k)
+        self.kind.addItem(_t("用自己的照片…"), "__file__")
+        self.kind.activated.connect(self._pick)
+        side.addWidget(self.kind)
+        self.harm = ParamSlider(_t("前景协调"), 0, 60, 20, 0, "%")
+        self.bright = ParamSlider(_t("天空亮度"), -50, 50, 0, 0, "%")
+        side.addWidget(self.harm)
+        side.addWidget(self.bright)
+        side.addWidget(caption(_t("自动找出天空（亮、平滑、和画面上边相连的区域），边缘按树梢、楼顶精修。"
+                                  "结果放在一个组里：新天空带蒙版，可以用画笔修蒙版、用移动工具挪天空。"), "faint", 8.5))
+        side.addStretch(1)
+        row.addLayout(side)
+        self.body.addLayout(row)
+        _ok_cancel(self)
+        for w in (self.harm, self.bright):
+            w.changed.connect(lambda _=0: self._update())
+        self.kind.currentIndexChanged.connect(lambda _=0: self._update())
+        self.resize(980, 560)
+        QTimer.singleShot(0, self._update)
+
+    def _pick(self, i):
+        if self.kind.itemData(i) != "__file__":
+            return
+        from PySide6.QtWidgets import QFileDialog
+        from PIL import Image
+        p, _ = QFileDialog.getOpenFileName(self, _t("选择天空照片"), os.path.expanduser("~"),
+                                           _t("图片 (*.jpg *.jpeg *.png *.tif *.tiff *.webp)"))
+        if p:
+            with Image.open(p) as im:
+                self.custom = np.array(im.convert("RGB"), dtype=np.uint8)
+        else:
+            self.kind.setCurrentIndex(0)
+        self._update()
+
+    def sky_image(self, w: int = 2400, h: int = 1200) -> np.ndarray:
+        from ...edit import sky
+        if self.kind.currentData() == "__file__" and self.custom is not None:
+            return self.custom
+        return sky.make_sky(self.kind.currentData() if self.kind.currentData() != "__file__" else "clear", w, h)
+
+    def _update(self):
+        import cv2
+        h, w = self.small.shape[:2]
+        sk = cv2.resize(self.sky_image(800, 400), (w, int(w * 400 / 800)), interpolation=cv2.INTER_AREA)
+        canvas = np.zeros((h, w, 3), np.float32)
+        hh = min(h, sk.shape[0])
+        canvas[:hh] = sk[:hh]
+        canvas *= 1 + self.bright.value() / 100
+        m = (self.mask_small.astype(np.float32) / 255)[..., None]
+        img = self.small[..., :3].astype(np.float32)
+        tone = canvas[max(0, hh - 10):hh].reshape(-1, 3).mean(axis=0) if hh else np.full(3, 200, np.float32)
+        k = self.harm.value() / 100
+        fg = img + (img * tone / 255 - img) * k
+        out = fg * (1 - m) + canvas * m
+        self.pic.show_rgb(np.clip(out, 0, 255).astype(np.uint8))
+
+    def full_mask(self) -> np.ndarray:
+        from ...edit import sky
+        return sky.detect(self.doc.flat_rgba())
+
+
+# ---------------------------------------------------------------------------
+# 选择配置文件（校样设置 / 转换为配置文件）
+# ---------------------------------------------------------------------------
+
+class ProfileDialog(_Base):
+    def __init__(self, win, title: str, current: str | None, intent: int, cmyk_first: bool = False,
+                 rgb_only: bool = False, note: str = ""):
+        super().__init__(win, title, "COLOR")
+        from ...edit import color
+        self.combo = QComboBox()
+        items = color.system_profiles()
+        if rgb_only:
+            items = [i for i in items if i[2] == "RGB"]
+            self.combo.addItem("sRGB IEC61966-2.1", "sRGB")
+        items.sort(key=lambda i: (i[2] != "CMYK") if cmyk_first else 0)
+        for p, d, sp in items:
+            self.combo.addItem(f"{d}  ({sp})", p)
+        self.combo.addItem(_t("自定义 ICC 文件…"), "__custom__")
+        if current:
+            i = self.combo.findData(current)
+            if i < 0:
+                self.combo.insertItem(0, os.path.basename(current), current)
+                i = 0
+            self.combo.setCurrentIndex(i)
+        self.combo.activated.connect(self._maybe_custom)
+        r = QHBoxLayout()
+        r.addWidget(QLabel(_t("配置文件：")))
+        r.addWidget(self.combo, 1)
+        self.body.addLayout(r)
+        r = QHBoxLayout()
+        r.addWidget(QLabel(_t("渲染方式：")))
+        self.ri = QComboBox()
+        for v, t in color.INTENTS:
+            self.ri.addItem(t, v)
+        self.ri.setCurrentIndex(max(0, self.ri.findData(intent)))
+        r.addWidget(self.ri, 1)
+        self.body.addLayout(r)
+        if note:
+            self.body.addWidget(caption(note, "faint", 8.5))
+        self.body.addWidget(caption(_t("可感知：整体压缩到能显示 / 印刷的范围，适合照片；相对比色：能还原的颜色尽量不变，超出的截掉。"),
+                                    "faint", 8.5))
+        _ok_cancel(self)
+        self.resize(560, 10)
+
+    def _maybe_custom(self, i):
+        if self.combo.itemData(i) != "__custom__":
+            return
+        from PySide6.QtWidgets import QFileDialog
+        p, _ = QFileDialog.getOpenFileName(self, _t("选择 ICC 配置文件"), "", "ICC (*.icc *.icm)")
+        if p:
+            self.combo.insertItem(0, os.path.basename(p), p)
+            self.combo.setCurrentIndex(0)
+
+    def path(self) -> str | None:
+        v = self.combo.currentData()
+        return None if v == "__custom__" else v
+
+    def intent(self) -> int:
+        return int(self.ri.currentData())
 
 
 # ---------------------------------------------------------------------------

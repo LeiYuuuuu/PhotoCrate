@@ -193,7 +193,7 @@ class CanvasView(QWidget):
         except MemoryError:
             self.win.status_msg(_t("内存不足：画面太大，请缩小后再看"))
             return
-        buf = np.ascontiguousarray(to_uint8(rgb, a))
+        buf = np.ascontiguousarray(self._proof(to_uint8(rgb, a)))
         if not self._coarse:
             self._last_ms = (time.perf_counter() - t0) * 1000
         self._buf = buf
@@ -230,10 +230,23 @@ class CanvasView(QWidget):
         if a >= c or b >= d:
             return
         rgb, al = self.doc.render(self._lvl, (a, b, c - a, d - b))
-        self._buf[b - ry:d - ry, a - rx:c - rx] = to_uint8(rgb, al)
+        self._buf[b - ry:d - ry, a - rx:c - rx] = self._proof(to_uint8(rgb, al))
         p0 = self.to_widget(a * f, b * f)
         self.update(QRectF(p0.x() - 2, p0.y() - 2, (c - a) * f * self.zoom + 4,
                            (d - b) * f * self.zoom + 4).toAlignedRect())
+
+    def _proof(self, buf: np.ndarray) -> np.ndarray:
+        """校样颜色（Ctrl+Y）/ 色域警告（Ctrl+Shift+Y）：只改显示，不改像素。"""
+        pf = getattr(self.win, "proof", None)
+        if pf is None or not (self._opt("proof_on", False) or self._opt("gamut_on", False)):
+            return buf
+        if self._opt("proof_on", False):
+            out = pf.apply(buf, self._opt("gamut_on", False))
+        else:
+            out = pf.apply(buf, True)
+            keep = out[..., :3] != (128, 128, 128)
+            out[..., :3] = np.where(keep.any(axis=-1, keepdims=True), buf[..., :3], out[..., :3])
+        return out
 
     def sample(self, x: float, y: float):
         """取已渲染图上 (x, y) 处的颜色（吸管、状态栏用）。"""
@@ -336,9 +349,194 @@ class CanvasView(QWidget):
     def _panning_tool(self) -> bool:
         return self._space or (self._tool() is not None and self._tool().id == "hand")
 
+    # ---- 标尺 / 参考线 / 网格 / 对齐 ----
+    RULER = 18
+
+    def _opt(self, k, d=False):
+        return self.win.opts.get(k, d)
+
+    def snap_value(self, v: float, axis: str, extra=()) -> tuple[float, bool]:
+        """把画布坐标 v 吸附到最近的参考线 / 网格 / 画布边缘和中线（屏幕上 6 像素以内）。"""
+        if not self._opt("snap", True) or self.doc is None:
+            return v, False
+        tol = 6 / max(self.zoom, 1e-3)
+        size = self.doc.width if axis == "x" else self.doc.height
+        cands = [0.0, size / 2, float(size)] + list(extra)
+        if self._opt("show_guides", True):
+            cands += [p for o, p in self.doc.guides if (o == "v") == (axis == "x")]
+        if self._opt("show_grid", False):
+            step = float(self._opt("grid_step", 100)) / max(1, int(self._opt("grid_sub", 4)))
+            cands.append(round(v / step) * step)
+        best = min(cands, key=lambda c: abs(c - v))
+        return (best, True) if abs(best - v) <= tol else (v, False)
+
+    def snap_delta(self, edges, axis: str) -> float:
+        """移动一组边（比如图层的左 / 中 / 右）时，让其中离吸附目标最近的那条对齐：返回要额外挪的量。"""
+        best = None
+        for e in edges:
+            s, ok = self.snap_value(e, axis)
+            if ok and (best is None or abs(s - e) < abs(best)):
+                best = s - e
+        return 0.0 if best is None else best
+
+    def _ruler_hit(self, p: QPointF) -> str | None:
+        if not self._opt("show_rulers", False):
+            return None
+        if p.y() < self.RULER and p.x() >= self.RULER:
+            return "h"
+        if p.x() < self.RULER and p.y() >= self.RULER:
+            return "v"
+        return None
+
+    def _guide_hit(self, p: QPointF) -> int | None:
+        if self.doc is None or not self._opt("show_guides", True):
+            return None
+        x, y = self.to_canvas(p)
+        for i, (o, pos) in enumerate(self.doc.guides):
+            q = self.to_widget(pos, 0).x() if o == "v" else self.to_widget(0, pos).y()
+            if abs((p.x() if o == "v" else p.y()) - q) <= 4:
+                return i
+        return None
+
+    def _guide_press(self, e) -> bool:
+        p = e.position()
+        hit = self._ruler_hit(p)
+        if hit is not None:
+            self._gdrag = {"new": hit, "pos": None}
+            return True
+        t = self._tool()
+        if t is not None and t.id == "move":
+            i = self._guide_hit(p)
+            if i is not None:
+                self._gdrag = {"i": i, "before": self.doc.state(), "orient": self.doc.guides[i][0]}
+                return True
+        return False
+
+    def _guide_move(self, e) -> None:
+        g = self._gdrag
+        x, y = self.to_canvas(e.position())
+        o = g.get("new") or g.get("orient")
+        v = x if o == "v" else y
+        if not (e.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            v = round(v)
+        if "i" in g:
+            gs = list(self.doc.guides)
+            gs[g["i"]] = (o, v)
+            self.doc.guides = gs
+        else:
+            g["pos"] = v
+        self.update()
+
+    def _guide_release(self, e) -> None:
+        g, self._gdrag = self._gdrag, None
+        over_ruler = self._ruler_hit(e.position()) is not None or not self.rect().contains(e.position().toPoint())
+        if "new" in g:
+            if g["pos"] is not None and not over_ruler:
+                self.doc.add_guide(g["new"], g["pos"])
+        else:
+            pos = None if over_ruler else self.doc.guides[g["i"]][1]
+            self.doc.guides = list(g["before"]["guides"])
+            self.doc.move_guide(g["i"], pos, g["before"])
+        self.update()
+
+    def _paint_overlays(self, qp: QPainter, r: QRectF) -> None:
+        d = self.doc
+        if self._opt("show_grid", False):
+            step = float(self._opt("grid_step", 100))
+            sub = max(1, int(self._opt("grid_sub", 4)))
+            x0, y0 = self.to_canvas(QPointF(0, 0))
+            x1, y1 = self.to_canvas(QPointF(self.width(), self.height()))
+            qp.save()
+            qp.setClipRect(r)
+            for k, st in ((sub, step / sub), (1, step)):
+                if st * self.zoom < 6:
+                    continue
+                qp.setPen(QPen(QColor(120, 160, 255, 70 if k > 1 else 140), 1))
+                gx = math.floor(max(0, x0) / st) * st
+                while gx <= min(d.width, x1):
+                    p = self.to_widget(gx, 0)
+                    qp.drawLine(QPointF(p.x(), r.top()), QPointF(p.x(), r.bottom()))
+                    gx += st
+                gy = math.floor(max(0, y0) / st) * st
+                while gy <= min(d.height, y1):
+                    p = self.to_widget(0, gy)
+                    qp.drawLine(QPointF(r.left(), p.y()), QPointF(r.right(), p.y()))
+                    gy += st
+            qp.restore()
+        if self._opt("show_guides", True):
+            gs = list(d.guides)
+            g = getattr(self, "_gdrag", None)
+            if g and g.get("new") and g.get("pos") is not None:
+                gs.append((g["new"], g["pos"]))
+            qp.setPen(QPen(QColor("#00C8FF"), 1))
+            for o, pos in gs:
+                if o == "v":
+                    xw = self.to_widget(pos, 0).x()
+                    qp.drawLine(QPointF(xw, 0), QPointF(xw, self.height()))
+                else:
+                    yw = self.to_widget(0, pos).y()
+                    qp.drawLine(QPointF(0, yw), QPointF(self.width(), yw))
+        for reg in d.regions:                                # 画板 / 切片
+            a, b = self.to_widget(reg["x"], reg["y"]), self.to_widget(reg["x"] + reg["w"], reg["y"] + reg["h"])
+            col = QColor("#F08A24") if reg["kind"] == "slice" else QColor("#B0B4BA")
+            qp.setPen(QPen(col, 1.2, Qt.PenStyle.DashLine if reg["kind"] == "slice" else Qt.PenStyle.SolidLine))
+            qp.setBrush(Qt.BrushStyle.NoBrush)
+            qp.drawRect(QRectF(a, b))
+            qp.setPen(col)
+            qp.drawText(QPointF(a.x() + 3, a.y() - 4 if reg["kind"] == "artboard" else a.y() + 13), reg["name"])
+        if self._opt("show_rulers", False):
+            self._paint_rulers(qp)
+
+    def _paint_rulers(self, qp: QPainter) -> None:
+        R = self.RULER
+        qp.save()
+        qp.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        qp.fillRect(QRectF(0, 0, self.width(), R), QColor("#2A2D31"))
+        qp.fillRect(QRectF(0, 0, R, self.height()), QColor("#2A2D31"))
+        f = qp.font()
+        f.setPixelSize(9)
+        qp.setFont(f)
+        steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]
+        step = next((s for s in steps if s * self.zoom >= 60), steps[-1])
+        qp.setPen(QColor("#9AA0A6"))
+        x0, _ = self.to_canvas(QPointF(R, 0))
+        x1, _ = self.to_canvas(QPointF(self.width(), 0))
+        v = math.floor(x0 / step) * step
+        while v <= x1:
+            xw = self.to_widget(v, 0).x()
+            qp.drawLine(QPointF(xw, R - 7), QPointF(xw, R))
+            qp.drawText(QPointF(xw + 2, 9), str(int(v)))
+            for k in range(1, 10):
+                xs = self.to_widget(v + step * k / 10, 0).x()
+                qp.drawLine(QPointF(xs, R - (4 if k == 5 else 2)), QPointF(xs, R))
+            v += step
+        _, y0 = self.to_canvas(QPointF(0, R))
+        _, y1 = self.to_canvas(QPointF(0, self.height()))
+        v = math.floor(y0 / step) * step
+        while v <= y1:
+            yw = self.to_widget(0, v).y()
+            qp.drawLine(QPointF(R - 7, yw), QPointF(R, yw))
+            qp.save()
+            qp.translate(9, yw + 2)
+            qp.rotate(90)
+            qp.drawText(QPointF(0, 0), str(int(v)))
+            qp.restore()
+            for k in range(1, 10):
+                ys = self.to_widget(0, v + step * k / 10).y()
+                qp.drawLine(QPointF(R - (4 if k == 5 else 2), ys), QPointF(R, ys))
+            v += step
+        if self.hover is not None:                        # 鼠标位置
+            qp.setPen(QColor("#00C8FF"))
+            qp.drawLine(QPointF(self.hover.x(), 0), QPointF(self.hover.x(), R))
+            qp.drawLine(QPointF(0, self.hover.y()), QPointF(R, self.hover.y()))
+        qp.fillRect(QRectF(0, 0, R, R), QColor("#1E2023"))
+        qp.restore()
+
     def mousePressEvent(self, e):
         self.setFocus()
         if self.doc is None:
+            return
+        if e.button() == Qt.MouseButton.LeftButton and self._guide_press(e):
             return
         if e.button() == Qt.MouseButton.MiddleButton or (e.button() == Qt.MouseButton.LeftButton
                                                           and self._panning_tool()):
@@ -356,6 +554,9 @@ class CanvasView(QWidget):
             return
         self.hover = e.position()
         x, y = self.to_canvas(e.position())
+        if getattr(self, "_gdrag", None) is not None:
+            self._guide_move(e)
+            return
         if self._pan is not None:
             d = e.position() - self._pan
             self._pan = e.position()
@@ -371,6 +572,9 @@ class CanvasView(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, e):
+        if getattr(self, "_gdrag", None) is not None:
+            self._guide_release(e)
+            return
         if self._pan is not None:
             self._pan = None
             self._update_cursor()
@@ -483,6 +687,7 @@ class CanvasView(QWidget):
             qp.setPen(pen)
             qp.drawPath(path)
             qp.restore()
+        self._paint_overlays(qp, r)
         t = self._tool()
         if t is not None:
             qp.setRenderHint(QPainter.RenderHint.Antialiasing)

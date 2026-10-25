@@ -253,6 +253,43 @@ def paint_icon(qp: QPainter, rect: QRectF, kind: str, col: QColor) -> None:
         f.setBold(True)
         qp.setFont(f)
         qp.drawText(QRectF(0, 0, 24, 24), Qt.AlignmentFlag.AlignCenter, "fx")
+    elif kind == "pen":                                    # 钢笔尖
+        path = QPainterPath(QPointF(12, 3))
+        path.lineTo(18, 13)
+        path.lineTo(14, 20)
+        path.lineTo(10, 20)
+        path.lineTo(6, 13)
+        path.closeSubpath()
+        qp.drawPath(path)
+        qp.drawLine(QPointF(12, 3), QPointF(12, 12))
+        qp.drawEllipse(QPointF(12, 13), 1.3, 1.3)
+        qp.drawLine(QPointF(10, 22), QPointF(14, 22))
+    elif kind == "rect":
+        qp.setBrush(fill)
+        qp.drawRect(QRectF(4, 6, 16, 12))
+    elif kind == "rrect":
+        qp.setBrush(fill)
+        qp.drawRoundedRect(QRectF(4, 6, 16, 12), 4, 4)
+    elif kind == "ellipse":
+        qp.setBrush(fill)
+        qp.drawEllipse(QPointF(12, 12), 8, 6)
+    elif kind == "polygon":
+        qp.setBrush(fill)
+        qp.drawPolygon(_poly([(12 + 8 * math.sin(i * math.pi / 3), 12 - 8 * math.cos(i * math.pi / 3)) for i in range(6)]))
+    elif kind == "line":
+        qp.setPen(_pen(col, 2.2))
+        qp.drawLine(QPointF(4, 20), QPointF(20, 4))
+    elif kind == "smart":                                  # 智能对象：图层缩略图角上的小标记
+        qp.drawRect(QRectF(3, 3, 18, 18))
+        qp.drawPolyline(_poly([(7, 15), (11, 11), (14, 14), (17, 9)]))
+    elif kind == "slice":                                  # 切片：刀
+        qp.drawPolygon(_poly([(4, 20), (18, 6), (20, 8), (8, 20)]))
+        qp.drawLine(QPointF(18, 6), QPointF(21, 3))
+    elif kind == "artboard":
+        qp.drawRect(QRectF(6, 6, 12, 12))
+        for x0, y0, x1, y1 in ((6, 2, 6, 5), (18, 2, 18, 5), (6, 19, 6, 22), (18, 19, 18, 22), (2, 6, 5, 6),
+                               (19, 6, 22, 6), (2, 18, 5, 18), (19, 18, 22, 18)):
+            qp.drawLine(QPointF(x0, y0), QPointF(x1, y1))
     elif kind == "folder":
         path = QPainterPath(QPointF(3, 7))
         path.lineTo(3, 19)

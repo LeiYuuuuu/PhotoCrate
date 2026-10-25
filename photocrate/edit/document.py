@@ -35,7 +35,9 @@ from ..i18n import t as _t
 
 _ids = itertools.count(1)
 
-KIND_NAMES = {"pixel": _t("图层"), "text": _t("文字"), "adjust": _t("调整"), "group": _t("图层组")}
+KIND_NAMES = {"pixel": _t("图层"), "text": _t("文字"), "adjust": _t("调整"), "group": _t("图层组"),
+              "shape": _t("形状"), "smart": _t("智能对象")}
+LIVE = ("text", "shape", "smart")        # 按参数重新画出像素的图层：在上面画 / 用滤镜时先栅格化
 
 
 def _ceil_div(a: int, b: int) -> int:
@@ -143,6 +145,7 @@ class Layer:
         self.fill = 1.0                            # 填充不透明度：只影响图层自己的像素，不影响图层样式
         self.style: dict = {}                      # 图层样式（styles.py）：投影、描边、发光…
         self.lock_alpha = self.lock_pixels = self.lock_pos = self.lock_all = False
+        self.source: np.ndarray | None = None      # 智能对象的原始像素
         self.parent: int | None = None             # 所在图层组的 id（None = 不在组里）
         self.collapsed = False                     # 图层组在面板里是否折叠
         self.version = 0
@@ -162,7 +165,7 @@ class Layer:
 
     @property
     def has_pixels(self) -> bool:
-        return self.kind in ("pixel", "text") and self.pixels is not None
+        return self.kind in ("pixel", "text", "shape", "smart") and self.pixels is not None
 
     @property
     def canvas_sized(self) -> bool:
@@ -215,12 +218,36 @@ class Layer:
         self.pixels = render_text(self.params)
         self.touch()
 
+    def render_shape(self) -> None:
+        """形状图层：先把图层被移动过的距离补进几何参数，再按参数重画。"""
+        from .vector import render_shape, translate_shape
+        p = self.params
+        if "rx" in p:
+            dx, dy = self.x - int(p["rx"]), self.y - int(p["ry"])
+            if dx or dy:
+                p = translate_shape(p, dx, dy)
+        px, x, y = render_shape(p)
+        p = dict(p)
+        p["rx"], p["ry"] = x, y
+        self.params = p
+        self.pixels, self.x, self.y = px, x, y
+        self.touch()
+
+    def render(self) -> None:
+        if self.kind == "text":
+            self.render_text()
+        elif self.kind == "shape":
+            self.render_shape()
+        elif self.kind == "smart":
+            from .smart import render_smart
+            render_smart(self)
+
     # ---- 历史记录用 ----
     def snapshot(self) -> dict:
         return {"id": self.id, "kind": self.kind, "name": self.name, "pixels": self.pixels, "x": self.x, "y": self.y,
                 "visible": self.visible, "opacity": self.opacity, "blend": self.blend, "mask": self.mask,
                 "mask_enabled": self.mask_enabled, "params": copy.deepcopy(self.params), "clip": self.clip,
-                "parent": self.parent, "collapsed": self.collapsed, "fill": self.fill,
+                "parent": self.parent, "collapsed": self.collapsed, "fill": self.fill, "source": self.source,
                 "style": copy.deepcopy(self.style), "locks": (self.lock_alpha, self.lock_pixels, self.lock_pos,
                                                              self.lock_all)}
 
@@ -448,6 +475,10 @@ class Document:
         self.selection: np.ndarray | None = None
         self.channels: dict[str, np.ndarray] = {}    # 存储的选区（Alpha 通道）：名称 → 与画布同尺寸的 uint8
         self.quick_mask = False                       # 快速蒙版模式（界面状态，不进历史）
+        self.guides: list[tuple[str, float]] = []     # 参考线：("v", x) 竖线 / ("h", y) 横线，画布像素
+        self.work_path: list[dict] = []               # 钢笔正在画的工作路径（vector.py 的格式）
+        self.regions: list[dict] = []                 # 画板 / 切片：{"kind": artboard / slice, "name", "x", "y", "w", "h"}
+        self.frames: list[dict] = []                  # 时间轴（帧动画）：{"show": [图层 id…], "delay": 毫秒}
         self.mask_edit = False                  # True = 画笔画在当前图层的蒙版上
         self.history = History(self)
         self.source = SourceInfo()
@@ -497,7 +528,8 @@ class Document:
     # ---- 状态 / 历史 ----
     def state(self) -> dict:
         return {"w": self.width, "h": self.height, "active": self.active_id, "sel": self.selection,
-                "depth": self.depth, "channels": dict(self.channels), "layers": [l.snapshot() for l in self.layers]}
+                "depth": self.depth, "channels": dict(self.channels), "guides": list(self.guides), "regions": [dict(r) for r in self.regions],
+                "frames": [dict(f) for f in self.frames], "layers": [l.snapshot() for l in self.layers]}
 
     def restore(self, st: dict) -> None:
         size_changed = (self.width, self.height) != (st["w"], st["h"])
@@ -518,6 +550,7 @@ class Document:
                 setattr(l, k, s[k])
             l.clip, l.parent, l.collapsed = s.get("clip", False), s.get("parent"), s.get("collapsed", False)
             l.fill, l.style = s.get("fill", 1.0), copy.deepcopy(s.get("style") or {})
+            l.source = s.get("source")
             l.lock_alpha, l.lock_pixels, l.lock_pos, l.lock_all = s.get("locks", (False,) * 4)
             l.params = copy.deepcopy(s["params"])
             l.xform = None
@@ -527,6 +560,9 @@ class Document:
         self.layers = layers
         self.selection = st["sel"]
         self.channels = dict(st.get("channels") or {})
+        self.guides = list(st.get("guides") or [])
+        self.regions = [dict(r) for r in st.get("regions") or []]
+        self.frames = [dict(f) for f in st.get("frames") or []]
         self._sel_proxy.clear()
         self.active_id = st["active"] if self.layer(st["active"]) else (layers[-1].id if layers else None)
         if self.active is None or self.active.mask is None:
@@ -686,6 +722,23 @@ class Document:
         l.render_text()
         return self.add_layer(l, name=_t("新建文字图层"))
 
+    def new_shape_layer(self, params: dict, name: str | None = None) -> Layer:
+        from .vector import render_shape
+        l = Layer("shape", name or _t("形状"), params=dict(params))
+        l.render_shape()
+        return self.add_layer(l, name=_t("新建形状图层"))
+
+    def to_smart(self, lid: int | None = None) -> Layer | None:
+        """图层 → 转换为智能对象：之后的缩放、旋转、透视和滤镜都可以再改，不损失画质。"""
+        from .smart import make
+        l = self.layer(self.active_id if lid is None else lid)
+        if l is None or not l.has_pixels or l.kind == "smart":
+            return None
+        with self.edit(_t("转换为智能对象")):
+            make(l, l.pixels)
+            l.version += 1
+        return l
+
     def place_image(self, rgba: np.ndarray, name: str = _t("置入的图片")) -> Layer:
         h, w = rgba.shape[:2]
         s = min(1.0, 0.9 * self.width / w, 0.9 * self.height / h)
@@ -703,6 +756,7 @@ class Document:
         l.visible, l.opacity, l.blend, l.mask_enabled = src.visible, src.opacity, src.blend, src.mask_enabled
         l.clip, l.parent, l.collapsed = src.clip, src.parent, src.collapsed
         l.fill, l.style = src.fill, copy.deepcopy(src.style)
+        l.source = src.source
         l.lock_alpha, l.lock_pixels, l.lock_pos, l.lock_all = src.lock_alpha, src.lock_pixels, src.lock_pos, src.lock_all
         l.mask = None if src.mask is None else src.mask.copy()
         return l
@@ -797,8 +851,8 @@ class Document:
             return
         with self.edit(name, key):
             l.params = copy.deepcopy(params)
-            if l.kind == "text":
-                l.render_text()
+            if l.kind in LIVE:
+                l.render()
             l.version += 1
 
     def translate(self, lid: int, dx: int, dy: int, before: dict | None = None) -> None:
@@ -907,6 +961,68 @@ class Document:
             out = (dist > -px).astype(np.uint8) * 255
         self.set_selection(out, _t("扩展选区") if px > 0 else _t("收缩选区"))
 
+    # ---- 参考线 ----
+    def add_guide(self, orient: str, pos: float) -> None:
+        with self.edit(_t("新建参考线"), kind="guides"):
+            self.guides = self.guides + [(orient, float(pos))]
+
+    def move_guide(self, i: int, pos: float | None, before: dict | None = None) -> None:
+        """移动（pos）或删除（pos 为 None）第 i 条参考线；before：界面边拖边改时拖之前的状态。"""
+        if not 0 <= i < len(self.guides):
+            return
+        st = before or self.state()
+        g = list(self.guides)
+        if pos is None:
+            g.pop(i)
+        else:
+            g[i] = (g[i][0], float(pos))
+        self.guides = g
+        self.history.push_state(_t("删除参考线") if pos is None else _t("移动参考线"), st)
+        self.changed("guides")
+        self.emit("history")
+
+    # ---- 画板 / 切片 ----
+    def add_region(self, kind: str, x: float, y: float, w: float, h: float, name: str | None = None) -> dict:
+        x0, x1 = sorted((int(round(x)), int(round(x + w))))
+        y0, y1 = sorted((int(round(y)), int(round(y + h))))
+        n = sum(1 for r in self.regions if r["kind"] == kind) + 1
+        r = {"kind": kind, "name": name or (_t('画板 {0}', n) if kind == "artboard" else _t('切片 {0}', n)),
+             "x": x0, "y": y0, "w": max(1, x1 - x0), "h": max(1, y1 - y0)}
+        with self.edit(_t("新建画板") if kind == "artboard" else _t("新建切片"), kind="guides"):
+            self.regions = self.regions + [r]
+        return r
+
+    def remove_regions(self, kind: str, index: int | None = None) -> None:
+        idx = [i for i, r in enumerate(self.regions) if r["kind"] == kind]
+        if not idx:
+            return
+        drop = set(idx) if index is None else {idx[index]} if -len(idx) <= index < len(idx) else set()
+        with self.edit(_t("删除画板") if kind == "artboard" else _t("删除切片"), kind="guides"):
+            self.regions = [r for i, r in enumerate(self.regions) if i not in drop]
+
+    def export_regions(self, kind: str, folder: str, ext: str = ".png", quality: int = 92) -> list[str]:
+        """导出画板 / 切片：每个区域从合成结果里裁出来存一张。"""
+        import os
+        from .io import export_image
+        flat = self.render_full()
+        out = []
+        for r in [r for r in self.regions if r["kind"] == kind]:
+            part = crop_canvas(flat, r["x"], r["y"], r["w"], r["h"], 0)
+            safe = "".join(c if c not in '\\/:*?"<>|' else "_" for c in r["name"]).strip() or kind
+            p = os.path.join(folder, safe + ext)
+            k = 1
+            while os.path.exists(p):
+                p = os.path.join(folder, f"{safe} ({k}){ext}")
+                k += 1
+            export_image(self, p, quality, True, False, rgba=part)
+            out.append(p)
+        return out
+
+    def clear_guides(self) -> None:
+        if self.guides:
+            with self.edit(_t("清除参考线"), kind="guides"):
+                self.guides = []
+
     def save_selection(self, name: str) -> str:
         """选择 → 存储选区：存成一个 Alpha 通道（同名覆盖）。返回实际用的名称。"""
         if self.selection is None:
@@ -957,10 +1073,10 @@ class Document:
 
     def rasterize(self, lid: int, record: bool = True) -> None:
         l = self.layer(lid)
-        if l is None or l.kind != "text":
+        if l is None or l.kind not in LIVE:
             return
         if record:
-            with self.edit(_t("栅格化文字")):
+            with self.edit({"text": _t("栅格化文字"), "shape": _t("栅格化形状")}.get(l.kind, _t("栅格化图层"))):
                 l.kind = "pixel"
                 l.version += 1
         else:
@@ -1046,6 +1162,14 @@ class Document:
         from .filters import FILTERS
         l = self._editable(lid)
         if l is None:
+            return
+        if l.kind == "smart":                              # 智能滤镜：记进参数，随时可改 / 关掉 / 删掉
+            with self.edit(_t('智能滤镜：{0}', FILTERS[fid].name)):
+                p = dict(l.params)
+                p["filters"] = list(p.get("filters") or []) + [[fid, dict(params or {}), True]]
+                l.params = p
+                l.render()
+                l.version += 1
             return
         out = self._filtered_full(l, fid, params or {})
         self.replace_pixels(lid, out, FILTERS[fid].name)
@@ -1233,7 +1357,7 @@ class Document:
         M = np.array([[c, -s, cx - c * w / 2 + s * h / 2], [s, c, cy - s * w / 2 - c * h / 2]], np.float64)
         with self.edit(_t("裁剪")):
             for l in self.layers:
-                if l.kind == "text":
+                if l.kind in LIVE:
                     l.kind = "pixel"
                 if l.canvas_sized:
                     if l.mask is not None:
@@ -1251,6 +1375,7 @@ class Document:
             self.width, self.height = w, h
             self.selection = None
             self.channels = {k: _warp(v, M, w, h, inverse=True, fill=0) for k, v in self.channels.items()}
+            self.guides = []
         self.emit("canvas")
 
     def _crop_straight(self, x: int, y: int, w: int, h: int) -> None:
@@ -1279,6 +1404,7 @@ class Document:
             self.width, self.height = w, h
             self.selection = None if self.selection is None else crop_canvas(self.selection, x, y, w, h, 0)
             self.channels = {k: crop_canvas(v, x, y, w, h, 0) for k, v in self.channels.items()}
+            self.guides = [(o, p - (x if o == "v" else y)) for o, p in self.guides]
         self.emit("canvas")
 
     def rotate(self, k: int) -> None:
@@ -1289,7 +1415,7 @@ class Document:
         W, H = self.width, self.height
         with self.edit({1: _t("顺时针旋转 90°"), 2: _t("旋转 180°"), 3: _t("逆时针旋转 90°")}[k]):
             for l in self.layers:
-                if l.kind == "text":
+                if l.kind in LIVE:
                     l.kind = "pixel"
                 if l.canvas_sized:
                     if l.mask is not None:
@@ -1313,6 +1439,7 @@ class Document:
             if self.selection is not None:
                 self.selection = np.ascontiguousarray(np.rot90(self.selection, -k))
             self.channels = {n: np.ascontiguousarray(np.rot90(v, -k)) for n, v in self.channels.items()}
+            self.guides = []
         self.emit("canvas")
 
     def flip(self, horizontal: bool = True) -> None:
@@ -1320,7 +1447,7 @@ class Document:
         with self.edit(_t("水平翻转") if horizontal else _t("垂直翻转")):
             ax = 1 if horizontal else 0
             for l in self.layers:
-                if l.kind == "text":
+                if l.kind in LIVE:
                     l.kind = "pixel"
                 if l.canvas_sized:
                     if l.mask is not None:
@@ -1339,6 +1466,8 @@ class Document:
             if self.selection is not None:
                 self.selection = np.ascontiguousarray(np.flip(self.selection, ax))
             self.channels = {n: np.ascontiguousarray(np.flip(v, ax)) for n, v in self.channels.items()}
+            self.guides = [(o, (W - p if o == "v" else p) if horizontal else (H - p if o == "h" else p))
+                           for o, p in self.guides]
 
     def resize_image(self, w: int, h: int) -> None:
         w, h = max(1, int(w)), max(1, int(h))
@@ -1349,6 +1478,20 @@ class Document:
                     if l.mask is not None:
                         l.mask = _resize(l.mask, w, h)
                         l.touch_mask()
+                    continue
+                if l.kind == "smart":                          # 智能对象：把缩放并进矩阵，从原始像素重新取样
+                    from .smart import matrix
+                    H = np.diag([sx, sy, 1.0]) @ matrix(l)
+                    l.params = dict(l.params, H=H.tolist())
+                    l.params.pop("rx", None)
+                    l.params.pop("ry", None)
+                    l.render()
+                    continue
+                if l.kind == "shape":
+                    from .vector import scale_shape
+                    l.render_shape()                               # 先把移动过的距离并进参数
+                    l.params = scale_shape(l.params, sx, sy)
+                    l.render_shape()
                     continue
                 l.x, l.y = int(round(l.x * sx)), int(round(l.y * sy))
                 if l.kind == "text":
@@ -1366,6 +1509,7 @@ class Document:
             if self.selection is not None:
                 self.selection = _resize(self.selection, w, h)
             self.channels = {n: _resize(v, w, h) for n, v in self.channels.items()}
+            self.guides = [(o, p * (sx if o == "v" else sy)) for o, p in self.guides]
         self.emit("canvas")
 
     def transform_layer(self, lid: int, M) -> None:
@@ -1374,6 +1518,19 @@ class Document:
         from . import warp
         l = self.layer(lid)
         if l is None or not l.has_pixels:
+            return
+        if l.kind in ("shape", "smart") and not isinstance(M, dict):
+            with self.edit(_t("自由变换")):
+                if l.kind == "shape":
+                    from .vector import transform_shape
+                    l.render_shape()
+                    l.params = transform_shape(l.params, M)
+                    l.render_shape()
+                else:
+                    from .smart import transform
+                    transform(l, M)
+                l.xform = None
+                l.version += 1
             return
         if isinstance(M, dict) or not warp.is_affine(M):
             self._transform_general(l, M)

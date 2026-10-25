@@ -166,6 +166,24 @@ Enter applies, Esc cancels.
 
 ![Select and Mask](screenshots/en/editor_refine.png)
 
+### Design and productivity: pen, shapes, smart objects, guides, actions, panoramas, print
+
+**Shapes and the Pen.** Press **U** for the Rectangle / Ellipse tools and drag — you get a shape layer whose color and stroke stay editable in Properties and never blur when resized (great for posters and callouts). Press **P** for the Pen: click to add points, drag to pull curves, click the first point to close, then "Make Selection" for precise cut-outs along curves.
+
+**Smart Objects.** Going to resize a placed image several times? First choose **Layer → Smart Object → Convert to Smart Object**: every resize is computed from the original, and filters become Smart Filters you can edit or switch off.
+
+**Guides.** **Ctrl+R** shows the rulers; drag from a ruler into the picture to make a guide. Moving layers snaps to guides, the canvas edges and the center lines, which makes centering easy.
+
+**Actions and Batch.** Need the same treatment for many photos (say, long side 2048 plus sharpening)? **Window → Actions**, "New & Record", do it once on one photo, "Stop Recording"; then "Batch…", pick the other photos, and they're all processed into another folder.
+
+**Panoramas and focus stacking.** **File → Automate → Photomerge**: pick a few photos taken while turning (neighbours overlapping by a third) and they're stitched with the empty edges cropped. For macro or product shots without enough depth of field, Focus Stack merges shots focused near, middle and far into one that's sharp throughout.
+
+**Print.** **View → Proof Colors** (Ctrl+Y) previews printed color and **Gamut Warning** (Ctrl+Shift+Y) grays out colors that can't be printed; tick "Convert to CMYK" when exporting JPEG / TIFF for the printer. For Photoshop users: **File → Export → Save as PSD**.
+
+**Sky Replacement.** **Edit → Sky Replacement…** finds the sky and swaps in Sunset, Clear sky and more (or your own sky photo), harmonizing the foreground tone; everything lands in a group whose mask and position you can still change.
+
+![Shape layers and guides](screenshots/en/editor_shapes.png)
+
 ---
 
 ## 5. Saving: two ways, pick what you need

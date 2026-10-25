@@ -303,7 +303,7 @@ class ToolBar(QWidget):
         lay.setSpacing(2)
         self.buttons: dict[str, ToolButton] = {}         # 工具 id → 它所在的那一格
         self.slots: list[ToolButton] = []
-        breaks = {"marquee", "crop", "heal", "text", "hand"}
+        breaks = {"marquee", "crop", "heal", "pen", "hand"}
         for slot in TOOL_SLOTS:
             if slot[0] in breaks:
                 sep = QWidget()
@@ -572,7 +572,9 @@ class ExportDialog(_Base):
         self.rescan.setChecked(True)
         self.deep = QCheckBox(_t("保存为 16 位（PNG / TIFF，给其他修图软件接着调；文件大一倍）"))
         self.deep.setChecked(doc.depth == 16)
-        for w in (self.deep, self.keep_exif, self.strip_gps, self.rescan):
+        self.cmyk = QCheckBox(_t("转换为 CMYK（印刷用，按「校样设置」里的配置文件）"))
+        self.cmyk.setChecked(False)
+        for w in (self.deep, self.cmyk, self.keep_exif, self.strip_gps, self.rescan):
             self.body.addWidget(w)
         self.body.addWidget(caption(_t('画布 {0} × {1}，{2} 个图层合并成一张。原片不会被修改；想保留图层以后再改，用「文件 → 保存工程」。', doc.width, doc.height, len(doc.layers)), "faint", 8.5))
         self.fmt.currentIndexChanged.connect(self._fmt_changed)
@@ -593,6 +595,7 @@ class ExportDialog(_Base):
             self.path.setText(os.path.splitext(p)[0] + ext)
         self.quality.setEnabled(ext in (".jpg", ".webp"))
         self.deep.setEnabled(ext in (".png", ".tif"))
+        self.cmyk.setEnabled(ext in (".jpg", ".tif"))
         self._update_rescan()
 
     def deep_on(self) -> bool:
@@ -768,11 +771,20 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._act(m, _t("打开工程…"), lambda: self.open_image(project=True))
         self._act(m, _t("置入图片（作为新图层）…"), self.place_image, "Ctrl+Shift+P")
         self._act(m, _t("合并曝光（HDR）…"), self.merge_exposures)
+        sub = m.addMenu(_t("自动"))
+        self._act(sub, _t("Photomerge（全景拼接）…"), self.photomerge)
+        self._act(sub, _t("景深合成（焦点堆栈）…"), self.focus_stack)
+        self._act(sub, _t("批处理…"), self.batch)
         self.a_redevelop = self._act(m, _t("重新显影 RAW…"), self.redevelop_raw)
         m.addSeparator()
         self._act(m, _t("保存工程"), self.save_project, "Ctrl+S")
         self._act(m, _t("工程另存为…"), lambda: self.save_project(ask=True))
         self._act(m, _t("导出图片…"), self.export, ["Ctrl+Shift+S", "Ctrl+Alt+Shift+W"])
+        sub = m.addMenu(_t("导出"))
+        self._act(sub, _t("存储为 PSD…"), self.save_psd)
+        self._act(sub, _t("导出画板…"), lambda: self.export_regions("artboard"))
+        self._act(sub, _t("导出切片…"), lambda: self.export_regions("slice"))
+        self._act(sub, _t("导出动画（GIF / MP4）…"), self.show_timeline)
         m.addSeparator()
         self._act(m, _t("关闭"), self.close, "Ctrl+W")
 
@@ -788,6 +800,9 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._act(m, _t("填充…"), self.fill, "Shift+F5")
         self._act(m, _t("内容识别填充（去掉选区里的东西）"), self.content_fill, "Shift+Backspace")
         self._act(m, _t("清除选区内容"), self.clear, "Delete")
+        m.addSeparator()
+        self._act(m, _t("天空替换…"), self.sky_replace)
+        self._act(m, _t("转换为配置文件…"), self.convert_profile)
         m.addSeparator()
         self._act(m, _t("自由变换"), lambda: self.transform_mode("free"), "Ctrl+T")
         sub = m.addMenu(_t("变换"))
@@ -819,12 +834,12 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         m.addSeparator()
         self._act(m, _t("修补重影（从某一张源图取）…"), self.fix_ghost)
         sub = m.addMenu(_t("图像旋转"))
-        self._act(sub, _t("顺时针 90°"), lambda: d().rotate(1))
-        self._act(sub, _t("逆时针 90°"), lambda: d().rotate(3))
-        self._act(sub, "180°", lambda: d().rotate(2))
+        self._act(sub, _t("顺时针 90°"), lambda: self._rot(1))
+        self._act(sub, _t("逆时针 90°"), lambda: self._rot(3))
+        self._act(sub, "180°", lambda: self._rot(2))
         sub.addSeparator()
-        self._act(sub, _t("水平翻转"), lambda: d().flip(True))
-        self._act(sub, _t("垂直翻转"), lambda: d().flip(False))
+        self._act(sub, _t("水平翻转"), lambda: self._flip(True))
+        self._act(sub, _t("垂直翻转"), lambda: self._flip(False))
 
         m = mb.addMenu(_t("图层"))
         self._act(m, _t("新建图层"), lambda: d().new_pixel_layer(), "Ctrl+Shift+N")
@@ -850,10 +865,14 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._act(m, _t("下移一层"), lambda: d().move_layer(d().active_id, -1), "Ctrl+[")
         m.addSeparator()
         self._act(m, _t("向下合并"), lambda: self._busy_call(_t("正在合并…"), lambda: d().merge_down(d().active_id)), "Ctrl+E")
-        self._act(m, _t("盖印可见图层"), lambda: self._busy_call(_t("正在合成…"), d().stamp_visible), "Ctrl+Alt+Shift+E")
-        self._act(m, _t("拼合图像"), lambda: self._busy_call(_t("正在拼合…"), d().flatten))
+        self._act(m, _t("盖印可见图层"), lambda: (self._busy_call(_t("正在合成…"), d().stamp_visible),
+                                              self._rec({"op": "stamp"})), "Ctrl+Alt+Shift+E")
+        self._act(m, _t("拼合图像"), lambda: (self._busy_call(_t("正在拼合…"), d().flatten), self._rec({"op": "flatten"})))
         m.addSeparator()
-        self._act(m, _t("栅格化文字"), lambda: d().rasterize(d().active_id))
+        sub = m.addMenu(_t("智能对象"))
+        self._act(sub, _t("转换为智能对象"), self.to_smart)
+        self._act(sub, _t("替换内容…"), self.replace_smart)
+        self._act(m, _t("栅格化（文字 / 形状 / 智能对象）"), lambda: d().rasterize(d().active_id))
 
         m = mb.addMenu(_t("选择"))
         self._act(m, _t("全选"), lambda: d().select_all(), "Ctrl+A")
@@ -882,7 +901,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         m.addSeparator()
         for title, fids in ((P_BLUR, ("gaussian", "motion", "surface", "lensblur")),
                             (_t("扭曲"), ("twirl", "wave", "ripple", "spherize", "pinch", "polar")),
-                            (_t("锐化"), ("unsharp",)), (_t("杂色"), ("denoise", "noise")),
+                            (_t("锐化"), ("unsharp",)), (_t("杂色"), ("denoise", "noise")), (_t("人像"), ("skin",)),
                             (_t("其他"), ("highpass", "mosaic", "posterize", "threshold"))):
             sub = m.addMenu(title)
             for fid in fids:
@@ -893,6 +912,31 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._act(m, _t("缩小"), lambda: self.canvas.zoom_step(False), "Ctrl+-")
         self._act(m, _t("适合窗口"), self.canvas.fit, "Ctrl+0")
         self._act(m, _t("实际像素（100%）"), lambda: self.canvas.set_zoom(1.0), "Ctrl+1")
+        m.addSeparator()
+        self.a_view = {}
+        for key, label, sc, dv in (("show_rulers", _t("标尺"), "Ctrl+R", False), ("show_grid", _t("网格"), "Ctrl+'", False),
+                                   ("show_guides", _t("参考线"), "Ctrl+;", True), ("snap", _t("对齐（吸附）"), "Ctrl+Shift+;", True)):
+            a = self._act(m, label, lambda k=key: self.toggle_view(k), sc)
+            a.setCheckable(True)
+            a.setChecked(bool(self.opts.get(key, dv)))
+            self.opts.setdefault(key, dv)
+            self.a_view[key] = a
+        m.addSeparator()
+        self._act(m, _t("校样设置…"), self.proof_setup)
+        self.a_proof = self._act(m, _t("校样颜色"), lambda: self.toggle_proof("proof_on"), "Ctrl+Y")
+        self.a_gamut = self._act(m, _t("色域警告"), lambda: self.toggle_proof("gamut_on"), "Ctrl+Shift+Y")
+        for a in (self.a_proof, self.a_gamut):
+            a.setCheckable(True)
+        self.opts["proof_on"] = self.opts["gamut_on"] = False
+        m.addSeparator()
+        self._act(m, _t("新建参考线…"), self.new_guide)
+        self._act(m, _t("清除参考线"), lambda: d().clear_guides())
+        self._act(m, _t("网格间距…"), self.grid_spacing)
+
+        m = mb.addMenu(_t("窗口"))
+        self._act(m, _t("动作…"), self.show_actions, "Alt+F9")
+        self._act(m, _t("批处理…"), self.batch)
+        self._act(m, _t("时间轴（帧动画）…"), self.show_timeline)
 
         m = mb.addMenu(_t("帮助"))
         self._act(m, _t("新手教程"), self.start_tour)
@@ -995,6 +1039,8 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
             self._update_title()
             self._update_zoom()
             self._panel_timer.start()
+        elif kind == "guides":
+            self.canvas.update()
         elif kind == "history":
             self.history.refresh()
             self._update_title()
@@ -1050,6 +1096,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._leave_transform()
         with _Busy(self, _t("正在转换位深…")):
             self.doc.convert_depth(depth)
+        self._rec({"op": "depth", "depth": depth})
         self.status_msg(_t("已转换为 16 位/通道：调色不容易出断层，导出 PNG / TIFF 时可以保存 16 位")
                         if depth == 16 else _t("已转换为 8 位/通道"))
 
@@ -1091,6 +1138,92 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         l = Layer("pixel", _t('RAW 显影 · {0}', os.path.basename(p)), np.ascontiguousarray(rgba))
         d.add_layer(l, 1 if d.layers else 0, _t("重新显影 RAW"))
         self.status_msg(_t("已作为新图层放在背景上面：可以和原来的叠在一起，用蒙版取各自好的部分"))
+
+    # ---- 色彩管理 ----
+    proof = None
+
+    def _ensure_proof(self) -> bool:
+        if self.proof is not None:
+            return True
+        from ...edit import color
+        path = self.opts.get("proof_profile")
+        if not path or not os.path.exists(path):
+            path = next((p for p, _, sp in color.system_profiles() if sp == "CMYK"), None)
+        if not path:
+            info(self, _t("校样设置"), _t("没有找到 CMYK 配置文件。可以从印刷厂或 Adobe 下载 .icc 文件，再在「视图 → 校样设置」里选择。"))
+            return False
+        try:
+            self.proof = color.Proof(path, int(self.opts.get("proof_intent", 1)), self.doc.source.icc)
+            self.opts["proof_profile"] = path
+        except Exception as e:
+            info(self, _t("校样设置"), str(e), "ERROR")
+            return False
+        return True
+
+    def toggle_proof(self, key: str) -> None:
+        on = not self.opts.get(key, False)
+        if on and not self._ensure_proof():
+            on = False
+        self.opts[key] = on
+        (self.a_proof if key == "proof_on" else self.a_gamut).setChecked(on)
+        self.canvas.request_render()
+        if on and key == "proof_on":
+            from ...edit.color import profile_name
+            self.status_msg(_t('校样颜色：按「{0}」模拟印出来的颜色（只影响显示）', profile_name(self.opts["proof_profile"])))
+        elif on:
+            self.status_msg(_t("色域警告：灰色的地方印不出来（超出校样配置文件的色域）"))
+
+    def proof_setup(self) -> None:
+        from .dialogs2 import ProfileDialog
+        dlg = ProfileDialog(self, _t("校样设置"), self.opts.get("proof_profile"), int(self.opts.get("proof_intent", 1)),
+                            cmyk_first=True)
+        if dlg.exec() != ProfileDialog.DialogCode.Accepted or not dlg.path():
+            return
+        self.opts["proof_profile"], self.opts["proof_intent"] = dlg.path(), dlg.intent()
+        self.proof = None
+        if self._ensure_proof() and not self.opts.get("proof_on"):
+            self.toggle_proof("proof_on")
+        else:
+            self.canvas.request_render()
+
+    def convert_profile(self) -> None:
+        from ...edit import color
+        from .dialogs2 import ProfileDialog
+        dlg = ProfileDialog(self, _t("转换为配置文件"), None, 0, rgb_only=True,
+                            note=_t('现在是：{0}', color.profile_name(self.doc.source.icc)))
+        if dlg.exec() != ProfileDialog.DialogCode.Accepted or not dlg.path():
+            return
+        with _Busy(self, _t("正在转换颜色…")):
+            color.convert_doc(self.doc, dlg.path() if dlg.path() != "sRGB" else None, dlg.intent())
+        self.proof = None
+        self.status_msg(_t('已转换为「{0}」：导出时带上这个配置文件', color.profile_name(self.doc.source.icc)))
+
+    def toggle_view(self, key: str) -> None:
+        self.opts[key] = not self.opts.get(key, key in ("show_guides", "snap"))
+        self.a_view[key].setChecked(bool(self.opts[key]))
+        self.canvas.update()
+
+    def new_guide(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        items = [_t("垂直"), _t("水平")]
+        o, ok = QInputDialog.getItem(self, _t("新建参考线"), _t("方向："), items, 0, False)
+        if not ok:
+            return
+        v = NumberDialog.ask(self, _t("新建参考线"), _t("位置"), self.doc.width // 2 if o == items[0] else
+                             self.doc.height // 2, -30000, 30000)
+        if v is not None:
+            self.doc.add_guide("v" if o == items[0] else "h", v)
+            if not self.opts.get("show_guides", True):
+                self.toggle_view("show_guides")
+
+    def grid_spacing(self) -> None:
+        v = NumberDialog.ask(self, _t("网格间距"), _t("每格"), int(self.opts.get("grid_step", 100)), 2, 10000,
+                             note=_t("每一大格再细分成 4 小格。"))
+        if v:
+            self.opts["grid_step"] = int(v)
+            if not self.opts.get("show_grid"):
+                self.toggle_view("show_grid")
+            self.canvas.update()
 
     def _key_tool(self, ids: list[str], cycle: bool) -> None:
         slot = self.toolbar.slot_of(ids[0])
@@ -1221,6 +1354,71 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self.props.sync()
         self.layers.refresh(thumbs=False)
 
+    def shape_edited(self, lid: int, key: str) -> None:
+        ed = self.props.editor
+        l = self.doc.layer(lid)
+        if l is None or l.kind != "shape" or ed is None:
+            return
+        self.mark_interactive()
+        p = dict(l.params)
+        p.update({k: v for k, v in ed.params.items() if k in ("fill", "stroke", "stroke_w", "radius", "sides")})
+        self.doc.set_params(lid, p, key=f"shape{lid}:{key}", name=_t("编辑形状"))
+
+    def to_smart(self) -> None:
+        l = self.doc.active
+        if l is None or not l.has_pixels:
+            self.status_msg(_t("选中一个像素 / 文字 / 形状图层再转换"))
+            return
+        self.doc.to_smart(l.id)
+        self.props.rebuild()
+        self.status_msg(_t("已转换为智能对象：以后缩放、变换、滤镜都可以再改，画质不会越改越差"))
+
+    def replace_smart(self) -> None:
+        from PIL import Image, ImageOps
+        l = self.doc.active
+        if l is None or l.kind != "smart":
+            self.status_msg(_t("先选中一个智能对象"))
+            return
+        start = os.path.dirname(self.doc.source.path or "") or os.path.expanduser("~")
+        p, _ = QFileDialog.getOpenFileName(self, _t("替换内容"), start, eio.OPEN_FILTER)
+        if not p:
+            return
+        try:
+            with Image.open(p) as im:
+                arr = np.array(ImageOps.exif_transpose(im).convert("RGBA"), dtype=np.uint8)
+        except Exception as e:
+            info(self, _t("无法打开"), f"{p}<br>{e}", "ERROR")
+            return
+        from ...edit.smart import replace_contents
+        d = self.doc
+        with d.edit(_t("替换内容")):
+            replace_contents(l, arr)
+            l.version += 1
+
+    def smart_filter(self, lid: int, i: int, action: str, on: bool = True) -> None:
+        d = self.doc
+        l = d.layer(lid)
+        if l is None or l.kind != "smart":
+            return
+        fl = [list(f) for f in l.params.get("filters") or []]
+        if not 0 <= i < len(fl):
+            return
+        if action == "edit":
+            dlg = FilterDialog(self, fl[i][0], fl[i][1])
+            if dlg.exec() != FilterDialog.DialogCode.Accepted:
+                return
+            fl[i][1] = dict(dlg.params)
+        elif action == "toggle":
+            while len(fl[i]) < 3:
+                fl[i].append(True)
+            fl[i][2] = bool(on)
+        elif action == "delete":
+            fl.pop(i)
+        p = dict(l.params)
+        p["filters"] = fl
+        d.set_params(lid, p, name=_t("智能滤镜"))
+        self.props.rebuild()
+
     def text_edited(self, key: str) -> None:
         l = self.doc.active
         ed = self.props.editor
@@ -1230,8 +1428,58 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self.doc.set_params(l.id, ed.params, key=f"text{l.id}:{key}", name=_t("编辑文字"))
 
     def new_adjust(self, name: str = _t("调整"), params: dict | None = None, focus: str | None = None) -> None:
-        self.doc.new_adjust_layer(params or {}, name)
+        l = self.doc.new_adjust_layer(params or {}, name)
+        self._rec({"op": "adjust", "name": name, "params": dict(params or {}), "lid": l.id})
         self.props.rebuild(focus)
+
+    # ---- 动作 ----
+    recording = None
+
+    def _rec(self, step: dict) -> None:
+        if self.recording is not None:
+            self.recording["steps"].append(step)
+            if getattr(self, "_actions_dlg", None) is not None:
+                self._actions_dlg._refresh()
+
+    def start_recording(self, name: str) -> None:
+        self.recording = {"name": name, "steps": []}
+        self.status_msg(_t('开始录制动作「{0}」：接下来的操作都会记下来，做完在「动作」里点「停止录制」', name))
+
+    def stop_recording(self):
+        rec, self.recording = self.recording, None
+        if rec is None:
+            return None, []
+        steps = []
+        for st in rec["steps"]:                       # 调整图层：记录停止时它最终的参数（中间拖了很多次滑块）
+            st = dict(st)
+            lid = st.pop("lid", None)
+            l = self.doc.layer(lid) if lid is not None else None
+            if st["op"] == "adjust" and l is not None:
+                import copy as _copy
+                st["params"] = _copy.deepcopy(l.params)
+            steps.append(st)
+        self.status_msg(_t('动作「{0}」录好了：{1} 步', rec["name"], len(steps)))
+        return rec["name"], steps
+
+    def show_actions(self) -> None:
+        from .actions_dlg import ActionsDialog
+        if getattr(self, "_actions_dlg", None) is None:
+            self._actions_dlg = ActionsDialog(self)
+        self._actions_dlg.show()
+        self._actions_dlg.raise_()
+
+    def batch(self) -> None:
+        from .actions_dlg import ActionsDialog
+        self.show_actions()
+        self._actions_dlg._batch()
+
+    def _rot(self, k: int) -> None:
+        self.doc.rotate(k)
+        self._rec({"op": "rotate", "k": k})
+
+    def _flip(self, horizontal: bool) -> None:
+        self.doc.flip(horizontal)
+        self._rec({"op": "flip", "horizontal": horizontal})
 
     def add_mask(self) -> None:
         d = self.doc
@@ -1288,6 +1536,9 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
             params = dlg.params
         with _Busy(self, _t('正在应用{0}…', spec.name)):
             self.doc.apply_filter(l.id, fid, params or {})
+        self._rec({"op": "filter", "fid": fid, "params": dict(params or {})})
+        if l.kind == "smart":
+            self.props.rebuild()
         self._last_filter = (fid, dict(params or {}))
         self.a_last_filter.setText(_t('上次滤镜：{0}', spec.name))
         self.a_last_filter.setEnabled(True)
@@ -1429,6 +1680,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         if dlg.exec() == ImageSizeDialog.DialogCode.Accepted:
             w, h = dlg.w.value(), dlg.h.value()
             if (w, h) != (d.width, d.height):
+                self._rec({"op": "resize", "sx": w / d.width, "sy": h / d.height})
                 with _Busy(self, _t("正在调整图像大小…")):
                     d.resize_image(w, h)
 
@@ -1557,6 +1809,129 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         if ps:
             merge_paths(self.ctx, self.parent() or self, [p for p in ps if not p.lower().endswith(eio.PROJECT_EXT)])
 
+    def sky_replace(self) -> None:
+        from .dialogs2 import SkyDialog
+        self._leave_transform()
+        dlg = SkyDialog(self)
+        if dlg.exec() != SkyDialog.DialogCode.Accepted:
+            return
+        from ...edit import sky
+        with _Busy(self, _t("正在替换天空…")):
+            m = dlg.full_mask()
+            if not m.any():
+                self.status_msg(_t("没有找到天空：天空太小、或者和地面颜色太接近。可以先自己选出天空再用「编辑 → 填充」"))
+                return
+            sky.replace(self.doc, m, dlg.sky_image(), dlg.harm.value(), dlg.bright.value())
+        self.props.rebuild()
+        self.status_msg(_t("已替换天空：放在「天空替换」组里，可以改蒙版、移动新天空、调前景协调的浓度"))
+
+    def save_psd(self) -> None:
+        from ...edit import psd
+        d = self.doc
+        start = os.path.splitext(eio.default_project_path(d) or os.path.expanduser(_t("~/未命名.pcedit")))[0] + ".psd"
+        p, _ = QFileDialog.getSaveFileName(self, _t("存储为 PSD"), start, "Photoshop (*.psd)")
+        if not p:
+            return
+        if not p.lower().endswith(".psd"):
+            p += ".psd"
+        if os.path.normcase(os.path.abspath(p)) == os.path.normcase(os.path.abspath(d.source.path or "?")):
+            info(self, _t("存储为 PSD"), _t("不能覆盖原片：请另存为一个新文件。"))
+            return
+        self._leave_transform()
+        try:
+            with _Busy(self, _t("正在写 PSD…")):
+                size = psd.write(d, p)
+        except Exception as e:
+            info(self, _t("存储失败"), str(e), "ERROR")
+            return
+        from ...ops.pathsafe import human_size
+        n_adj = sum(1 for l in d.layers if l.kind == "adjust")
+        self.status_msg(_t('已存储为 PSD：{0}（{1}）', p, human_size(size)) +
+                        (_t("。注意：{0} 个调整图层在 PSD 里只能留一个隐藏的占位图层，合成结果是对的", n_adj) if n_adj else ""))
+
+    def export_regions(self, kind: str) -> None:
+        d = self.doc
+        if not any(r["kind"] == kind for r in d.regions):
+            self.status_msg(_t("还没有画板：用画板工具（V，和移动同一格）拖出来") if kind == "artboard"
+                            else _t("还没有切片：用切片工具（C，和裁剪同一格）拖出来"))
+            return
+        start = os.path.dirname(d.source.path or "") or os.path.expanduser("~")
+        folder = QFileDialog.getExistingDirectory(self, _t("导出到哪个文件夹"), start)
+        if not folder:
+            return
+        with _Busy(self, _t("正在导出…")):
+            out = d.export_regions(kind, folder, ".png")
+        self.status_msg(_t('已导出 {0} 张到 {1}', len(out), folder))
+
+    def show_timeline(self) -> None:
+        from .timeline_dlg import TimelineDialog
+        if getattr(self, "_timeline", None) is None:
+            self._timeline = TimelineDialog(self)
+        self._timeline.show()
+        self._timeline.raise_()
+
+    def _pick_many(self, title: str) -> list[str]:
+        start = os.path.dirname(self.doc.source.path or "") or os.path.expanduser("~")
+        ps, _ = QFileDialog.getOpenFileNames(self, title, start, eio.OPEN_FILTER)
+        return [p for p in ps if not p.lower().endswith(eio.PROJECT_EXT)]
+
+    def _load_rgb(self, paths: list[str]) -> list:
+        out = []
+        for p in paths:
+            d = eio.open_file(p)
+            out.append(d.render_full(np.uint8)[..., :3])
+        return out
+
+    def _open_result(self, rgba, first: str, suffix: str, sources=None, names=()) -> None:
+        from ...edit.document import SourceInfo
+        doc = eio._new_doc(np.ascontiguousarray(rgba), _t("结果"))
+        if sources:
+            res = doc.layers[0]
+            doc.layers = []
+            for img, n in zip(sources, names):
+                l = doc._register(Layer("pixel", n, np.dstack([img, np.full(img.shape[:2], 255, np.uint8)])))
+                l.visible = False
+                doc.layers.append(l)
+            doc.layers.append(res)
+            doc.active_id = res.id
+        doc.source = SourceInfo(path=first, name=os.path.basename(first), suffix=suffix)
+        doc.modified = True
+        open_editor(self.ctx, self.parent() or self, doc=doc)
+
+    def photomerge(self) -> None:
+        ps = self._pick_many(_t("选择要拼成全景的几张照片（相邻的重叠 30% 以上）"))
+        if len(ps) < 2:
+            return
+        r = choose(self, _t("Photomerge"), _t("用哪种方式拼接？<br>「全景」：站在原地转着拍的风景（球面投影）。<br>"
+                                               "「平面扫描」：平移着拍的书页、壁画、地图（不做透视变形）。"),
+                   [("auto", _t("全景"), "primary"), ("scans", _t("平面扫描"), "secondary"), (None, _t("取消"), "secondary")])
+        if r is None:
+            return
+        from ...edit.stitch import StitchError, panorama
+        try:
+            with _Busy(self, _t("正在拼接全景（几十秒）…")):
+                rgba = panorama(self._load_rgb(ps), r, crop=True)
+        except StitchError as e:
+            info(self, _t("Photomerge"), str(e), "NOTICE")
+            return
+        self._open_result(rgba, ps[0], _t("_全景"))
+
+    def focus_stack(self) -> None:
+        ps = self._pick_many(_t("选择同一场景、对焦在不同距离的几张照片"))
+        if len(ps) < 2:
+            return
+        from ...edit.stitch import StitchError, focus_stack
+        try:
+            with _Busy(self, _t("正在对齐并合成景深…")):
+                imgs = self._load_rgb(ps)
+                out, _, aligned = focus_stack(imgs, True)
+        except StitchError as e:
+            info(self, _t("景深合成"), str(e), "NOTICE")
+            return
+        rgba = np.dstack([out, np.full(out.shape[:2], 255, np.uint8)])
+        self._open_result(rgba, ps[len(ps) // 2], _t("_景深合成"), aligned, [os.path.basename(p) for p in ps])
+        self.status_msg(_t("景深合成完成：下面隐藏的是对齐后的每一张，哪里不满意可以加蒙版用某一张补"))
+
     def fix_ghost(self) -> None:
         from .merge import fix_ghost
         fix_ghost(self)
@@ -1612,8 +1987,11 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
             s.set("editor_strip_gps", dlg.strip_gps.isChecked())
         try:
             with _Busy(self, _t("正在导出…")):
+                cmyk = None
+                if dlg.cmyk.isChecked() and dlg.fmt.currentData() in (".jpg", ".tif") and self._ensure_proof():
+                    cmyk = self.opts.get("proof_profile")
                 size = eio.export_image(self.doc, path, int(dlg.quality.value()), dlg.keep_exif.isChecked(),
-                                        dlg.strip_gps.isChecked(), deep=dlg.deep_on())
+                                        dlg.strip_gps.isChecked(), deep=dlg.deep_on() and cmyk is None, cmyk=cmyk)
         except Exception as e:
             info(self, _t("导出失败"), str(e), "ERROR")
             return False
@@ -1647,6 +2025,10 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
                 ("Q", _t("快速蒙版（用画笔涂选区）")),
                 ("J / Shift+J", _t("污点修复 / 修补 / 红眼（Shift+J 轮换）")),
                 ("Ctrl+Alt+R", _t("选择并遮住（精修头发等边缘）")),
+                ("P / U", _t("钢笔 / 形状（矩形、圆角矩形、椭圆、多边形、直线）")),
+                ("Ctrl+R / Ctrl+; / Ctrl+'", _t("标尺 / 参考线 / 网格（从标尺上拖出参考线）")),
+                ("Ctrl+Y / Ctrl+Shift+Y", _t("校样颜色 / 色域警告")),
+                ("Alt+F9", _t("动作（录制、播放、批处理）")),
                 ("Ctrl+Shift+X / Ctrl+Shift+R", _t("液化 / 镜头校正")),
                 ("C / I", _t("裁剪（按住 Ctrl 拖线拉直）/ 吸管")),
                 ("J / B / S / E", _t("污点修复 / 画笔 / 仿制图章（Alt 取样）/ 橡皮擦")),

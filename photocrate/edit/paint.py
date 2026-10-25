@@ -93,7 +93,7 @@ class Stroke:
         self.pickup = None                                         # 涂抹：手指上沾着的颜色（笔刷大小的 float RGBA）
         self.name = name or MODE_NAMES.get(mode, _t("画笔"))
         self.state_before = None
-        if not self.to_mask and layer.kind == "text":     # 在文字上画 = 先栅格化（换新数组，旧状态里的像素不受影响）
+        if not self.to_mask and layer.kind in ("text", "shape", "smart"):     # 在文字上画 = 先栅格化（换新数组，旧状态里的像素不受影响）
             self.state_before = doc.state()
             layer.kind = "pixel"
             layer.pixels = layer.pixels.copy()

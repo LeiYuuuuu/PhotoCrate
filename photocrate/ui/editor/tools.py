@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication
 
 from ...edit import paint as P
 from ...edit import warp as W
+from ...edit import vector as V
 from ...i18n import t as _t
 
 SEL_MODES = [("new", _t("新选区")), ("add", _t("添加")), ("sub", _t("减去")), ("and", _t("交叉"))]
@@ -149,6 +150,7 @@ class MoveTool(Tool):
         if self.win._locked(l, "position"):
             return
         self.drag = (x, y, [(m, m.x, m.y) for m in d.movable(l)], d.state(), l)
+        self.drag_box = None
 
     def move(self, x, y, e):
         if self.drag is None:
@@ -161,6 +163,15 @@ class MoveTool(Tool):
                 dy = 0
             else:
                 dx = 0
+        if not self.drag_box:
+            xs = [m.x for m, _, _ in items]
+            ys = [m.y for m, _, _ in items]
+            x2 = [m.x + m.w for m, _, _ in items]
+            y2 = [m.y + m.h for m, _, _ in items]
+            self.drag_box = (min(xs), min(ys), max(x2), max(y2))
+        bx0, by0, bx1, by1 = self.drag_box
+        dx += int(round(self.cv.snap_delta([bx0 + dx, (bx0 + bx1) / 2 + dx, bx1 + dx], "x")))
+        dy += int(round(self.cv.snap_delta([by0 + dy, (by0 + by1) / 2 + dy, by1 + dy], "y")))
         m0, mx, my = items[0]
         if (mx + dx, my + dy) != (m0.x, m0.y):
             for m, ox, oy in items:
@@ -241,6 +252,7 @@ class MarqueeTool(Tool):
         return self.a is not None
 
     def press(self, x, y, e):
+        x, y = self.cv.snap_value(x, "x")[0], self.cv.snap_value(y, "y")[0]
         self.a = self.b = (x, y)
         self.mode = self._sel_mode(e)
         self.free_shift = not _mods(e)[0]
@@ -252,6 +264,8 @@ class MarqueeTool(Tool):
             s = max(abs(x - self.a[0]), abs(y - self.a[1]))
             x = self.a[0] + math.copysign(s, x - self.a[0])
             y = self.a[1] + math.copysign(s, y - self.a[1])
+        else:
+            x, y = self.cv.snap_value(x, "x")[0], self.cv.snap_value(y, "y")[0]
         self.b = (x, y)
 
     def release(self, x, y, e):
@@ -1631,11 +1645,372 @@ class TransformTool(Tool):
         qp.drawEllipse(c, 3, 3)
 
 
+# ---------------------------------------------------------------------------
+# 钢笔 / 形状
+# ---------------------------------------------------------------------------
+
+def _qcolor_hex(c) -> str:
+    return QColor(c).name().upper()
+
+
+class PenTool(Tool):
+    id, name, shortcut, icon = "pen", _t("钢笔"), "P", "pen"
+    tip = _t("钢笔工具（P）：单击加尖角点，按住拖动拉出曲线；点回第一个点闭合，回车结束，Backspace 删最后一个点。"
+             "按住 Ctrl 拖动可以改已有的点和控制柄。选项栏里把路径变成选区、填充、描边或形状图层")
+    cursor = Qt.CursorShape.CrossCursor
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.drag = None
+
+    @property
+    def path(self) -> list:
+        return self.doc.work_path
+
+    def options(self, bar):
+        bar.combo(_t("模式"), "pen_mode", [("path", _t("路径")), ("shape", _t("形状"))], "path")
+        bar.button(_t("建立选区"), self.to_selection)
+        bar.button(_t("填充路径"), lambda: self.fill_path(False))
+        bar.button(_t("描边路径"), lambda: self.fill_path(True))
+        bar.button(_t("转为形状图层"), self.to_shape)
+        bar.button(_t("删除路径"), self.clear)
+
+    def busy(self):
+        return self.drag is not None
+
+    def _cur(self):
+        p = self.path
+        if not p or p[-1].get("closed"):
+            p.append({"pts": [], "closed": False})
+        return p[-1]
+
+    def _near(self, x, y, px, py) -> bool:
+        a = self.cv.to_widget(x, y)
+        b = self.cv.to_widget(px, py)
+        return abs(a.x() - b.x()) <= 6 and abs(a.y() - b.y()) <= 6
+
+    def press(self, x, y, e):
+        _, _, ctrl = _mods(e)
+        x, y = self.cv.snap_value(x, "x")[0], self.cv.snap_value(y, "y")[0]
+        if ctrl:                                               # 改已有的点 / 控制柄
+            for si, sub in enumerate(self.path):
+                for pi, pt in enumerate(sub["pts"]):
+                    for k, off in (("a", 0), ("i", 2), ("o", 4)):
+                        if self._near(x, y, pt[off], pt[off + 1]):
+                            self.drag = ("edit", si, pi, k, x, y, [list(q) for q in sub["pts"]])
+                            return
+            return
+        sub = self._cur()
+        if len(sub["pts"]) >= 2 and self._near(x, y, *sub["pts"][0][:2]):
+            sub["closed"] = True
+            self._changed()
+            if self.opt("pen_mode", "path") == "shape":
+                self.to_shape()
+            return
+        sub["pts"].append(V.anchor(x, y))
+        self.drag = ("new", len(self.path) - 1, len(sub["pts"]) - 1)
+        self._changed()
+
+    def move(self, x, y, e):
+        if self.drag is None:
+            return
+        if self.drag[0] == "new":
+            _, si, pi = self.drag
+            pt = self.path[si]["pts"][pi]
+            ax, ay = pt[0], pt[1]
+            pt[4], pt[5] = x, y                                  # 离开的控制柄 = 鼠标；进入的 = 对称
+            pt[2], pt[3] = 2 * ax - x, 2 * ay - y
+        else:
+            _, si, pi, k, x0, y0, orig = self.drag
+            dx, dy = x - x0, y - y0
+            pt = list(orig[pi])
+            if k == "a":
+                pt = [v + (dx if i % 2 == 0 else dy) for i, v in enumerate(pt)]
+            elif k == "i":
+                pt[2], pt[3] = orig[pi][2] + dx, orig[pi][3] + dy
+            else:
+                pt[4], pt[5] = orig[pi][4] + dx, orig[pi][5] + dy
+            self.path[si]["pts"][pi] = pt
+        self._changed()
+
+    def release(self, x, y, e):
+        self.drag = None
+
+    def key(self, e):
+        k = e.key()
+        if k in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if self.opt("pen_mode", "path") == "shape":
+                self.to_shape()
+            elif self.path and self.path[-1]["pts"]:
+                self.path.append({"pts": [], "closed": False})
+            return True
+        if k == Qt.Key.Key_Backspace and self.path and self.path[-1]["pts"]:
+            self.path[-1]["pts"].pop()
+            self._changed()
+            return True
+        if k == Qt.Key.Key_Escape and self.path:
+            self.path.append({"pts": [], "closed": False})
+            return True
+        return False
+
+    def _changed(self):
+        self.doc.work_path = [s for s in self.path if s["pts"]] + ([self.path[-1]] if self.path and not self.path[-1]["pts"] else [])
+        self.cv.update()
+
+    def _clean(self) -> list:
+        return [s for s in self.path if len(s["pts"]) >= 2]
+
+    def to_selection(self):
+        p = self._clean()
+        if not p:
+            self.win.status_msg(_t("先用钢笔画一条路径"))
+            return
+        d = self.doc
+        self._apply_selection(V.path_mask(p, d.width, d.height), "new", _t("从路径建立选区"))
+
+    def fill_path(self, stroke: bool):
+        d = self.doc
+        p = self._clean()
+        l = d.active
+        if not p or l is None or not l.has_pixels or self.win._locked(l, "pixels"):
+            self.win.status_msg(_t("先画一条路径，并选中一个像素图层"))
+            return
+        if stroke:
+            m = V.stroke_mask(p, l.w, l.h, float(self.opt("brush_size", 40)) / 4, l.x, l.y)
+        else:
+            m = V.path_mask(p, l.w, l.h, l.x, l.y)
+        fg = self.win.fg
+        from ...edit.document import over
+        new = over(l.pixels, np.array([fg.red(), fg.green(), fg.blue()], np.float32) / 255, m.astype(np.float32) / 255)
+        d.replace_pixels(l.id, new, _t("描边路径") if stroke else _t("填充路径"))
+
+    def to_shape(self):
+        p = self._clean()
+        if not p:
+            return
+        fg = self.win.fg
+        self.doc.new_shape_layer({"type": "path", "path": p, "fill": _qcolor_hex(fg), "stroke": None, "stroke_w": 0},
+                                 _t("形状"))
+        self.doc.work_path = []
+        self.cv.update()
+
+    def clear(self):
+        self.doc.work_path = []
+        self.cv.update()
+
+    def paint(self, qp):
+        if not self.path:
+            return
+        for pen in (QPen(QColor(0, 0, 0, 150), 2.5), QPen(QColor("#1EC6E6"), 1.2)):
+            qp.setPen(pen)
+            qp.setBrush(Qt.BrushStyle.NoBrush)
+            for poly, closed in V.path_polys(self.path):
+                if len(poly) < 2:
+                    continue
+                pts = QPolygonF([self.cv.to_widget(*p) for p in poly])
+                qp.drawPolygon(pts) if closed else qp.drawPolyline(pts)
+        qp.setPen(QPen(QColor("#1EC6E6"), 1))
+        for sub in self.path:
+            for pt in sub["pts"]:
+                a = self.cv.to_widget(pt[0], pt[1])
+                for off in (2, 4):
+                    h = self.cv.to_widget(pt[off], pt[off + 1])
+                    if abs(h.x() - a.x()) + abs(h.y() - a.y()) > 1:
+                        qp.drawLine(a, h)
+                        qp.drawEllipse(h, 3, 3)
+                qp.setBrush(QColor("#FFFFFF"))
+                qp.drawRect(QRectF(a.x() - 3, a.y() - 3, 6, 6))
+                qp.setBrush(Qt.BrushStyle.NoBrush)
+
+
+SHAPE_FILL = [("fg", _t("前景色")), ("bg", _t("背景色")), ("none", _t("无填充"))]
+SHAPE_STROKE = [("none", _t("无描边")), ("bg", _t("背景色")), ("fg", _t("前景色")), ("black", _t("黑色")),
+                ("white", _t("白色"))]
+
+
+class _ShapeTool(Tool):
+    shape = "rect"
+    shortcut = "U"
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.a = self.b = None
+
+    def options(self, bar):
+        bar.combo(_t("填充"), "shape_fill", SHAPE_FILL, "fg")
+        bar.combo(_t("描边"), "shape_stroke", SHAPE_STROKE, "none")
+        bar.spin(_t("粗细"), "shape_stroke_w", 1, 200, 6, " px", slider=False)
+        if self.shape == "rrect":
+            bar.spin(_t("圆角"), "shape_radius", 1, 1000, 24, " px", slider=False)
+        if self.shape == "polygon":
+            bar.spin(_t("边数"), "shape_sides", 3, 64, 6, slider=False)
+
+    def busy(self):
+        return self.a is not None
+
+    def press(self, x, y, e):
+        x, y = self.cv.snap_value(x, "x")[0], self.cv.snap_value(y, "y")[0]
+        self.a = self.b = (x, y)
+
+    def move(self, x, y, e):
+        if self.a is None:
+            return
+        shift, alt, _ = _mods(e)
+        if shift and self.shape != "line":
+            s = max(abs(x - self.a[0]), abs(y - self.a[1]))
+            x, y = self.a[0] + math.copysign(s, x - self.a[0]), self.a[1] + math.copysign(s, y - self.a[1])
+        elif shift:
+            ang = round(math.atan2(y - self.a[1], x - self.a[0]) / (math.pi / 4)) * (math.pi / 4)
+            L = math.hypot(x - self.a[0], y - self.a[1])
+            x, y = self.a[0] + L * math.cos(ang), self.a[1] + L * math.sin(ang)
+        else:
+            x, y = self.cv.snap_value(x, "x")[0], self.cv.snap_value(y, "y")[0]
+        self.b = (x, y)
+        self.alt = alt
+
+    def _color(self, key):
+        return {"fg": _qcolor_hex(self.win.fg), "bg": _qcolor_hex(self.win.bg), "black": "#000000",
+                "white": "#FFFFFF"}.get(key)
+
+    def params(self) -> dict:
+        (x0, y0), (x1, y1) = self.a, self.b
+        if getattr(self, "alt", False) and self.shape != "line":       # Alt：从中心往外画
+            x0, y0 = 2 * x0 - x1, 2 * y0 - y1
+        stroke = self._color(self.opt("shape_stroke", "none"))
+        fill = self._color(self.opt("shape_fill", "fg"))
+        if self.shape == "line":
+            stroke, fill = stroke or _qcolor_hex(self.win.fg), None
+        return {"type": self.shape, "x0": x0, "y0": y0, "x1": x1, "y1": y1, "fill": fill, "stroke": stroke,
+                "stroke_w": float(self.opt("shape_stroke_w", 6)), "radius": float(self.opt("shape_radius", 24)),
+                "sides": int(self.opt("shape_sides", 6))}
+
+    def release(self, x, y, e):
+        if self.a is None:
+            return
+        p = self.params()
+        self.a = self.b = None
+        if math.hypot(p["x1"] - p["x0"], p["y1"] - p["y0"]) * self.cv.zoom < 4:
+            return
+        if not p["fill"] and not p["stroke"]:
+            self.win.status_msg(_t("填充和描边都是“无”，画出来看不见：在选项栏里选一个颜色"))
+            return
+        self.doc.new_shape_layer(p, self.name)
+        self.win.props.rebuild()
+
+    def paint(self, qp):
+        if self.a is None or self.b is None:
+            return
+        path = V.shape_path(self.params())
+        qp.setPen(QPen(QColor("#1EC6E6"), 1.2))
+        qp.setBrush(Qt.BrushStyle.NoBrush)
+        for poly, closed in V.path_polys(path):
+            pts = QPolygonF([self.cv.to_widget(*p) for p in poly])
+            qp.drawPolygon(pts) if closed else qp.drawPolyline(pts)
+
+
+class RectTool(_ShapeTool):
+    id, name, icon, shape = "rect", _t("矩形"), "rect", "rect"
+    tip = _t("矩形工具（U）：拖出一个矩形形状图层（Shift 正方形，Alt 从中心）。形状图层随时可改颜色、描边，放大缩小不会糊")
+
+
+class RRectTool(_ShapeTool):
+    id, name, icon, shape = "rrect", _t("圆角矩形"), "rrect", "rrect"
+    tip = _t("圆角矩形工具（U）：拖出圆角矩形，选项栏里设圆角半径")
+
+
+class EllipseTool(_ShapeTool):
+    id, name, icon, shape = "ellipse", _t("椭圆"), "ellipse", "ellipse"
+    tip = _t("椭圆工具（U）：拖出椭圆（Shift 正圆，Alt 从中心）")
+
+
+class PolygonTool(_ShapeTool):
+    id, name, icon, shape = "polygon", _t("多边形"), "polygon", "polygon"
+    tip = _t("多边形工具（U）：拖出正多边形，选项栏里设边数")
+
+
+class LineTool(_ShapeTool):
+    id, name, icon, shape = "line", _t("直线"), "line", "line"
+    tip = _t("直线工具（U）：拖一条直线（Shift 45° 的倍数），粗细在选项栏里设")
+
+
+# ---------------------------------------------------------------------------
+# 画板 / 切片
+# ---------------------------------------------------------------------------
+
+class _RegionTool(Tool):
+    kind = "slice"
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.a = self.b = None
+
+    def options(self, bar):
+        self.count_lab = bar.label("")
+        self._count()
+        bar.button(_t("导出…"), lambda: self.win.export_regions(self.kind), "primary")
+        bar.button(_t("删除最后一个"), lambda: (self.doc.remove_regions(self.kind, -1), self._count()))
+        bar.button(_t("全部删除"), lambda: (self.doc.remove_regions(self.kind), self._count()))
+
+    def _count(self):
+        n = sum(1 for r in self.doc.regions if r["kind"] == self.kind) if self.doc else 0
+        lab = getattr(self, "count_lab", None)
+        if lab is not None:
+            try:
+                lab.setText(_t('已有 {0} 个', n))
+            except RuntimeError:
+                pass
+        self.cv.update()
+
+    def busy(self):
+        return self.a is not None
+
+    def press(self, x, y, e):
+        x, y = self.cv.snap_value(x, "x")[0], self.cv.snap_value(y, "y")[0]
+        self.a = self.b = (x, y)
+
+    def move(self, x, y, e):
+        if self.a is not None:
+            self.b = (self.cv.snap_value(x, "x")[0], self.cv.snap_value(y, "y")[0])
+
+    def release(self, x, y, e):
+        if self.a is None:
+            return
+        (x0, y0), (x1, y1) = self.a, self.b
+        self.a = self.b = None
+        if abs(x1 - x0) * self.cv.zoom < 6 or abs(y1 - y0) * self.cv.zoom < 6:
+            return
+        d = self.doc
+        x0, x1 = max(0, min(x0, x1)), min(d.width, max(x0, x1))
+        y0, y1 = max(0, min(y0, y1)), min(d.height, max(y0, y1))
+        r = d.add_region(self.kind, x0, y0, x1 - x0, y1 - y0)
+        self.win.status_msg(_t('已添加「{0}」：{1} × {2}', r["name"], r["w"], r["h"]))
+        self._count()
+
+    def paint(self, qp):
+        if self.a is None:
+            return
+        qp.setPen(QPen(QColor("#F08A24"), 1.5, Qt.PenStyle.DashLine))
+        qp.setBrush(Qt.BrushStyle.NoBrush)
+        qp.drawRect(QRectF(self.cv.to_widget(*self.a), self.cv.to_widget(*self.b)).normalized())
+
+
+class SliceTool(_RegionTool):
+    id, name, shortcut, icon, kind = "slice", _t("切片"), "C", "slice", "slice"
+    tip = _t("切片工具（C，和裁剪同一格）：在画面上拖出要单独导出的区域（网页切图、九宫格），「导出…」时每块存成一张图")
+
+
+class ArtboardTool(_RegionTool):
+    id, name, shortcut, icon, kind = "artboard", _t("画板"), "V", "artboard", "artboard"
+    tip = _t("画板工具（V，和移动同一格）：拖出几块画板（比如同一张图的手机版 / 电脑版尺寸），「导出…」时每块画板存成一张图")
+
+
 TOOLS = [MoveTool, MarqueeTool, LassoTool, WandTool, ObjectTool, CropTool, EyedropperTool, HealTool, PatchTool,
          RedEyeTool, PaintTool, CloneTool, EraserTool, BucketTool, GradientTool, DodgeTool, BurnTool, SpongeTool, BlurTool, SharpenTool,
-         SmudgeTool, TextTool, HandTool, ZoomTool]
+         SmudgeTool, TextTool, PenTool, RectTool, RRectTool, EllipseTool, PolygonTool, LineTool, SliceTool, ArtboardTool, HandTool,
+         ZoomTool]
 
 # 工具栏的格子：同一格里的工具共用一个按钮（右键 / 长按换），和 Photoshop 一样按住 Shift + 快捷键在组里轮换
-TOOL_SLOTS = [["move"], ["marquee"], ["lasso"], ["wand", "object"], ["crop"], ["eyedropper"],
+TOOL_SLOTS = [["move", "artboard"], ["marquee"], ["lasso"], ["wand", "object"], ["crop", "slice"], ["eyedropper"],
               ["heal", "patch", "redeye"], ["brush"], ["clone"], ["eraser"], ["gradient", "bucket"], ["blur", "sharpen", "smudge"],
-              ["dodge", "burn", "sponge"], ["text"], ["hand"], ["zoom"]]
+              ["dodge", "burn", "sponge"], ["pen"], ["text"], ["rect", "rrect", "ellipse", "polygon", "line"],
+              ["hand"], ["zoom"]]

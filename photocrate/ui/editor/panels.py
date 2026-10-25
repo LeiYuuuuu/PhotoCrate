@@ -624,6 +624,60 @@ class AdjustEditor(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# 属性面板：形状图层
+# ---------------------------------------------------------------------------
+
+class ShapeEditor(QWidget):
+    edited = Signal(str)
+
+    def __init__(self, params: dict, parent=None):
+        super().__init__(parent)
+        self.params = dict(params)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        for key, label, default in (("fill", _t("填充"), "#E5484D"), ("stroke", _t("描边"), "#000000")):
+            r = QHBoxLayout()
+            cb = QCheckBox(label)
+            cb.setChecked(bool(self.params.get(key)))
+            btn = ColorButton(self.params.get(key) or default)
+            cb.toggled.connect(lambda on, k=key, b=btn: self._set(k, b.color.name().upper() if on else None))
+            btn.changed.connect(lambda c, k=key, c2=cb: (c2.blockSignals(True), c2.setChecked(True),
+                                                         c2.blockSignals(False), self._set(k, c.name().upper())))
+            r.addWidget(cb)
+            r.addWidget(btn)
+            r.addStretch(1)
+            lay.addLayout(r)
+        s = ParamSlider(_t("描边粗细"), 0, 200, 0, 0, " px")
+        s.set_value(float(self.params.get("stroke_w", 0) or 0))
+        s.changed.connect(lambda v: self._set("stroke_w", float(v)))
+        lay.addWidget(s)
+        t = self.params.get("type")
+        if t == "rrect":
+            s2 = ParamSlider(_t("圆角"), 0, 1000, 24, 0, " px")
+            s2.set_value(float(self.params.get("radius", 24)))
+            s2.changed.connect(lambda v: self._set("radius", float(v)))
+            lay.addWidget(s2)
+        if t == "polygon":
+            s3 = ParamSlider(_t("边数"), 3, 64, 6)
+            s3.set_value(float(self.params.get("sides", 6)))
+            s3.changed.connect(lambda v: self._set("sides", int(v)))
+            lay.addWidget(s3)
+        tip = QLabel(_t("形状是矢量的：改颜色、描边随时可以；Ctrl+T 缩放、旋转、透视后仍然清晰。用画笔或滤镜时会先栅格化。"))
+        tip.setWordWrap(True)
+        tip.setProperty("role", "faint")
+        tip.setFont(font("cn", 8.5))
+        lay.addWidget(tip)
+
+    def _set(self, key, v):
+        self.params[key] = v
+        self.edited.emit(key)
+
+    def sync(self, params: dict) -> None:
+        self.params = dict(params)
+
+
+# ---------------------------------------------------------------------------
 # 属性面板：文字图层
 # ---------------------------------------------------------------------------
 
@@ -754,7 +808,7 @@ class PropertiesPanel(QScrollArea):
             return
         w, lay = self._container()
         title = QLabel({"adjust": _t("调整图层"), "text": _t("文字图层"), "pixel": _t("像素图层"),
-                        "group": _t("图层组")}[l.kind] + f"  ·  {l.name}")
+                        "group": _t("图层组"), "shape": _t("形状图层"), "smart": _t("智能对象")}[l.kind] + f"  ·  {l.name}")
         title.setFont(font("cn", 10, 700))
         title.setWordWrap(True)
         lay.addWidget(title)
@@ -774,6 +828,16 @@ class PropertiesPanel(QScrollArea):
             b = QPushButton(_t("栅格化文字（变成普通像素图层）"))
             b.clicked.connect(lambda: doc.rasterize(l.id))
             lay.addWidget(b)
+        elif l.kind == "shape":
+            ed = ShapeEditor(l.params)
+            ed.edited.connect(lambda key, lid=l.id: self.win.shape_edited(lid, key))
+            self.editor = ed
+            lay.addWidget(ed)
+            b = QPushButton(_t("栅格化形状（变成普通像素图层）"))
+            b.clicked.connect(lambda: doc.rasterize(l.id))
+            lay.addWidget(b)
+        elif l.kind == "smart":
+            lay.addWidget(self._smart_box(l))
         elif l.kind == "group":
             n = len(doc.descendants(l.id))
             info = QLabel(_t('组里有 {0} 个图层。混合模式「穿透」= 组里的图层（包括调整图层）照常作用到下面；'
@@ -790,6 +854,50 @@ class PropertiesPanel(QScrollArea):
             lay.addWidget(self._mask_box(l))
         lay.addStretch(1)
         self.setWidget(w)
+
+    def _smart_box(self, l) -> QWidget:
+        """智能对象：说明 + 智能滤镜列表（勾选开关、双击重新设置、删除）+ 替换内容 / 栅格化。"""
+        from ...edit.filters import FILTERS
+        doc = self.win.doc
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        src = l.source
+        info = QLabel(_t('原始内容 {0} × {1}。缩放、旋转、透视和滤镜都是参数，随时可改，放大缩小不会越来越糊。',
+                         src.shape[1] if src is not None else 0, src.shape[0] if src is not None else 0))
+        info.setWordWrap(True)
+        info.setProperty("role", "dim")
+        lay.addWidget(info)
+        sec = Section(_t("智能滤镜"), True)
+        flist = list(l.params.get("filters") or [])
+        if not flist:
+            t = QLabel(_t("还没有滤镜：选中这个图层后用「滤镜」菜单，滤镜会加在这里，以后还能改。"))
+            t.setWordWrap(True)
+            t.setProperty("role", "faint")
+            sec.body.addWidget(t)
+        for i, (fid, p, *rest) in enumerate(flist):
+            r = QHBoxLayout()
+            cb = QCheckBox(FILTERS[fid].name if fid in FILTERS else fid)
+            cb.setChecked(bool(rest[0]) if rest else True)
+            cb.toggled.connect(lambda on, k=i: self.win.smart_filter(l.id, k, "toggle", on))
+            r.addWidget(cb, 1)
+            be = QPushButton(_t("设置…"))
+            be.clicked.connect(lambda _=False, k=i: self.win.smart_filter(l.id, k, "edit"))
+            r.addWidget(be)
+            bd = QPushButton(_t("删除"))
+            bd.clicked.connect(lambda _=False, k=i: self.win.smart_filter(l.id, k, "delete"))
+            r.addWidget(bd)
+            sec.body.addLayout(r)
+        lay.addWidget(sec)
+        r = QHBoxLayout()
+        b = QPushButton(_t("替换内容…"))
+        b.clicked.connect(self.win.replace_smart)
+        r.addWidget(b)
+        b2 = QPushButton(_t("栅格化"))
+        b2.clicked.connect(lambda: doc.rasterize(l.id))
+        r.addWidget(b2)
+        lay.addLayout(r)
+        return w
 
     def _mask_box(self, l) -> QWidget:
         doc = self.win.doc
@@ -881,11 +989,15 @@ def layer_thumb(layer, w: int = 44, h: int = 34, mask: bool = False) -> QPixmap:
         qp.fillRect(QRectF(0, 0, w, h), QColor("#2A2E33"))
         paint_icon(qp, QRectF(0, 0, w, h).adjusted(8, 4, -8, -4), "folder" if layer.kind == "group" else "adjust",
                    QColor("#E6E6E6"))
-    if layer.kind == "text" and not mask:
+    if layer.kind in ("text", "shape", "smart") and not mask:
         qp.fillRect(QRectF(0, h - 13, 13, 13), QColor(0, 0, 0, 170))
-        qp.setPen(QColor("#FFFFFF"))
-        qp.setFont(font("display", 8, 700))
-        qp.drawText(QRectF(0, h - 13, 13, 13), Qt.AlignmentFlag.AlignCenter, "T")
+        if layer.kind == "text":
+            qp.setPen(QColor("#FFFFFF"))
+            qp.setFont(font("display", 8, 700))
+            qp.drawText(QRectF(0, h - 13, 13, 13), Qt.AlignmentFlag.AlignCenter, "T")
+        else:
+            paint_icon(qp, QRectF(0.5, h - 12.5, 12, 12), "smart" if layer.kind == "smart" else "rect",
+                       QColor("#FFFFFF"))
     qp.setPen(QPen(QColor(0, 0, 0, 90), 1))
     qp.drawRect(QRectF(0.5, 0.5, w - 1, h - 1))
     qp.end()
@@ -993,7 +1105,8 @@ class LayerRow(QWidget):
         elif layer.clip:
             self.arrow.setIcon(QIcon(icon_pixmap("clip", QColor(theme.current().ink2), 14)))
             self.arrow.setToolTip(_t("剪贴蒙版：只在下面那一层有像素的地方显示"))
-        parts = [{"adjust": _t("调整"), "text": _t("文字"), "pixel": _t("像素"), "group": _t("组")}[layer.kind]]
+        parts = [{"adjust": _t("调整"), "text": _t("文字"), "pixel": _t("像素"), "group": _t("组"), "shape": _t("形状"),
+                  "smart": _t("智能对象")}[layer.kind]]
         if layer.pixels is not None and layer.pixels.dtype == np.uint16 and layer.kind == "pixel":
             parts.append(_t("16 位"))
         if layer.clip:
