@@ -38,7 +38,7 @@ class AiPage(Page):
         mp.setFixedWidth(560 if is_en() else 520)
         self.model_panel = mp
         self.rows: dict[str, tuple[QLabel, TacButton]] = {}
-        for key in ("clip", "face"):
+        for key in ("clip", "face", "ocr"):
             r = QHBoxLayout()
             name = QLabel(models.MODELS[key]["label"])
             name.setMinimumWidth(220)
@@ -214,7 +214,7 @@ class AiPage(Page):
     # ---- 下载 / 分析 -----------------------------------------------------
     def download(self, key: str):
         size = models.download_size(key)
-        if not ask(self, _t("下载 AI 模型"), _t('将下载 <b>{0}</b>（约 {1:.0f} MB）到<br>{2}<br><br>来源：{3}；许可：{4}。只需下载一次。', models.MODELS[key]['label'], size / 1e6, models.models_dir(), 'Hugging Face' if key == 'clip' else 'GitHub（OpenCV Zoo）', models.MODELS[key]['license']), ok=_t("下载"), en="DOWNLOAD"):
+        if not ask(self, _t("下载 AI 模型"), _t('将下载 <b>{0}</b>（约 {1:.0f} MB）到<br>{2}<br><br>来源：{3}；许可：{4}。只需下载一次。', models.MODELS[key]['label'], size / 1e6, models.models_dir(), 'Hugging Face' if key in ('clip', 'ocr') else 'GitHub（OpenCV Zoo）', models.MODELS[key]['license']), ok=_t("下载"), en="DOWNLOAD"):
             return
         mirror = self.ctx.settings.get("ai_mirror", "auto")
 
@@ -223,6 +223,7 @@ class AiPage(Page):
 
         res, tb = run_with_progress(self.ctx, self, _t("正在下载模型"), "DOWNLOADING", job)
         self.ctx.library.ai.unload()
+        self.ctx.library.ocr.unload()
         self.refresh()
         if tb:
             last = tb.strip().splitlines()[-1]

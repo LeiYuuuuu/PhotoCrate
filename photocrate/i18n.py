@@ -29,6 +29,8 @@ def set_language(lang: str | None) -> str:
         table: dict[str, str] = {}
         table.update(_place_table())
         table.update(PROVINCES)
+        from .locale_en_photos import EN_PHOTOS
+        table.update(EN_PHOTOS)          # 相册 / 修图工作台 / 文字识别（与 locale_en 同名的条目以 locale_en 为准）
         table.update(EN)
         _EN = table
     return LANG

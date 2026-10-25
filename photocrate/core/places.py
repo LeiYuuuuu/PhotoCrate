@@ -29,8 +29,9 @@ LEVELS = ("country", "province", "city", "district")
 # ---------------------------------------------------------------------------
 
 class AnnotationStore:
-    KINDS = ("places", "timeshift", "rating", "people", "face_fix")
+    KINDS = ("places", "timeshift", "rating", "people", "face_fix", "favorite", "album_items", "albums")
     # people：已命名的人（键 = 人物 id）；face_fix：人脸更正（键 = 主图指纹#序号）
+    # favorite：「相册」里的收藏 ♥；album_items：照片属于哪些相簿（{"ids": [...]}）；albums：相簿本身（键 = 相簿 id）
 
     def __init__(self, path: Path | None = None):
         self.path = path or (user_data_dir() / "annotations.db")

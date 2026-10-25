@@ -106,6 +106,8 @@ class Library:
         self.trips: list = []                # 旅行自动分段的结果（core/trips.Trip）
         from ..ai.service import AIService
         self.ai = AIService(self)            # 场景识别 / 文字搜图 / 人物分组（模型下载后可用）
+        from ..ai.ocrindex import OcrIndex
+        self.ocr = OcrIndex(self)            # 照片里的文字（「相册」里搜文字找照片）
         self.refresh_exiftool()
 
     # ---- 工具状态 --------------------------------------------------------
@@ -281,7 +283,38 @@ class Library:
         # 7) AI：CLIP 向量索引 + 场景识别（模型已下载且开启时）
         if pixels:
             self.run_ai(groups, pg, emit, cancel)
+            # 8) 照片里的文字（模型已下载且开启时）
+            self.run_ocr(groups, pg, emit, cancel)
         return groups
+
+    def run_ocr(self, groups: list[PhotoGroup] | None = None, pg: Progress | None = None,
+                emit: Callable[[], None] | None = None, cancel: threading.Event | None = None,
+                force: bool = False) -> dict[str, Any]:
+        """识别照片里的文字。没有模型或关闭时只载入已有的缓存。返回 {done, new, error}。"""
+        groups = self.groups if groups is None else groups
+        out: dict[str, Any] = {"done": 0, "new": 0, "error": None}
+        try:
+            if self.ocr.ready() and (force or self.settings.get("ocr_enabled", True)):
+                if pg is not None:
+                    pg.stage = "ai"
+                    pg.message = _t("文字识别：照片里的文字…")
+                    pg.ai_done, pg.ai_total = 0, 0
+                    if emit:
+                        emit()
+
+                def prog(d, t):
+                    if pg is not None:
+                        pg.ai_done, pg.ai_total = d, t
+                        if emit:
+                            emit()
+                out["new"] = self.ocr.index(groups, prog, cancel)
+            else:
+                self.ocr.load_cached(groups)
+        except Exception as e:
+            log.warning("文字识别失败：%s", e)
+            out["error"] = f"{type(e).__name__}: {e}"
+        out["done"] = sum(1 for g in groups if "ocr" in g.feats)
+        return out
 
     def run_ai(self, groups: list[PhotoGroup] | None = None, pg: Progress | None = None,
                emit: Callable[[], None] | None = None, cancel: threading.Event | None = None,

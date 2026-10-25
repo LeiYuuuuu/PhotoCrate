@@ -5,6 +5,7 @@
 - pix：每个主图 × 每个像素分析器的结果（带版本号，算法升级后自动失效）
 - preview：缩略图路径与预览尺寸
 - emb：AI 向量（CLIP 图片向量，float16），按 模型名 区分
+- ocr：照片里识别出的文字（每行文字 + 分数 + 位置，JSON），按 识别版本 区分
 """
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ class FeatureCache:
                                            PRIMARY KEY(sig, analyzer));
             CREATE TABLE IF NOT EXISTS preview(sig TEXT PRIMARY KEY, thumb TEXT, w INTEGER, h INTEGER, src TEXT);
             CREATE TABLE IF NOT EXISTS emb(sig TEXT, model TEXT, data BLOB, PRIMARY KEY(sig, model));
+            CREATE TABLE IF NOT EXISTS ocr(sig TEXT, ver TEXT, data TEXT, PRIMARY KEY(sig, ver));
             """
         )
         self._db.commit()
@@ -115,6 +117,26 @@ class FeatureCache:
         with self._lock:
             return self._db.execute("SELECT COUNT(*) FROM emb WHERE model=?", (model,)).fetchone()[0]
 
+    # ---- 照片里的文字 ----------------------------------------------------
+    def get_ocr_many(self, sigs: list[str], ver: str) -> dict[str, list]:
+        out = {}
+        with self._lock:
+            for ch in self._chunks(list(set(sigs))):
+                q = f"SELECT sig, data FROM ocr WHERE ver=? AND sig IN ({','.join('?' * len(ch))})"
+                for sig, data in self._db.execute(q, [ver, *ch]):
+                    try:
+                        out[sig] = json.loads(data)
+                    except ValueError:
+                        pass
+        return out
+
+    def put_ocr_many(self, items: dict[str, list], ver: str) -> None:
+        with self._lock:
+            self._db.executemany("INSERT OR REPLACE INTO ocr(sig, ver, data) VALUES(?,?,?)",
+                                 [(s, ver, json.dumps(v, ensure_ascii=False, separators=(",", ":")))
+                                  for s, v in items.items()])
+            self._db.commit()
+
     def copy_keys(self, mapping: dict[str, str]) -> None:
         """文件改名后（大小、修改时间不变）把旧指纹的缓存复制到新指纹，避免重新分析。"""
         if not mapping:
@@ -129,6 +151,8 @@ class FeatureCache:
                                  "SELECT ?, thumb, w, h, src FROM preview WHERE sig=?", (new, old))
                 self._db.execute("INSERT OR REPLACE INTO emb(sig, model, data) "
                                  "SELECT ?, model, data FROM emb WHERE sig=?", (new, old))
+                self._db.execute("INSERT OR REPLACE INTO ocr(sig, ver, data) "
+                                 "SELECT ?, ver, data FROM ocr WHERE sig=?", (new, old))
             self._db.commit()
 
     def commit(self) -> None:
@@ -138,7 +162,7 @@ class FeatureCache:
     # ---- 维护 ------------------------------------------------------------
     def clear(self) -> None:
         with self._lock:
-            self._db.executescript("DELETE FROM meta; DELETE FROM pix; DELETE FROM preview; DELETE FROM emb;")
+            self._db.executescript("DELETE FROM meta; DELETE FROM pix; DELETE FROM preview; DELETE FROM emb; DELETE FROM ocr;")
             self._db.commit()
             self._db.execute("VACUUM")
 

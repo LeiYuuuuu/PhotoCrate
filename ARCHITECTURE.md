@@ -210,6 +210,18 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 | 滤镜 | `filters.py`：每个滤镜 `fn(rgba, scale, **参数)`；对话框里改参数时只在当前显示级别的代理图上算（`Document.previews`），确定后按原尺寸分条应用（每条上下多算一圈），有选区时按选区混合 |
 | 打开 / 保存 | 与「导出分享」共用读图（RAW 用内嵌全尺寸预览）；导出带原片 EXIF（方向改为 1、更新宽高、可去 GPS）与 ICC；整张合成分 512 行一条、多线程并行。`.pcedit` = zip（document.json + 每层 PNG + exif.bin / icc.icc），扩展名加进 `formats.SIDECAR_EXTS`，与原片同名时作为附属文件跟着照片移动 / 改名 |
 
+## 9.55 两个主界面：相册 / 修图（ui/photos/ + ui/studio.py）
+
+主窗口顶栏中间是 `ModeSwitch`，下面一个 `QStackedWidget`：0 = 相册（原来的导航 + 页面，最前面加了「00 照片」），1 = 修图（`StudioMode`）。
+
+| 部分 | 实现 |
+|---|---|
+| 数据层 `core/smart.py` | 纯计算、不碰 Qt。`timeline(groups, level)` 按天 / 月 / 年分段（新的在前，带地点摘要与封面：打星 / 留用 > 清晰 > 中间那张）；`shelves()` 生成智能相簿（媒体类型、我的相簿、人物、地点、旅行、场景）；`Marks` 管收藏 ♥ 与手动相簿，存在 annotations.db 的 `favorite` / `album_items`（按图片文件指纹，移动 / 改名后有效）/ `albums`；`SearchIndex` + `search()`：每张照片准备好各类可搜索文字（归一化：NFKC、小写、去空白），一句话按空格拆词，每个词在 文字 / 地点 / 人物 / 场景 / 日期与时段（`date_matcher`：年、年月、月、今天 / 去年 / 上个月、季节、早上 / 晚上…）/ 相机 / 旅行 / 相簿 / 类型词 / 文件名 里找，词与词取交集；整句去掉空格再在照片文字里找一遍（一句话被拆成几行也能命中）；`matched_lines()` 给出要高亮的行 |
+| 文字识别 `ai/ocr.py` + `ai/ocrindex.py` | PaddleOCR PP-OCRv4 移动版两个 ONNX（RapidOCR 转换，检测 4.7 MB + 识别 10.9 MB，字表在识别模型的元数据里），onnxruntime 运行，不依赖 paddle / pyclipper：DB 概率图 → 轮廓 → 最小外接矩形，按“面积 × 1.6 / 周长”外扩（矩形的 unclip）→ 透视拉正每行 → 高 48 分批识别 → CTC 贪心解码，丢掉分数 < 0.5 的行。用 1600 px 长边的预览识别（检测缩到 960），一张约 0.1–0.4 秒。结果（每行文字、分数、四角坐标 0–1）按主图指纹存 cache.db 的 `ocr` 表；没有文字也存空列表，不重复识别。扫描时在 CLIP 之后自动跑（`ocr_enabled`），旧照片由相册页在后台识别，扫描开始时让路 |
+| 相册界面 `ui/photos/` | `grid.py`：`PhotoGrid`（分段正方形缩略图）与 `CardGrid`（封面卡片，年 / 月视图与相簿页）都是自绘的 `QAbstractScrollArea`，按段记录纵坐标、只画可见行，几万张也流畅。`page.py`：`PhotosPage`，视图栈 + 返回历史；搜索 280 ms 防抖，精确结果立即出，CLIP 画面搜索在后台线程补到下面一段。`detail.py`：单张页（缩略图先显示，后台读 1600 px 预览）+ 信息栏；`canvas.py`：大图画布，叠加文字框（悬停显示、单击复制）与裁剪框 |
+| 基础编辑 `edit/quick.py` | `QuickState` = 滑块 + 自动增强参数 + 滤镜（按强度与“不调整”插值：数值、曲线偏离对角线的部分、HSL 都乘强度）+ 转 90° / 翻转 / 拉直（自动放大到没有空角）/ 裁剪框。像素全部交给 `adjust.develop`（与调整图层同一套算法）；预览在 ≤ 1100 px 的代理图上算，停手后用 1600 px 补一帧；存储时按原尺寸重新算，`io.export_image` 写「原名_编辑.jpg」（保留 EXIF），然后重新扫描并打开新照片 |
+| 修图模式 `ui/studio.py` | `open_editor()` 建好 `EditorWindow` 后，如果 `ctx.studio` 存在就交给 `StudioMode.adopt()`：去掉窗口标志、放进标签页，并把窗口里所有 `WindowShortcut` 的 QAction 改成 `WidgetWithChildrenShortcut`——单键快捷键（V、B、X…）只在这个标签页里生效，不会在相册或别的标签里误触发。关闭标签 = 调用修图窗口自己的 `close()`（会问要不要保存），窗口销毁后标签自动去掉；退出程序前逐个关闭，有一个取消就不退出 |
+
 ## 9.6 合并曝光（edit/hdr.py + ui/editor/merge.py）
 
 同一场景、不同曝光的 2–9 张 → 一张。只用 numpy / OpenCV，不新增依赖。目标是**不损失清晰度**，所以每一步都围绕“少重新取样、对得准”来做：
@@ -365,8 +377,8 @@ PhotoCrate/
 ├─ photocrate/
 │  ├─ app.py  bootstrap.py  config.py  plugins.py  i18n.py  locale_en.py（英文界面文字）
 │  ├─ core/        models formats scanner metadata imaging pixelwork geo dates cache library stats
-│  │               pairing geotime places daybook trips videos
-│  ├─ ai/          models clip scenes faces people service visual
+│  │               pairing geotime places daybook trips videos smart（相册：时间线 / 智能相簿 / 搜索）
+│  ├─ ai/          models clip scenes faces people service visual ocr ocrindex（ocr = 照片里的文字）
 │  ├─ analyzers/   base builtin
 │  ├─ partition/   base dimensions engine
 │  ├─ ops/         planner mover journal pathsafe xmpwrite cleanup trashbin renamer
@@ -374,6 +386,7 @@ PhotoCrate/
 │  ├─ edit/        document adjust blend paint filters text io hdr（修图核心；hdr = 合并曝光）
 │  └─ ui/          theme context dialogs timeplace_dialogs culling_dialogs workflow_dialogs xmpflow viewer
 │                  main_window  pages/  widgets/（deco thumbgrid mapview）  editor/（window canvas tools panels icons tutorial merge）
+│                  photos/（相册：page grid detail canvas）  studio（修图模式：标签页）
 ├─ data/           geonames_cities1000.csv.gz  place_names_zh.json  clip_vocab_zh.txt
 ├─ assets/         app.ico app.png
 ├─ plugins/        用户插件放这里        plugins_examples/  示例插件

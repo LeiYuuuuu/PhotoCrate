@@ -178,6 +178,8 @@ DEFAULTS: dict[str, Any] = {
     # AI（模型首次使用时下载到用户数据目录 models\）
     "ai_enabled": True,               # 模型就绪后，扫描时自动做场景识别 / 文字搜图索引
     "ai_faces": True,                 # 模型就绪后，扫描时自动检测人脸
+    "ocr_enabled": True,              # 文字识别模型就绪后，扫描时自动识别照片里的文字
+    "photos_zoom": 5,                 # 「相册」网格每行几张（3–12）
     "ai_mirror": "auto",              # 模型下载源：auto（先官方后镜像）/ hf / mirror
     "face_threshold": 0.42,           # 人脸相似度（余弦）达到多少算同一人
     "face_min_size": 40,              # 预览图（长边 1024）里小于多少像素的脸忽略

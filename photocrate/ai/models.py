@@ -4,6 +4,8 @@
 - clip：中文 CLIP（OFA-Sys Chinese-CLIP ViT-B/16，Xenova 转成 ONNX 并做了 int8 量化，约 190 MB）
         —— 场景识别、文字搜图、以图搜图。来源 Hugging Face，国内网络可改用镜像 hf-mirror.com。
 - face：OpenCV Zoo 的 YuNet（人脸检测，230 KB）+ SFace（人脸特征，37 MB）—— 人物分组。来源 GitHub。
+- ocr：PaddleOCR PP-OCRv4 移动版的文字检测（4.7 MB）+ 识别（10.9 MB），RapidOCR 转成 ONNX
+       —— 识别照片里的文字，「相册」里搜文字就能找到照片。来源 Hugging Face（可用镜像）。
 也可以手动把文件放进 models\\ 文件夹（或程序目录下的 models\\），文件名与下表一致即可。
 """
 from __future__ import annotations
@@ -22,6 +24,7 @@ HF = "https://huggingface.co"
 HF_MIRROR = "https://hf-mirror.com"
 GH_LFS = "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models"
 GH_RAW = "https://github.com/opencv/opencv_zoo/raw/main/models"
+OCR_PATH = "SWHL/RapidOCR/resolve/main/PP-OCRv4"
 
 # 文件名 → (下载地址列表, 大概大小（字节，用于进度与校验）)
 FILES: dict[str, tuple[list[str], int]] = {
@@ -37,6 +40,10 @@ FILES: dict[str, tuple[list[str], int]] = {
     "face_recognition_sface_2021dec.onnx": (
         [f"{GH_LFS}/face_recognition_sface/face_recognition_sface_2021dec.onnx",
          f"{GH_RAW}/face_recognition_sface/face_recognition_sface_2021dec.onnx"], 38_696_353),
+    "ch_PP-OCRv4_det_infer.onnx": (
+        [f"{HF}/{OCR_PATH}/ch_PP-OCRv4_det_infer.onnx", f"{HF_MIRROR}/{OCR_PATH}/ch_PP-OCRv4_det_infer.onnx"], 4_745_517),
+    "ch_PP-OCRv4_rec_infer.onnx": (
+        [f"{HF}/{OCR_PATH}/ch_PP-OCRv4_rec_infer.onnx", f"{HF_MIRROR}/{OCR_PATH}/ch_PP-OCRv4_rec_infer.onnx"], 10_857_958),
 }
 
 MODELS = {
@@ -45,6 +52,9 @@ MODELS = {
     "face": {"label": _t("人脸检测 + 识别（YuNet · SFace）"),
              "files": ["face_detection_yunet_2023mar.onnx", "face_recognition_sface_2021dec.onnx"],
              "optional": [], "license": _t("OpenCV Zoo：MIT / Apache 2.0")},
+    "ocr": {"label": _t("文字识别（PP-OCRv4 · 照片里的文字可搜索）"),
+            "files": ["ch_PP-OCRv4_det_infer.onnx", "ch_PP-OCRv4_rec_infer.onnx"],
+            "optional": [], "license": _t("PaddleOCR：Apache 2.0；ONNX 转换：RapidOCR")},
 }
 
 
@@ -87,7 +97,7 @@ def onnxruntime_ok() -> bool:
 
 
 def status_text(model: str) -> str:
-    if model == "clip" and not onnxruntime_ok():
+    if model in ("clip", "ocr") and not onnxruntime_ok():
         return _t("缺少 onnxruntime：请重新运行 run.bat 自动安装（或 pip install onnxruntime）")
     if ready(model):
         return _t("已就绪")

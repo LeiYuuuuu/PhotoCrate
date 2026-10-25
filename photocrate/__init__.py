@@ -3,4 +3,4 @@
 APP_NAME = "影匣"
 APP_NAME_EN = "PHOTOCRATE"
 APP_TAGLINE = "LOCAL ARCHIVE SORTING TERMINAL"
-__version__ = "2.0.0"
+__version__ = "2.1.0"

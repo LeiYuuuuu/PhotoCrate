@@ -1,11 +1,17 @@
-"""主窗口：顶部机体条 + 左侧导航 + 页面区 + 底部状态条。"""
+"""主窗口：顶部机体条（含「相册 / 修图」模式切换）+ 左侧导航 + 页面区 + 底部状态条。
+
+两个主界面：
+- 相册（存储模式）：00 照片（类似 iOS 相册的图库 / 相簿 / 搜索）+ 01–11 整理工具页；
+- 修图（专业模式）：ui/studio.py，修图窗口作为标签页嵌在这里。
+"""
 from __future__ import annotations
 
 import os
 from datetime import datetime
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QGuiApplication, QIcon, QPainter, QPen, QPolygonF
+from PySide6.QtGui import (QColor, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QPainter, QPen, QPolygonF,
+                           QShortcut)
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QMainWindow, QSizePolicy, QStackedWidget, QVBoxLayout,
                                QWidget)
 
@@ -27,9 +33,96 @@ from .pages.settings_page import SettingsPage
 from .pages.source_page import SourcePage
 from .pages.timeplace_page import TimePlacePage
 from .pages.travel_page import TravelPage
+from .photos import PhotosPage
+from .studio import StudioMode
 from .theme import font
 from .widgets.deco import Barcode, LogoMark
 from ..i18n import is_en, t as _t
+
+
+class ModeSwitch(QWidget):
+    """顶栏中间的两个主界面切换：相册（存储）/ 修图（专业）。"""
+    changed = Signal(int)
+    MODES = [("Photos" if is_en() else "相册", "PHOTOS"), ("Studio" if is_en() else "修图", "STUDIO")]  # “相册”在别处是 Album
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current = 0
+        self.badge = 0                      # 修图里打开着几张
+        self._hover = -1
+        self.marker = motion.Motion(self, 0, 200)
+        self.setFixedSize(260, 40)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAccessibleName(_t("主界面切换"))
+        self.setToolTip(_t("相册：浏览、搜索、整理照片（Alt+1）") + "\n" + _t("修图：图层、蒙版、修复等专业修图（Alt+2）"))
+
+    def set_current(self, i: int) -> None:
+        self.current = i
+        self.marker.to(i)
+        self.update()
+
+    def set_badge(self, n: int) -> None:
+        self.badge = n
+        self.update()
+
+    def mousePressEvent(self, e):
+        i = 0 if e.position().x() < self.width() / 2 else 1
+        if i != self.current:
+            self.changed.emit(i)
+
+    def mouseMoveEvent(self, e):
+        i = 0 if e.position().x() < self.width() / 2 else 1
+        if i != self._hover:
+            self._hover = i
+            self.update()
+
+    def leaveEvent(self, e):
+        self._hover = -1
+        self.update()
+
+    def paintEvent(self, e):
+        p = theme.current()
+        qp = QPainter(self)
+        qp.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        half = w / 2
+        qp.setPen(QPen(QColor(p.slab2), 1))
+        qp.setBrush(QColor(p.slab))
+        qp.drawRect(QRectF(0.5, 0.5, w - 1, h - 1))
+        x = self.marker.value * half
+        poly = QPolygonF([QPointF(x + 3, 3), QPointF(x + half - 13, 3), QPointF(x + half - 3, 13),
+                          QPointF(x + half - 3, h - 3), QPointF(x + 3, h - 3)])
+        qp.setPen(Qt.PenStyle.NoPen)
+        qp.setBrush(QColor(p.accent))
+        qp.drawPolygon(poly)
+        for i, (name, en) in enumerate(self.MODES):
+            r = QRectF(i * half, 0, half, h)
+            active = i == self.current
+            if not active and i == self._hover:
+                qp.fillRect(r.adjusted(3, 3, -3, -3), QColor(p.slab2))
+            ink = QColor(p.accent_ink) if active else QColor(p.slab_ink)
+            ink2 = QColor(p.accent_ink) if active else QColor(p.slab_ink2)
+            f1 = font("cn", 11.5, 800)
+            f2 = font("mono", 6.5, 400, 1.2)
+            tw = QFontMetrics(f1).horizontalAdvance(name)
+            ew = QFontMetrics(f2).horizontalAdvance(en)
+            x0 = r.left() + (half - tw - 8 - ew) / 2
+            qp.setFont(f1)
+            qp.setPen(ink)
+            qp.drawText(QRectF(x0, 0, tw + 2, h), Qt.AlignmentFlag.AlignVCenter, name)
+            qp.setFont(f2)
+            qp.setPen(ink2)
+            qp.drawText(QRectF(x0 + tw + 8, 1, ew + 2, h), Qt.AlignmentFlag.AlignVCenter, en)
+            if i == 1 and self.badge:
+                b = QRectF(r.right() - 22, 5, 16, 14)
+                qp.setPen(Qt.PenStyle.NoPen)
+                qp.setBrush(QColor(p.accent2))
+                qp.drawRoundedRect(b, 7, 7)
+                qp.setPen(QColor("#FFFFFF"))
+                qp.setFont(font("mono", 7, 700))
+                qp.drawText(b, Qt.AlignmentFlag.AlignCenter, str(self.badge))
+        qp.end()
 
 
 class TopBar(QWidget):
@@ -41,6 +134,9 @@ class TopBar(QWidget):
         lay.setSpacing(12)
         lay.addWidget(LogoMark(34))
         self.readouts: list[tuple[str, str, str]] = []
+        lay.addSpacing(390)
+        self.mode = ModeSwitch()
+        lay.addWidget(self.mode)
         lay.addStretch(1)
         self.bc = Barcode(seed=11, w=84, h=20)
         lay.addWidget(self.bc)
@@ -255,7 +351,10 @@ class MainWindow(QMainWindow):
         root.setSpacing(0)
         self.top = TopBar()
         root.addWidget(self.top)
-        mid = QHBoxLayout()
+        self.modes = QStackedWidget()           # 0 相册（导航 + 页面）/ 1 修图
+        library = QWidget()
+        mid = QHBoxLayout(library)
+        mid.setContentsMargins(0, 0, 0, 0)
         mid.setSpacing(0)
         self.nav = NavRail()
         mid.addWidget(self.nav)
@@ -264,14 +363,18 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         right.addWidget(self.stack, 1)
         mid.addLayout(right, 1)
-        root.addLayout(mid, 1)
+        self.modes.addWidget(library)
+        self.studio = StudioMode(ctx)
+        ctx.studio = self.studio                # open_editor 看到它就把修图窗口嵌进来
+        self.modes.addWidget(self.studio)
+        root.addWidget(self.modes, 1)
         self.status = StatusStrip()
         root.addWidget(self.status)
         self.setCentralWidget(central)
 
         self.pages: list[Page | QWidget] = []
         self.page_ids: list[str] = []
-        for cls in (SourcePage, TimePlacePage, PartitionPage, OverviewPage, CullingPage, TravelPage, AiPage,
+        for cls in (PhotosPage, SourcePage, TimePlacePage, PartitionPage, OverviewPage, CullingPage, TravelPage, AiPage,
                     PeoplePage, BlurPage, HistoryPage, SettingsPage):
             self._add_page(cls(ctx), cls.page_id, cls.index, cls.title, cls.en.split("//")[0].strip())
         # 插件页面
@@ -282,6 +385,12 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 ctx.status.emit(_t('插件页面加载失败：{0}：{1}', spec.title, e))
         self.nav.changed.connect(self.go)
+        self.top.mode.changed.connect(self.set_mode)
+        self.studio.activated.connect(lambda: self.set_mode(1))
+        self.studio.want_library.connect(lambda: (self.set_mode(0), self.go(0)))
+        self.studio.count_changed.connect(self.top.mode.set_badge)
+        QShortcut(QKeySequence("Alt+1"), self, activated=lambda: self.set_mode(0))
+        QShortcut(QKeySequence("Alt+2"), self, activated=lambda: self.set_mode(1))
         # 缩略图上打分 / 双击看大图（所有页面的缩略图网格共用）
         from .widgets.thumbgrid import HOOKS
         HOOKS.rate = ctx.rate
@@ -296,7 +405,7 @@ class MainWindow(QMainWindow):
         ctx.files_changed.connect(self._update_readouts)
         ctx.settings_changed.connect(lambda k: k == "exiftool_path" and self._update_readouts())
         ctx.theme_changed.connect(self._apply_theme)
-        ctx.navigate.connect(lambda pid: pid in self.page_ids and self.go(self.page_ids.index(pid)))
+        ctx.navigate.connect(lambda pid: pid in self.page_ids and (self.set_mode(0), self.go(self.page_ids.index(pid))))
         self._update_readouts()
         self._clock = QTimer(self)
         self._clock.timeout.connect(self.status.update)
@@ -369,6 +478,8 @@ class MainWindow(QMainWindow):
         d = screenshots_dir()
         idx = self.stack.currentIndex()
         pid = self.page_ids[idx] if 0 <= idx < len(self.page_ids) else "page"
+        if self.modes.currentIndex() == 1:
+            pid = "studio"
         path = os.path.join(str(d), f"PhotoCrate_{datetime.now():%Y%m%d_%H%M%S}_{pid}.png")
         pm = None
         scr = self.screen() or QGuiApplication.primaryScreen()
@@ -396,6 +507,26 @@ class MainWindow(QMainWindow):
 
     def page(self, pid: str):
         return self.pages[self.page_ids.index(pid)] if pid in self.page_ids else None
+
+    def mode(self) -> int:
+        return self.modes.currentIndex()
+
+    def set_mode(self, i: int) -> None:
+        """切换主界面：0 相册 / 1 修图。"""
+        if i == self.modes.currentIndex():
+            self.top.mode.set_current(i)
+            return
+        snapshot = self.modes.grab() if motion.enabled() and self.isVisible() else None
+        self.modes.setCurrentIndex(i)
+        self.top.mode.set_current(i)
+        if i == 0:
+            w = self.stack.currentWidget()
+            if hasattr(w, "on_show"):
+                w.on_show()
+        else:
+            self.studio.home.refresh()
+        if snapshot is not None:
+            motion.PageVeil(self.modes, snapshot)
 
     def go(self, i: int) -> None:
         if not 0 <= i < len(self.pages):
@@ -462,6 +593,10 @@ class MainWindow(QMainWindow):
                        ok=_t("退出"), danger=True):
                 e.ignore()
                 return
+        if not self.studio.close_all():          # 修图标签各自问要不要保存；有一个取消就不退出
+            self.set_mode(1)
+            e.ignore()
+            return
         QApplication.instance().removeEventFilter(self)
         self._save_window()
         self.ctx.shutdown()
