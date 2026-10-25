@@ -200,7 +200,7 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 
 | 部分 | 实现 |
 |---|---|
-| 图层 | `Layer`：`pixel`（RGBA uint8 + 左上角位置，可以比画布大 / 小）、`text`（参数 + 按参数用 Pillow 画出的像素，改参数就重画）、`adjust`（`adjust.py` 的参数，作用于下面所有图层合成的结果）。蒙版 uint8：像素 / 文字图层与像素同尺寸、跟着图层移动；调整图层与画布同尺寸 |
+| 图层 | `Layer`：`pixel`（RGBA uint8 / uint16 + 左上角位置，可以比画布大 / 小）、`text`（参数 + 按参数用 Pillow 画出的像素，改参数就重画）、`adjust`（`adjust.py` 的参数，作用于下面所有图层合成的结果）。蒙版 uint8：像素 / 文字图层与像素同尺寸、跟着图层移动；调整图层与画布同尺寸 |
 | 混合 | `blend.composite`：W3C Compositing 公式（带底层 alpha），18 种模式含色相 / 饱和度 / 颜色 / 明度（SetLum / SetSat） |
 | 渲染 | `Document.render(level, rect)`：在 2^-level 级别上只合成一块。每层按级别缓存代理图——宽高补齐到 2^level 的整数倍再整数倍盒式平均（有透明时先预乘），所以画笔只改一小块时可以只更新代理图的这一块，结果与整张重算完全一致。调整图层里有半径的操作（高光阴影分区、清晰度、锐化、降噪）按 `RenderCtx.scale` 换算，且渲染一块时四周多算 `adjust.margin()`；大半径模糊先缩小再模糊。拖滑块时缓存“这一层下面所有图层的合成结果”（`hot`，签名 = 下面每层的版本号 / 属性） |
 | 画布 | `CanvasView`：缩放 < 100% 时选不小于屏幕像素的级别；整张代理图 ≤ 600 万像素就整张算（平移不重算），否则只算可见区域外加 30%。连续操作时上一帧 > 90 ms 就先用低一级出图、停手 250 ms 后补清晰的。画笔每一笔只重算改动的矩形并直接写进显示缓冲。选区蚂蚁线 = `cv2.findContours` 的轮廓 |
@@ -227,6 +227,22 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 | 修补重影 | `ghost_patch`：补丁是对齐后源图的原样像素（不再重新取样），只取选区外接矩形；亮度用选区周围一圈（排除羽化带）逐通道直方图匹配到合并结果；蒙版 = 选区羽化，选区内恒为 255。放在合并结果上方的新图层（`params.ghost_fix`），可撤销、可在蒙版上修边 |
 
 测试：`tests/test_hdr.py`（合成的手持包围曝光：对齐误差、锐度不低于参考帧、移动物体处与参考帧一致、静止场景不误判、修补的亮度匹配、工程往返）、`tests/ui_merge.py`（挑片页 → 对话框 → 修图窗口 → 修补重影 → 保存工程）。
+
+## 9.7 修图进阶：16 位、RAW、图层组、变换、修饰工具（v1.8.0）
+
+| 部分 | 实现 |
+|---|---|
+| 16 位 | `Document.depth`（8 / 16）决定新建、合并、拼合出来的像素类型；每个图层按自己数组的类型换算到 0–1（`to_float` / `from_float` / `convert`，8→16 = ×257），所以同一文档里可以混用（文字图层总是 8 位渲染）。代理图、缩放、预乘、滤镜分条、画笔、仿制、修复、合并都按数组自己的满值算。蒙版和选区仍是 uint8。OpenCV 修复只收 8 位彩色图：在 8 位上补好，只把“补上的差值”×257 加回 16 位原图。调整的查找表改为线性插值，否则 16 位拉伸后仍只有 4096 级 |
+| 16 位读写 | 16 位 PNG / TIFF 用 `cv2.imdecode`（Pillow 读不了 48 位 RGB），EXIF 方向自己转；导出 16 位 PNG = `cv2.imencode` 再插入 iCCP / eXIf 块；16 位 TIFF 自己写（Deflate + 水平差分预测，ICC 标签 34675，相机 / 拍摄时间写成 IFD0 文字标签）。工程里每层记 `depth`，16 位图层存 16 位 PNG |
+| RAW | `edit/raw.py`：rawpy（LibRaw）`postprocess(output_bps=16, sRGB, BT.709 伽马)`；白平衡 = 相机记录 / 自动 / 日光系数 / 自定义四个系数。吸管：在按当前系数显影的预览上取一小块，去掉 BT.709 伽马后按 G/R、G/B 修正系数（合成 DNG 上一次就收敛到 <0.5%）。`ui/editor/rawdlg.py` 预览用半尺寸 + 线性解马赛克。测试用的 RAW 由 `tests/raw_fixture.py` 现写一个未压缩 Bayer DNG（颜色矩阵 = diag(增益)·XYZ→sRGB，AsShotNeutral = 增益） |
+| 图层组 | 不改成树：组（`kind="group"`，像调整图层一样没有像素、蒙版与画布同尺寸）和子图层仍在同一个平铺列表里，子图层用 `parent` 指向组，且连续排在组的正下方（“单元” = 组 + 全部后代，`Document.unit()`）。渲染时临时建 `父 id → 子图层` 表递归合成：穿透 = 子图层直接叠到下面的结果上，再按组的不透明度 × 蒙版与之前的结果插值；其他模式 = 先在透明底上单独合成再按组的模式叠上去。上移 / 下移按 Photoshop 的规则进出组；复制组时重新映射 `parent` |
+| 剪贴蒙版 | `Layer.clip`：同一层级里，基底 = 下面最近的非剪贴图层。合成时基底和它上面连续的剪贴图层作为一组：基底按“正常、100%”单独画出来，剪贴的像素图层按自己的模式在 alpha = 1 的底上合成后只保留颜色（相当于 source-atop），剪贴的调整图层直接调这一组的颜色；最后按基底的模式和不透明度叠上去 |
+| 拖滑块缓存 | `hot` 缓存的是“热图层所在的顶层单元下面”的合成结果（剪贴图层退到它的基底），签名包含 `clip` / `parent` |
+| 透视 / 变形 | `edit/warp.py`：图层的 `xform` 可以是 2×3 仿射、3×3 单应矩阵或 `{"mesh": 4×4 控制点}`。预览时在代理图级别直接 warp（矩阵按 T·S⁻¹·H·S 换算到级别）。变形网格 = 双三次贝塞尔曲面：切成 n×n 个四边形、每个两个三角形，用 `fillConvexPoly` 画“像素属于哪个三角形”的编号图，再用每个三角形的仿射逆变换一次算出 remap 用的源坐标（全向量化）；提交时按 1024 行一条分条算。自由变换工具以 3×3 矩阵为状态：缩放在图层自己的坐标系里做（透视后也成立），旋转 / 移动左乘画布变换，扭曲 / 斜切 / 透视改四个角再求单应矩阵（角拖到“地平线”后面时拒绝） |
+| 修饰工具 | `paint.Stroke` 新模式：减淡 / 加深 / 海绵按 `tone_target`（亮度权重：暗部 (1−L)²、中间调 4L(1−L)、高光 L²）算目标色，按笔刷覆盖度混合（同一笔不叠加）；模糊 / 锐化的目标从笔触开始时的快照里按块现算（四周多取 3σ、图层边缘复制边缘）；涂抹逐个笔触点混合当前像素和“手指上的颜色”，手指再沾上混合结果 |
+| 工具栏 | `TOOL_SLOTS`：一格可以放几个工具（右键 / 长按弹菜单）；共用快捷键的工具注册成一个动作，Shift + 键在格里轮换 |
+
+测试：`tests/test_editor_pro.py`（16 位精度与各操作保持位深、16 位 PNG / TIFF / 工程往返、RAW 白平衡与吸管、剪贴与组的合成结果、组的移动 / 复制 / 合并 / 取消、hot 缓存、透视与变形的预览 = 提交、六种修饰工具）、`tests/ui_editor_pro.py`。
 
 ## 10. 安全搬运（ops/）
 
@@ -332,7 +348,7 @@ PhotoCrate/
 ├─ tools/          get_exiftool.ps1  make_icon.py  （exiftool/ 运行后自动下载到这里）
 └─ tests/          test_core.py  test_timeplace.py  test_culling.py  test_trips.py  test_ai.py
                    test_workflow.py  test_repartition.py  test_search_rank.py  test_faces_screen.py  test_i18n.py
-                   test_editor.py  test_hdr.py
+                   test_editor.py  test_editor_pro.py  test_hdr.py
                    make_samples.py  ui_smoke.py  ui_timeplace.py
                    ui_culling.py  ui_tier3.py  ui_workflow.py  ui_repartition.py  ui_editor.py  ui_merge.py
 ```

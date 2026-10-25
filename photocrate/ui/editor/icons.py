@@ -20,6 +20,18 @@ def _poly(pts) -> QPolygonF:
     return QPolygonF([QPointF(x, y) for x, y in pts])
 
 
+def icon_pixmap(kind: str, col: QColor, size: int = 16):
+    """画成一张小图（按钮、面板里用；有些符号字体里没有，用画的更稳）。"""
+    from PySide6.QtGui import QPixmap
+    pm = QPixmap(size * 2, size * 2)
+    pm.setDevicePixelRatio(2.0)
+    pm.fill(Qt.GlobalColor.transparent)
+    qp = QPainter(pm)
+    paint_icon(qp, QRectF(0, 0, size, size), kind, col)
+    qp.end()
+    return pm
+
+
 def paint_icon(qp: QPainter, rect: QRectF, kind: str, col: QColor) -> None:
     qp.save()
     qp.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -171,4 +183,57 @@ def paint_icon(qp: QPainter, rect: QRectF, kind: str, col: QColor) -> None:
         path.arcTo(QRectF(4, 4, 16, 16), 90, 180)
         path.closeSubpath()
         qp.drawPath(path)
+    elif kind == "dodge":                                  # 减淡：棒棒糖形的遮挡板
+        qp.drawEllipse(QPointF(14, 9), 5.5, 5.5)
+        qp.setPen(_pen(col, 2.0))
+        qp.drawLine(QPointF(10, 13), QPointF(4, 20))
+    elif kind == "burn":                                   # 加深：捏起来的手
+        path = QPainterPath(QPointF(6, 21))
+        path.cubicTo(4, 15, 6, 11, 9, 10)
+        path.cubicTo(10, 6, 13, 4, 16, 5)
+        path.cubicTo(19, 6, 20, 9, 18, 12)
+        path.cubicTo(17, 15, 15, 17, 15, 21)
+        qp.drawPath(path)
+        qp.drawEllipse(QPointF(14, 9), 1.8, 1.8)
+    elif kind == "sponge":
+        qp.drawRoundedRect(QRectF(4, 6, 16, 12), 3, 3)
+        qp.setBrush(fill)
+        for x, y in ((8, 10), (13, 9), (16, 13), (10, 14)):
+            qp.drawEllipse(QPointF(x, y), 1.2, 1.2)
+    elif kind == "blur":                                   # 模糊：水滴
+        path = QPainterPath(QPointF(12, 3))
+        path.cubicTo(15, 8, 19, 12, 19, 15)
+        path.cubicTo(19, 19, 16, 21, 12, 21)
+        path.cubicTo(8, 21, 5, 19, 5, 15)
+        path.cubicTo(5, 12, 9, 8, 12, 3)
+        qp.drawPath(path)
+    elif kind == "sharpen":                                # 锐化：尖三角
+        qp.drawPolygon(_poly([(12, 3), (19, 20), (5, 20)]))
+        qp.drawLine(QPointF(12, 3), QPointF(12, 20))
+    elif kind == "smudge":                                 # 涂抹：伸出的手指
+        path = QPainterPath(QPointF(5, 21))
+        path.lineTo(5, 13)
+        path.cubicTo(5, 11, 8, 11, 8, 13)
+        path.lineTo(8, 4)
+        path.cubicTo(8, 2, 11, 2, 11, 4)
+        path.lineTo(11, 11)
+        path.cubicTo(13, 10, 15, 10, 15, 12)
+        path.cubicTo(17, 11, 19, 12, 19, 14)
+        path.lineTo(19, 17)
+        path.cubicTo(19, 20, 17, 21, 14, 21)
+        qp.drawPath(path)
+    elif kind == "folder":
+        path = QPainterPath(QPointF(3, 7))
+        path.lineTo(3, 19)
+        path.lineTo(21, 19)
+        path.lineTo(21, 8)
+        path.lineTo(11, 8)
+        path.lineTo(9, 5)
+        path.lineTo(3, 5)
+        path.closeSubpath()
+        qp.drawPath(path)
+    elif kind == "clip":                                   # 剪贴蒙版：向下的折角箭头
+        qp.setPen(_pen(col, 1.8))
+        qp.drawPolyline(_poly([(6, 4), (6, 16), (18, 16)]))
+        qp.drawPolyline(_poly([(14, 12), (18, 16), (14, 20)]))
     qp.restore()

@@ -9,6 +9,9 @@
 - clone   仿制图章：目标 = 快照里偏移 (dx, dy) 处的像素
 - heal    污点修复：先只记录涂抹范围，松开时用 OpenCV 修复（inpaint）填补并匹配周围的噪点
 - mask    在图层蒙版上画：目标 = 灰度值（白显示、黑隐藏）
+- dodge / burn / sponge   减淡 / 加深 / 海绵：目标 = 快照提亮 / 压暗 / 加减饱和度（按“范围”只作用于暗部 / 中间调 / 亮部）
+- blur / sharpen          模糊 / 锐化：目标 = 快照模糊 / USM 锐化后的样子（按笔触所在的一小块现算）
+- smudge                  涂抹：手指“沾”上起点的颜色往前推，每个笔触点都在当前像素上混合（不是按覆盖度）
 """
 from __future__ import annotations
 
@@ -16,8 +19,39 @@ import math
 
 import numpy as np
 
-from .document import Document, Layer, crop_canvas, mask_bbox, over
+from .document import Document, Layer, crop_canvas, from_float, mask_bbox, maxval, over, to8, to_float
 from ..i18n import t as _t
+
+TONE_MODES = ("dodge", "burn", "sponge", "blur", "sharpen")
+MODE_NAMES = {"paint": _t("画笔"), "erase": _t("橡皮擦"), "clone": _t("仿制图章"), "heal": _t("污点修复"),
+              "dodge": _t("减淡"), "burn": _t("加深"), "sponge": _t("海绵"), "blur": _t("模糊"), "sharpen": _t("锐化"),
+              "smudge": _t("涂抹")}
+
+
+def _lum(rgb: np.ndarray) -> np.ndarray:
+    return rgb[..., 0] * 0.299 + rgb[..., 1] * 0.587 + rgb[..., 2] * 0.114
+
+
+def tone_weight(L: np.ndarray, rng: str) -> np.ndarray:
+    """减淡 / 加深只作用在哪个亮度范围：shadows 暗部、midtones 中间调、highlights 亮部（平滑过渡）。"""
+    if rng == "shadows":
+        return (1 - L) ** 2
+    if rng == "highlights":
+        return L ** 2
+    return np.clip(4 * L * (1 - L), 0, 1)
+
+
+def tone_target(rgb: np.ndarray, mode: str, strength: float, rng: str = "midtones", sat_up: bool = False):
+    """减淡 / 加深 / 海绵的目标颜色（float 0–1）。"""
+    L = _lum(rgb)
+    if mode == "dodge":
+        w = tone_weight(L, rng)[..., None] * strength
+        return rgb + (1 - rgb) * w
+    if mode == "burn":
+        w = tone_weight(L, rng)[..., None] * strength
+        return rgb - rgb * w
+    k = 1 + strength if sat_up else 1 - strength                     # 海绵：加色 / 去色
+    return np.clip(L[..., None] + (rgb - L[..., None]) * k, 0, 1)
 
 
 def dab(radius: float, hardness: float) -> np.ndarray:
@@ -39,23 +73,30 @@ def dab(radius: float, hardness: float) -> np.ndarray:
 class Stroke:
     def __init__(self, doc: Document, layer: Layer, mode: str, *, color=(0, 0, 0), size: float = 30,
                  hardness: float = 0.8, opacity: float = 1.0, clone_offset: tuple[int, int] = (0, 0),
-                 to_mask: bool = False, name: str = ""):
+                 to_mask: bool = False, name: str = "", strength: float = 0.5, tone_range: str = "midtones",
+                 sat_up: bool = False):
         self.doc, self.layer, self.mode = doc, layer, mode
         self.to_mask = to_mask and layer.mask is not None
+        if self.to_mask and mode not in ("paint", "erase"):      # 修饰类工具只改像素；在蒙版上没有意义
+            self.to_mask = False
         self.radius = max(0.5, size / 2)
         self.kernel = dab(self.radius, hardness)
         self.opacity = float(opacity)
         self.color = np.array(color[:3], np.float32) / 255.0
         self.gray = float(np.dot(color[:3], (0.299, 0.587, 0.114)))
         self.offset = (int(clone_offset[0]), int(clone_offset[1]))
-        self.name = name or {"paint": _t("画笔"), "erase": _t("橡皮擦"), "clone": _t("仿制图章"), "heal": _t("污点修复")}.get(mode, _t("画笔"))
+        self.strength = float(np.clip(strength, 0, 1))
+        self.tone_range = tone_range
+        self.sat_up = bool(sat_up)
+        self.pickup = None                                         # 涂抹：手指上沾着的颜色（笔刷大小的 float RGBA）
+        self.name = name or MODE_NAMES.get(mode, _t("画笔"))
         self.state_before = None
         if not self.to_mask and layer.kind == "text":     # 在文字上画 = 先栅格化（换新数组，旧状态里的像素不受影响）
             self.state_before = doc.state()
             layer.kind = "pixel"
             layer.pixels = layer.pixels.copy()
             layer.touch()
-        if not self.to_mask and layer.kind != "adjust":
+        if not self.to_mask and not layer.canvas_sized:
             self._cover_canvas()
         arr = layer.mask if self.to_mask else layer.pixels
         self.arr = arr
@@ -87,7 +128,7 @@ class Stroke:
 
     # ---- 坐标 ----
     def to_local(self, cx: float, cy: float) -> tuple[float, float]:
-        if self.layer.kind == "adjust":
+        if self.layer.canvas_sized:
             return cx, cy
         return cx - self.layer.x, cy - self.layer.y
 
@@ -110,6 +151,7 @@ class Stroke:
         r = k.shape[0] // 2
         rx0 = ry0 = 10 ** 9
         rx1 = ry1 = -10 ** 9
+        smudge = self.mode == "smudge" and not self.to_mask
         for px, py in pts:
             ix, iy = int(round(px)), int(round(py))
             x0, y0, x1, y1 = ix - r, iy - r, ix + r + 1, iy + r + 1
@@ -118,10 +160,13 @@ class Stroke:
                 continue
             sub = self.cov[cy0:cy1, cx0:cx1]
             np.maximum(sub, k[cy0 - y0:cy1 - y0, cx0 - x0:cx1 - x0], out=sub)
+            if smudge:
+                self._smudge(x0, y0, cx0, cy0, cx1, cy1)
             rx0, ry0, rx1, ry1 = min(rx0, cx0), min(ry0, cy0), max(rx1, cx1), max(ry1, cy1)
         if rx0 >= rx1:
             return None
-        self._render(rx0, ry0, rx1, ry1)
+        if not smudge:
+            self._render(rx0, ry0, rx1, ry1)
         if self.bbox is None:
             self.bbox = [rx0, ry0, rx1, ry1]
         else:
@@ -132,7 +177,7 @@ class Stroke:
             self.layer.touch_mask(rect)
         else:
             self.layer.touch(rect)
-        ox, oy = (0, 0) if self.layer.kind == "adjust" else (self.layer.x, self.layer.y)
+        ox, oy = (0, 0) if self.layer.canvas_sized else (self.layer.x, self.layer.y)
         return rx0 + ox, ry0 + oy, rx1 - rx0, ry1 - ry0
 
     def _render(self, x0: int, y0: int, x1: int, y1: int) -> None:
@@ -147,21 +192,68 @@ class Stroke:
             out = before.astype(np.float32) + (target - before.astype(np.float32)) * a
             self.arr[y0:y1, x0:x1] = np.clip(out + 0.5, 0, 255).astype(np.uint8)
             return
+        M = maxval(before)
         if self.mode == "erase":
             px = before.copy()
-            px[..., 3] = np.clip(before[..., 3].astype(np.float32) * (1 - a) + 0.5, 0, 255).astype(np.uint8)
+            px[..., 3] = np.clip(before[..., 3].astype(np.float32) * (1 - a) + 0.5, 0, M).astype(before.dtype)
             self.arr[y0:y1, x0:x1] = px
         elif self.mode == "clone":
             dx, dy = self.offset
-            src = crop_canvas(self.before, x0 + dx, y0 + dy, x1 - x0, y1 - y0, 0).astype(np.float32) / 255.0
-            dst = before.astype(np.float32) / 255.0
+            src = to_float(crop_canvas(self.before, x0 + dx, y0 + dy, x1 - x0, y1 - y0, 0))
+            dst = to_float(before)
             sa = src[..., 3] * a
             oa = sa + dst[..., 3] * (1 - sa)
             oc = (src[..., :3] * sa[..., None] + dst[..., :3] * (dst[..., 3] * (1 - sa))[..., None]) \
                 / np.maximum(oa, 1e-6)[..., None]
-            self.arr[y0:y1, x0:x1] = np.clip(np.dstack([oc, oa]) * 255 + 0.5, 0, 255).astype(np.uint8)
+            self.arr[y0:y1, x0:x1] = from_float(np.dstack([oc, oa]), before.dtype)
+        elif self.mode in TONE_MODES:
+            src = to_float(before)
+            tgt = self._tone_region(x0, y0, x1, y1, src)
+            out = src.copy()
+            out[..., :3] = src[..., :3] + (tgt - src[..., :3]) * a[..., None]
+            self.arr[y0:y1, x0:x1] = from_float(out, before.dtype)
         else:
             self.arr[y0:y1, x0:x1] = over(before, self.color, a)
+
+    def _tone_region(self, x0, y0, x1, y1, src):
+        """修饰类工具在这块的目标颜色（float RGB）。模糊 / 锐化要看周围，所以从快照里多取一圈。"""
+        import cv2
+        if self.mode in ("dodge", "burn", "sponge"):
+            return tone_target(src[..., :3], self.mode, self.strength, self.tone_range, self.sat_up)
+        sigma = 0.6 + 4.0 * self.strength if self.mode == "blur" else 1.0
+        m = int(math.ceil(sigma * 3)) + 2
+        big = to_float(crop_canvas(self.before, x0 - m, y0 - m, x1 - x0 + 2 * m, y1 - y0 + 2 * m, 0))[..., :3]
+        H, W = self.before.shape[:2]                          # 图层边缘外面用复制边缘，免得边上被模糊成黑色
+        ix0, iy0 = max(0, m - x0), max(0, m - y0)
+        ix1, iy1 = big.shape[1] - max(0, x1 + m - W), big.shape[0] - max(0, y1 + m - H)
+        inner = big[iy0:iy1, ix0:ix1]
+        big = cv2.copyMakeBorder(inner, iy0, big.shape[0] - iy1, ix0, big.shape[1] - ix1, cv2.BORDER_REPLICATE)
+        bl = cv2.GaussianBlur(big, (0, 0), sigma)
+        if self.mode == "blur":
+            res = bl
+        else:
+            res = np.clip(big + (big - bl) * (0.4 + 2.6 * self.strength), 0, 1)
+        return res[m:m + (y1 - y0), m:m + (x1 - x0)]
+
+    def _smudge(self, x0, y0, cx0, cy0, cx1, cy1) -> None:
+        """涂抹一个笔触点：当前像素向“手指上的颜色”混合，手指再沾上混合后的颜色。"""
+        k = self.kernel
+        n = k.shape[0]
+        cur = to_float(self.arr[cy0:cy1, cx0:cx1])
+        if self.pickup is None:
+            self.pickup = np.zeros((n, n, 4), np.float32)
+            self.pickup[cy0 - y0:cy1 - y0, cx0 - x0:cx1 - x0] = cur
+            self.pick_ok = np.zeros((n, n), bool)
+            self.pick_ok[cy0 - y0:cy1 - y0, cx0 - x0:cx1 - x0] = True
+            return
+        sl = (slice(cy0 - y0, cy1 - y0), slice(cx0 - x0, cx1 - x0))
+        w = k[sl] * self.strength * self.pick_ok[sl]
+        if self.sel is not None:
+            w = w * self.sel[cy0:cy1, cx0:cx1]
+        new = cur + (self.pickup[sl] - cur) * w[..., None]
+        self.arr[cy0:cy1, cx0:cx1] = from_float(new, self.arr.dtype)
+        self.pickup[sl] = new
+        self.pick_ok[sl] = True
 
     def finish(self) -> tuple[int, int, int, int] | None:
         """结束这一笔：污点修复在这里真正计算；把改动记进历史。返回改动的画布矩形。"""
@@ -193,7 +285,7 @@ class Stroke:
         self.before = None
         self.doc.version += 1
         self.doc.emit("history")
-        ox, oy = (0, 0) if self.layer.kind == "adjust" else (self.layer.x, self.layer.y)
+        ox, oy = (0, 0) if self.layer.canvas_sized else (self.layer.x, self.layer.y)
         return x0 + ox, y0 + oy, x1 - x0, y1 - y0
 
     def cancel(self) -> None:
@@ -213,9 +305,21 @@ def inpaint(rgba: np.ndarray, mask: np.ndarray, feather: np.ndarray | None = Non
     """用周围的画面补上 mask（uint8，>0 = 要补）的区域，返回新的 uint8 RGBA。
 
     OpenCV 的 Telea 修复在大块区域上会变得很“糊”，所以大区域先在缩小图上补、放大回来，再把周围的噪点
-    （高频细节的标准差）加回去，看起来不那么像涂了一层蜡。"""
+    （高频细节的标准差）加回去，看起来不那么像涂了一层蜡。
+
+    16 位图层：OpenCV 的修复只收 8 位彩色图，所以在 8 位上补好，再只把“补上的差值”加回 16 位原图——
+    没补的地方一个值都不变。"""
     import cv2
 
+    if rgba.dtype != np.uint8:
+        r8 = to8(rgba)
+        fixed8 = inpaint(r8, mask, feather)
+        d = fixed8[..., :3].astype(np.int32) - r8[..., :3].astype(np.int32)
+        if not d.any():
+            return rgba.copy()
+        out = rgba.copy()
+        out[..., :3] = np.clip(rgba[..., :3].astype(np.int32) + d * 257, 0, 65535).astype(np.uint16)
+        return out
     rgb = np.ascontiguousarray(rgba[..., :3])
     m = (mask > 0).astype(np.uint8) * 255
     bb = mask_bbox(m)
@@ -412,7 +516,7 @@ def apply_bucket(doc: Document, layer: Layer, cx: int, cy: int, color, tolerance
     if sample_all:
         src = crop_canvas(doc.flat_rgba(), layer.x, layer.y, layer.w, layer.h, 0)
     else:
-        src = layer.pixels
+        src = to8(layer.pixels)
     lx, ly = int(cx - layer.x), int(cy - layer.y)
     if not (0 <= lx < layer.w and 0 <= ly < layer.h):
         return False

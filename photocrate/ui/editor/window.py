@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox,
 
 from ...edit import adjust
 from ...edit import io as eio
-from ...edit.document import Layer
+from ...edit.document import Layer, to8
 from ...edit.filters import FILTERS
 from .. import theme
 from ..dialogs import _Base, choose, info
@@ -211,14 +211,51 @@ class OptionsBar(QWidget):
 # ---------------------------------------------------------------------------
 
 class ToolButton(QPushButton):
-    def __init__(self, tool, parent=None):
+    """工具栏的一格。一格里有几个工具时右下角画个小三角：右键或按住不放弹出菜单选别的。"""
+
+    def __init__(self, tools, win, parent=None):
         super().__init__(parent)
-        self.tool = tool
+        self.tools = list(tools)
+        self.tool = self.tools[0]
+        self.win = win
         self.setCheckable(True)
-        self.setFixedSize(40, 36)
+        self.setFixedSize(40, 34)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(tool.tip)
+        self.setToolTip(self.tool.tip)
         self._hover = False
+        self._hold = QTimer(self)
+        self._hold.setSingleShot(True)
+        self._hold.setInterval(380)
+        self._hold.timeout.connect(self.show_menu)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(lambda _: self.show_menu())
+
+    def set_tool(self, tool) -> None:
+        self.tool = tool
+        self.setToolTip(tool.tip)
+        self.update()
+
+    def show_menu(self) -> None:
+        if len(self.tools) < 2:
+            return
+        from PySide6.QtWidgets import QMenu
+        m = QMenu(self)
+        for t in self.tools:
+            a = m.addAction(f"{t.name}\t{t.shortcut}" if t.shortcut else t.name)
+            a.setCheckable(True)
+            a.setChecked(t is self.tool)
+            a.triggered.connect(lambda _=False, tid=t.id: self.win.set_tool(tid))
+        self.setDown(False)
+        m.exec(self.mapToGlobal(self.rect().topRight()))
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton and len(self.tools) > 1:
+            self._hold.start()
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        self._hold.stop()
+        super().mouseReleaseEvent(e)
 
     def enterEvent(self, e):
         self._hover = True
@@ -239,38 +276,54 @@ class ToolButton(QPushButton):
             if self._hover:
                 qp.fillRect(r, QColor(p.slab2))
             col = QColor(p.slab_ink)
-        paint_icon(qp, r.adjusted(9, 7, -9, -7), self.tool.icon, col)
+        paint_icon(qp, r.adjusted(9, 6, -9, -6), self.tool.icon, col)
+        if len(self.tools) > 1:
+            from PySide6.QtGui import QPolygonF
+            from PySide6.QtCore import QPointF
+            qp.setRenderHint(QPainter.RenderHint.Antialiasing)
+            qp.setPen(Qt.PenStyle.NoPen)
+            qp.setBrush(col)
+            qp.drawPolygon(QPolygonF([QPointF(r.right() - 3, r.bottom() - 8), QPointF(r.right() - 3, r.bottom() - 3),
+                                      QPointF(r.right() - 8, r.bottom() - 3)]))
         qp.end()
 
 
 class ToolBar(QWidget):
     def __init__(self, win, parent=None):
         super().__init__(parent)
+        from .tools import TOOL_SLOTS
         self.win = win
         self.setFixedWidth(52)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 8, 6, 8)
         lay.setSpacing(2)
-        self.buttons: dict[str, ToolButton] = {}
-        groups = [["move"], ["marquee", "lasso", "wand", "object"], ["crop", "eyedropper"],
-                  ["heal", "brush", "clone", "eraser", "bucket", "gradient"], ["text"], ["hand", "zoom"]]
-        for gi, g in enumerate(groups):
-            if gi:
+        self.buttons: dict[str, ToolButton] = {}         # 工具 id → 它所在的那一格
+        self.slots: list[ToolButton] = []
+        breaks = {"marquee", "crop", "heal", "text", "hand"}
+        for slot in TOOL_SLOTS:
+            if slot[0] in breaks:
                 sep = QWidget()
-                sep.setFixedHeight(9)
+                sep.setFixedHeight(7)
                 lay.addWidget(sep)
-            for tid in g:
-                b = ToolButton(win.tools[tid])
-                b.clicked.connect(lambda _=False, t=tid: win.set_tool(t))
+            b = ToolButton([win.tools[t] for t in slot], win)
+            b.clicked.connect(lambda _=False, btn=b: win.set_tool(btn.tool.id))
+            for tid in slot:
                 self.buttons[tid] = b
-                lay.addWidget(b, 0, Qt.AlignmentFlag.AlignHCenter)
+            self.slots.append(b)
+            lay.addWidget(b, 0, Qt.AlignmentFlag.AlignHCenter)
         lay.addStretch(1)
         self.swatches = Swatches(win)
         lay.addWidget(self.swatches, 0, Qt.AlignmentFlag.AlignHCenter)
 
     def set_current(self, tid: str) -> None:
-        for k, b in self.buttons.items():
-            b.setChecked(k == tid)
+        cur = self.buttons.get(tid)
+        if cur is not None and cur.tool.id != tid:
+            cur.set_tool(self.win.tools[tid])
+        for b in self.slots:
+            b.setChecked(b is cur)
+
+    def slot_of(self, tid: str) -> ToolButton | None:
+        return self.buttons.get(tid)
 
     def paintEvent(self, e):
         qp = QPainter(self)
@@ -503,7 +556,9 @@ class ExportDialog(_Base):
         self.strip_gps.setChecked(bool(s.get("editor_strip_gps")) if s else False)
         self.rescan = QCheckBox(_t("保存后重新扫描，让新文件出现在照片库里"))
         self.rescan.setChecked(True)
-        for w in (self.keep_exif, self.strip_gps, self.rescan):
+        self.deep = QCheckBox(_t("保存为 16 位（PNG / TIFF，给其他修图软件接着调；文件大一倍）"))
+        self.deep.setChecked(doc.depth == 16)
+        for w in (self.deep, self.keep_exif, self.strip_gps, self.rescan):
             self.body.addWidget(w)
         self.body.addWidget(caption(_t('画布 {0} × {1}，{2} 个图层合并成一张。原片不会被修改；想保留图层以后再改，用「文件 → 保存工程」。', doc.width, doc.height, len(doc.layers)), "faint", 8.5))
         self.fmt.currentIndexChanged.connect(self._fmt_changed)
@@ -523,7 +578,11 @@ class ExportDialog(_Base):
         if p:
             self.path.setText(os.path.splitext(p)[0] + ext)
         self.quality.setEnabled(ext in (".jpg", ".webp"))
+        self.deep.setEnabled(ext in (".png", ".tif"))
         self._update_rescan()
+
+    def deep_on(self) -> bool:
+        return self.deep.isChecked() and self.fmt.currentData() in (".png", ".tif")
 
     def in_library(self) -> bool:
         """导出位置在「资源接入」的某个文件夹里时，重新扫描才能把新文件加进照片库。"""
@@ -695,6 +754,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._act(m, _t("打开工程…"), lambda: self.open_image(project=True))
         self._act(m, _t("置入图片（作为新图层）…"), self.place_image, "Ctrl+Shift+P")
         self._act(m, _t("合并曝光（HDR）…"), self.merge_exposures)
+        self.a_redevelop = self._act(m, _t("重新显影 RAW…"), self.redevelop_raw)
         m.addSeparator()
         self._act(m, _t("保存工程"), self.save_project, "Ctrl+S")
         self._act(m, _t("工程另存为…"), lambda: self.save_project(ask=True))
@@ -715,9 +775,20 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._act(m, _t("内容识别填充（去掉选区里的东西）"), self.content_fill, "Shift+Backspace")
         self._act(m, _t("清除选区内容"), self.clear, "Delete")
         m.addSeparator()
-        self._act(m, _t("自由变换"), lambda: self.set_tool("transform"), "Ctrl+T")
+        self._act(m, _t("自由变换"), lambda: self.transform_mode("free"), "Ctrl+T")
+        sub = m.addMenu(_t("变换"))
+        for mode, label in (("skew", _t("斜切")), ("distort", _t("扭曲")), ("perspective", _t("透视")),
+                            ("warp", _t("变形"))):
+            self._act(sub, label, lambda md=mode: self.transform_mode(md))
 
         m = self.menu_image = mb.addMenu(_t("图像"))
+        sub = m.addMenu(_t("模式"))
+        self.a_depth = {}
+        for dep, label in ((8, _t("8 位/通道")), (16, _t("16 位/通道"))):
+            a = self._act(sub, label, lambda v=dep: self.set_depth(v))
+            a.setCheckable(True)
+            self.a_depth[dep] = a
+        sub.aboutToShow.connect(self._sync_depth_menu)
         sub = m.addMenu(_t("调整（新建调整图层）"))
         for name, focus, params in ADJUSTMENTS:
             self._act(sub, _t(name), lambda n=name, f=focus, p=params: self.new_adjust(_t(n), p, f))
@@ -747,6 +818,11 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._act(m, _t("复制图层 / 通过拷贝的图层"), lambda: d().layer_via_copy(), "Ctrl+J")
         self._act(m, _t("通过剪切的图层"), lambda: d().layer_via_copy(cut=True), "Ctrl+Shift+J")
         self._act(m, _t("删除图层"), lambda: d().delete_layer(d().active_id))
+        m.addSeparator()
+        self._act(m, _t("新建图层组"), lambda: d().new_group())
+        self._act(m, _t("图层编组"), lambda: d().group_layers(), "Ctrl+G")
+        self._act(m, _t("取消图层编组"), lambda: d().ungroup(), "Ctrl+Shift+G")
+        self._act(m, _t("创建 / 释放剪贴蒙版"), lambda: d().toggle_clip(), "Ctrl+Alt+G")
         m.addSeparator()
         self._act(m, _t("添加图层蒙版"), self.add_mask)
         self._act(m, _t("删除图层蒙版"), lambda: d().delete_mask(d().active_id))
@@ -791,10 +867,18 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self._act(m, _t("新手教程"), self.start_tour)
         self._act(m, _t("快捷键…"), self.show_help, "F1")
 
-        # 工具与颜色的单键快捷键（不放进菜单）
+        # 工具与颜色的单键快捷键（不放进菜单）。几个工具共用一个键（O：减淡 / 加深 / 海绵）时，
+        # 按键选这一格当前的工具，Shift + 键在它们之间轮换（和 Photoshop 一样）
+        by_key: dict[str, list[str]] = {}
         for t in self.tools.values():
             if t.shortcut:
-                self._act(None, t.name, lambda tid=t.id: self.set_tool(tid), t.shortcut)
+                by_key.setdefault(t.shortcut, []).append(t.id)
+        for key, ids in by_key.items():
+            if len(ids) == 1:
+                self._act(None, self.tools[ids[0]].name, lambda tid=ids[0]: self.set_tool(tid), key)
+                continue
+            self._act(None, key, lambda ids=ids: self._key_tool(ids, False), key)
+            self._act(None, "Shift+" + key, lambda ids=ids: self._key_tool(ids, True), "Shift+" + key)
         self._act(None, _t("交换前景 / 背景色"), self.swap_colors, "X")
         self._act(None, _t("默认颜色"), self.reset_colors, "D")
         self._act(None, _t("笔刷变小"), lambda: self._brush_size(1 / 1.25), "[")
@@ -813,10 +897,12 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
     def _update_title(self) -> None:
         d = self.doc
         name = d.source.name or os.path.basename(d.source.project or "") or _t("未命名")
-        self.setWindowTitle(_t('影匣 · 修图 — {0}{1}', name, '  *' if d.modified else ''))
+        self.setWindowTitle(_t('影匣 · 修图 — {0}{1}', name, '  *' if d.modified else '') + (
+            _t("（16 位）") if d.depth == 16 else ""))
 
     def _update_zoom(self) -> None:
-        self.zoom_lab.setText(f"{self.canvas.zoom * 100:.0f}%   {self.doc.width} × {self.doc.height}")
+        self.zoom_lab.setText(f"{self.canvas.zoom * 100:.0f}%   {self.doc.width} × {self.doc.height}   "
+                              + _t('{0} 位', self.doc.depth))
 
     def _cursor_info(self, info_) -> None:
         if info_ is None:
@@ -874,6 +960,10 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
             self._panel_timer.start()
             if self.tool is not None and self.tool.id == "crop":
                 self.tool.reset()
+        elif kind == "depth":
+            self._update_title()
+            self._update_zoom()
+            self._panel_timer.start()
         elif kind == "history":
             self.history.refresh()
             self._update_title()
@@ -906,6 +996,77 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self.canvas._update_cursor()
         self.status_msg(self.tool.tip)
         self.canvas.update()
+
+    def transform_mode(self, mode: str) -> None:
+        """编辑 → 自由变换 / 变换 → 斜切、扭曲、透视、变形。已经在变换中就只换方式。"""
+        self.opts["xf_mode"] = mode
+        if self.tool is not None and self.tool.id == "transform" and self.tool.layer is not None:
+            w = self.options.widgets.get("xf_mode")
+            if isinstance(w, QComboBox):
+                w.setCurrentIndex(max(0, w.findData(mode)))
+            else:
+                self.tool._mode_changed(mode)
+            return
+        self.set_tool("transform")
+
+    def set_depth(self, depth: int) -> None:
+        if depth == self.doc.depth:
+            return
+        if depth == 8 and not choose(self, _t("转换为 8 位/通道"), _t(
+                "转成 8 位后，再大幅拉曲线 / 色阶时渐变（天空、皮肤）更容易出现断层。<br>可以撤销。要转换吗？"),
+                [("yes", _t("转换"), "primary"), (None, _t("取消"), "secondary")]):
+            return
+        self._leave_transform()
+        with _Busy(self, _t("正在转换位深…")):
+            self.doc.convert_depth(depth)
+        self.status_msg(_t("已转换为 16 位/通道：调色不容易出断层，导出 PNG / TIFF 时可以保存 16 位")
+                        if depth == 16 else _t("已转换为 8 位/通道"))
+
+    def _sync_depth_menu(self) -> None:
+        for dep, a in self.a_depth.items():
+            a.setChecked(dep == self.doc.depth)
+
+    def raw_source(self) -> str | None:
+        """这张图对应的 RAW 文件：打开的就是 RAW，或照片库里同一组有 RAW。"""
+        from ...edit.raw import is_raw
+        s = self.doc.source
+        if s.path and is_raw(s.path) and os.path.exists(s.path):
+            return s.path
+        if s.gid is not None and self.ctx is not None:
+            g = self.ctx.library.by_gid(s.gid)
+            for f in getattr(g, "files", []) or []:
+                if f.role == "raw" and os.path.exists(f.path):
+                    return f.path
+        return None
+
+    def redevelop_raw(self) -> None:
+        """文件 → 重新显影 RAW：按新的白平衡 / 曝光重新显影，作为一个新图层放进来（原有图层不动）。"""
+        from .rawdlg import RawDialog
+        p = self.raw_source()
+        if p is None:
+            info(self, _t("重新显影 RAW"), _t("这张图没有对应的 RAW 文件（只有 JPG / PNG 等）。"))
+            return
+        dlg = RawDialog(self, p)
+        if dlg.exec() != RawDialog.DialogCode.Accepted or dlg.result_rgb is None:
+            return
+        rgb = dlg.result_rgb
+        rgba = np.dstack([rgb, np.full(rgb.shape[:2], 65535, np.uint16)])
+        d = self.doc
+        if d.depth != 16:
+            d.convert_depth(16)
+        if rgba.shape[:2] != (d.height, d.width):
+            from ...edit.document import _resize
+            rgba = _resize(rgba, d.width, d.height)
+        l = Layer("pixel", _t('RAW 显影 · {0}', os.path.basename(p)), np.ascontiguousarray(rgba))
+        d.add_layer(l, 1 if d.layers else 0, _t("重新显影 RAW"))
+        self.status_msg(_t("已作为新图层放在背景上面：可以和原来的叠在一起，用蒙版取各自好的部分"))
+
+    def _key_tool(self, ids: list[str], cycle: bool) -> None:
+        slot = self.toolbar.slot_of(ids[0])
+        cur = slot.tool.id if slot is not None and slot.tool.id in ids else ids[0]
+        if cycle and self.tool is not None and self.tool.id in ids:
+            cur = ids[(ids.index(self.tool.id) + 1) % len(ids)]
+        self.set_tool(cur)
 
     def restore_tool(self) -> None:
         self.tool = None
@@ -1046,7 +1207,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         if d.active is None:
             return
         if d.active.kind == "text":
-            info(self, _t("文字图层不能加蒙版"), _t("先「栅格化文字」，或者把文字放进一个图层组…（暂不支持组）。也可以直接用调整图层的蒙版。"))
+            info(self, _t("文字图层不能加蒙版"), _t("先「栅格化文字」，或者把文字放进图层组（Ctrl+G）再给组加蒙版。"))
             return
         d.add_mask(d.active_id, "selection" if d.selection is not None else "reveal")
 
@@ -1077,7 +1238,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
 
     def _need_pixels(self, what: str):
         l = self.doc.active
-        if l is None or l.kind == "adjust":
+        if l is None or l.canvas_sized:
             self.status_msg(_t('{0}需要一个像素图层：在图层面板里选中它', what))
             return None
         return l
@@ -1192,7 +1353,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
             l = self._need_pixels(_t("拷贝"))
             if l is None:
                 return
-            src, ox, oy = l.pixels, l.x, l.y
+            src, ox, oy = to8(l.pixels), l.x, l.y
         sel = d.selection
         if sel is not None:
             m = crop_canvas(sel, ox, oy, src.shape[1], src.shape[0], 0)
@@ -1293,7 +1454,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         try:
             with _Busy(self, _t("正在导出…")):
                 size = eio.export_image(self.doc, path, int(dlg.quality.value()), dlg.keep_exif.isChecked(),
-                                        dlg.strip_gps.isChecked())
+                                        dlg.strip_gps.isChecked(), deep=dlg.deep_on())
         except Exception as e:
             info(self, _t("导出失败"), str(e), "ERROR")
             return False
@@ -1333,7 +1494,11 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
                 ("Shift / Alt", _t("选区工具：添加 / 减去（一起按 = 交叉）")),
                 ("Ctrl+Z / Ctrl+Shift+Z", _t("撤销 / 重做（历史记录面板里可以直接跳到任一步）")),
                 ("Ctrl+J / Ctrl+Shift+J", _t("通过拷贝 / 剪切的图层（有选区时只取选区）")),
-                ("Ctrl+T", _t("自由变换：拖角缩放、框外旋转，回车应用")),
+                ("Ctrl+T", _t("自由变换：拖角缩放、框外旋转，回车应用；按住 Ctrl 拖角 = 扭曲、拖边 = 斜切")),
+                ("O / Shift+O", _t("减淡 / 加深 / 海绵（Shift+O 轮换）")),
+                ("R / Shift+R", _t("模糊 / 锐化 / 涂抹（Shift+R 轮换）")),
+                ("Ctrl+G / Ctrl+Shift+G", _t("图层编组 / 取消编组")),
+                ("Ctrl+Alt+G", _t("创建 / 释放剪贴蒙版（只作用于下面那一层）")),
                 ("Ctrl+E / Ctrl+Alt+Shift+E", _t("向下合并 / 盖印可见图层")),
                 ("Ctrl+A / D / Shift+I", _t("全选 / 取消选择 / 反选")),
                 ("Shift+F5 / Shift+Backspace", _t("填充 / 内容识别填充")),
@@ -1393,17 +1558,34 @@ def open_editor(ctx, parent=None, group=None, path: str | None = None, doc=None)
                     return None
                 if r == "proj":
                     path = proj
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            try:
-                doc = eio.load_project(path) if path else eio.open_group(group, exiftool)
-            finally:
-                QApplication.restoreOverrideCursor()
+            if not path and f.role == "raw":                # 只有 RAW：先弹出显影对话框
+                from .rawdlg import develop_doc
+                doc = develop_doc(parent, f.path, group.name, group.gid, eio._group_exif(group))
+                if doc is None:
+                    return None
+                if doc is False:
+                    doc = None
+            if doc is None:
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                try:
+                    doc = eio.load_project(path) if path else eio.open_group(group, exiftool)
+                finally:
+                    QApplication.restoreOverrideCursor()
         elif path:
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            try:
-                doc = eio.open_file(path, exiftool)
-            finally:
-                QApplication.restoreOverrideCursor()
+            from ...edit.raw import is_raw
+            if is_raw(path):
+                from .rawdlg import develop_doc
+                doc = develop_doc(parent, path)
+                if doc is None:
+                    return None
+                if doc is False:
+                    doc = None
+            if doc is None:
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                try:
+                    doc = eio.open_file(path, exiftool)
+                finally:
+                    QApplication.restoreOverrideCursor()
     except Exception as e:
         info(parent, _t("打开失败"), f"{e}", "ERROR")
         return None
@@ -1412,6 +1594,10 @@ def open_editor(ctx, parent=None, group=None, path: str | None = None, doc=None)
     w = EditorWindow(ctx, doc, parent)
     _open.add(w)
     w.destroyed.connect(lambda *_: _open.discard(w))
+    studio = getattr(ctx, "studio", None)          # 主窗口的「修图」模式：作为标签页嵌进去
+    if studio is not None:
+        studio.adopt(w)
+        return w
     w.showMaximized()
     w.raise_()
     w.activateWindow()

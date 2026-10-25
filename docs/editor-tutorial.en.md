@@ -44,12 +44,13 @@ The **Histogram** in the top right shows the photo's brightness distribution; it
 | Position | Tool | Shortcut | What it does |
 |---|---|---|---|
 | 1st | Move | V | Drag the current layer (added text, pasted images) |
-| 2nd–5th | Marquee / Lasso / Magic Wand / Object Selection | M / L / W / Q | Mark out an area so the next operations only affect it. **Object Selection** is the easiest: draw a box around a person or object and it's selected along its edges |
-| 6th | Crop | C | Cut away extra parts, straighten a tilted horizon |
-| 8th | Spot Healing Brush | J | Paint over spots, dust or wires and they're gone |
-| 9th | Brush | B | Paint with the foreground color; painting on a mask controls where an effect shows |
-| 10th | Clone Stamp | S | Alt+click to sample a spot, then paint it somewhere else |
-| 11th | Eraser | E | Erase to transparency |
+| 2nd–4th | Marquee / Lasso / Magic Wand (Object Selection shares its slot) | M / L / W / Q | Mark out an area so the next operations only affect it. **Object Selection** is the easiest: draw a box around a person or object and it's selected along its edges |
+| 5th | Crop | C | Cut away extra parts, straighten a tilted horizon |
+| 7th | Spot Healing Brush | J | Paint over spots, dust or wires and they're gone |
+| 8th | Brush | B | Paint with the foreground color; painting on a mask controls where an effect shows |
+| 9th | Clone Stamp | S | Alt+click to sample a spot, then paint it somewhere else |
+| 10th | Eraser | E | Erase to transparency |
+| 12th, 13th | Blur / Sharpen / Smudge, Dodge / Burn / Sponge | R / O | Local smoothing and sharpening, local brightening and darkening (right-click or Shift+R / Shift+O to switch) |
 | T icon | Text | T | Add text to the photo |
 
 ---
@@ -124,6 +125,26 @@ Backlight, sunsets, a window seen from indoors: the sky is bright and the ground
 **Still see a ghost?** Draw around it with the Lasso **L** (a little generously), then **Image → Fix Ghosting (from one source photo)…**. Each source gets a preview of how the patch will look; click the cleanest one and choose **Patch**. The patch goes on a new layer with a mask, with its brightness matched to the merged result; refine the edge by painting on the mask, or delete the layer if you don't want it. Skip any source marked "clipped here, no detail".
 
 > Tip: use a tripod or hold steady, and use the camera's burst bracketing (the shorter the gap between shots, the less moves). RAW-only photos are merged from the camera's embedded full-size preview.
+
+### Pro editing: RAW, 16-bit, groups, transforms, retouching tools
+
+**Camera Raw.** For RAW-only photos, **Edit…** first opens the **Camera Raw** dialog: white balance (As Shot / Auto / Daylight, or click the **eyedropper** and then something that should be gray), exposure, highlights (**Reconstruct** recovers part of a blown sky) and noise reduction. The preview is on the left; click **Open** to get a **16-bit** image. Photos with both JPG and RAW still open the JPG; to use the RAW's latitude, choose **File → Re-develop RAW…** and the result arrives as a new layer.
+
+**16-bit.** When the title bar says "(16-bit)", strong Curves and Levels moves won't band smooth gradients (sky, skin). Ordinary JPGs open at 8 bits; before heavy grading choose **Image → Mode → 16 Bits/Channel**. When exporting PNG / TIFF, tick "Save as 16-bit" to keep editing elsewhere.
+
+**Groups.** Lots of layers? Select one and press **Ctrl+G** to put it in a group; the little arrow collapses it. **Ctrl+[ / Ctrl+]** move layers into and out of groups. A group's blend mode defaults to Pass Through; switch it to Normal and adjustment layers inside only affect the group.
+
+**Clipping masks (adjust just one layer).** To make an adjustment layer affect only the image right below it, select the adjustment layer and press **Ctrl+Alt+G** (or **Clip** in the Layers panel); it indents with a bent arrow. Pixel layers can be clipped too — e.g. show a texture only inside the text below it.
+
+**Skew, distort, perspective, warp.** After **Ctrl+T**, pick a **Mode** in the options bar:
+- **Perspective**: drag a corner and the other corner on that edge moves symmetrically — straighten a leaning building or put a picture on an angled wall
+- **Distort**: drag any corner freely (in Free Transform, Ctrl+drag a corner also distorts; Ctrl+drag a side skews)
+- **Warp**: a 4×4 grid appears; drag any point to bend the layer
+Enter applies, Esc cancels.
+
+**Dodge / Burn / Sponge (O), Blur / Sharpen / Smudge (R).** These two toolbar slots have a small triangle: right-click to switch tools, or press **Shift+O / Shift+R** to cycle. For portraits: Dodge (Midtones, 15–25% exposure) brightens eyes, Burn deepens outlines, Blur smooths skin, Sharpen crisps lashes.
+
+![Camera Raw](screenshots/en/editor_raw.png)
 
 ---
 

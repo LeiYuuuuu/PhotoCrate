@@ -13,6 +13,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import QApplication
 
 from ...edit import paint as P
+from ...edit import warp as W
 from ...i18n import t as _t
 
 SEL_MODES = [("new", _t("新选区")), ("add", _t("添加")), ("sub", _t("减去")), ("and", _t("交叉"))]
@@ -142,24 +143,27 @@ class MoveTool(Tool):
                             d.set_active(l.id)
                         break
         l = d.active
-        if l is None or l.kind == "adjust":
+        if l is None or not d.movable(l):
             self.win.status_msg(_t("调整图层不能移动；选中一个像素 / 文字图层再拖"))
             return
-        self.drag = (x, y, l.x, l.y, d.state(), l)
+        self.drag = (x, y, [(m, m.x, m.y) for m in d.movable(l)], d.state(), l)
 
     def move(self, x, y, e):
         if self.drag is None:
             return
-        x0, y0, lx, ly, _, l = self.drag
-        nx, ny = lx + int(round(x - x0)), ly + int(round(y - y0))
+        x0, y0, items, _, l = self.drag
+        dx, dy = int(round(x - x0)), int(round(y - y0))
         shift, _, _ = _mods(e)
         if shift:                                       # 只沿水平或垂直方向
-            if abs(nx - lx) > abs(ny - ly):
-                ny = ly
+            if abs(dx) > abs(dy):
+                dy = 0
             else:
-                nx = lx
-        if (nx, ny) != (l.x, l.y):
-            l.x, l.y = nx, ny
+                dx = 0
+        m0, mx, my = items[0]
+        if (mx + dx, my + dy) != (m0.x, m0.y):
+            for m, ox, oy in items:
+                m.x, m.y = ox + dx, oy + dy
+                m.version += 1
             l.version += 1
             self.doc.version += 1
             self.cv.request_render(True)
@@ -167,9 +171,10 @@ class MoveTool(Tool):
     def release(self, x, y, e):
         if self.drag is None:
             return
-        _, _, lx, ly, before, l = self.drag
+        _, _, items, before, l = self.drag
         self.drag = None
-        if (l.x, l.y) != (lx, ly):
+        m0, mx, my = items[0]
+        if (m0.x, m0.y) != (mx, my):
             self.doc.translate(l.id, 0, 0, before=before)
 
     def key(self, e):
@@ -177,14 +182,14 @@ class MoveTool(Tool):
         step = 10 if e.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1
         dx, dy = {Qt.Key.Key_Left: (-step, 0), Qt.Key.Key_Right: (step, 0), Qt.Key.Key_Up: (0, -step),
                   Qt.Key.Key_Down: (0, step)}.get(k, (0, 0))
-        if (dx or dy) and self.doc.active is not None and self.doc.active.kind != "adjust":
+        if (dx or dy) and self.doc.active is not None and self.doc.movable(self.doc.active):
             self.doc.translate(self.doc.active_id, dx, dy)
             return True
         return False
 
     def paint(self, qp):
         l = self.doc.active if self.doc is not None else None
-        if l is None or l.kind == "adjust" or l.xform is not None:
+        if l is None or l.canvas_sized or l.xform is not None:
             return
         a = self.cv.to_widget(l.x, l.y)
         b = self.cv.to_widget(l.x + l.w, l.y + l.h)
@@ -750,8 +755,9 @@ class PaintTool(Tool):
         if l is None:
             return None
         to_mask = d.mask_edit and l.mask is not None
-        if not to_mask and l.kind == "adjust":
-            self.win.status_msg(_t("调整图层没有像素：先给它加蒙版，再在蒙版上画（黑色隐藏、白色显示）"))
+        if not to_mask and l.canvas_sized:
+            self.win.status_msg(_t("调整图层没有像素：先给它加蒙版，再在蒙版上画（黑色隐藏、白色显示）")
+                                if l.kind == "adjust" else _t("图层组没有像素：选中组里的一个图层，或给组加蒙版后在蒙版上画"))
             return None
         if not l.visible:
             self.win.status_msg(_t("当前图层是隐藏的，先点眼睛图标显示它"))
@@ -820,7 +826,7 @@ class PaintTool(Tool):
         r = max(1.5, self._size() / 2 * self.cv.zoom)
         if self.stroke is not None and self.mode == "heal" and len(self.stroke.points) > 0:
             l = self.stroke.layer
-            ox, oy = (0, 0) if l.kind == "adjust" else (l.x, l.y)
+            ox, oy = (0, 0) if l.canvas_sized else (l.x, l.y)
             pen = QPen(QColor(255, 90, 90, 110), r * 2)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -1047,20 +1053,135 @@ class TextTool(Tool):
 
 
 # ---------------------------------------------------------------------------
-# 自由变换（Ctrl+T）
+# 减淡 / 加深 / 海绵 / 模糊 / 锐化 / 涂抹
 # ---------------------------------------------------------------------------
+
+TONE_RANGES = [("shadows", _t("阴影")), ("midtones", _t("中间调")), ("highlights", _t("高光"))]
+
+
+class _RetouchTool(PaintTool):
+    """修饰类画笔：只改像素（不能画在蒙版上），强度 = 选项栏里的“曝光度 / 流量 / 强度”。"""
+    strength_label = _t("强度")
+    strength_key = "retouch_strength"
+    strength_default = 50
+
+    def options(self, bar):
+        bar.spin(_t("大小"), "brush_size", 1, 2000, 40, " px")
+        bar.spin(_t("硬度"), "brush_hard", 0, 100, 50, "%")
+        bar.spin(self.strength_label, self.strength_key, 1, 100, self.strength_default, "%")
+        self.extra_options(bar)
+
+    def extra_options(self, bar):
+        pass
+
+    def _target(self):
+        tg = super()._target()
+        if tg is None:
+            return None
+        l, to_mask = tg
+        if to_mask or not l.has_pixels:
+            self.win.status_msg(_t('{0}只能用在像素上：在图层面板里点图层缩略图（不是蒙版）', self.name))
+            return None
+        return l, False
+
+    def press(self, x, y, e):
+        if _mods(e)[1]:                                    # 修饰工具没有临时吸管：Alt 直接忽略
+            return
+        super().press(x, y, e)
+
+    def _stroke_kw(self) -> dict:
+        return {"size": self._size(), "hardness": float(self.opt("brush_hard", 50)) / 100, "opacity": 1.0,
+                "strength": float(self.opt(self.strength_key, self.strength_default)) / 100}
+
+
+class DodgeTool(_RetouchTool):
+    id, name, shortcut, icon = "dodge", _t("减淡"), "O", "dodge"
+    tip = _t("减淡工具（O）：涂抹的地方变亮。范围选“阴影 / 中间调 / 高光”只提亮那一段，常用来提亮眼睛、补暗部")
+    mode = "dodge"
+    strength_label, strength_key = _t("曝光度"), "dodge_exposure"
+
+    def extra_options(self, bar):
+        bar.combo(_t("范围"), "tone_range", TONE_RANGES, "midtones")
+
+    def _stroke_kw(self) -> dict:
+        kw = super()._stroke_kw()
+        kw["tone_range"] = self.opt("tone_range", "midtones")
+        return kw
+
+
+class BurnTool(DodgeTool):
+    id, name, shortcut, icon = "burn", _t("加深"), "O", "burn"
+    tip = _t("加深工具（O）：涂抹的地方变暗。压暗过亮的天空边缘、加重轮廓")
+    mode = "burn"
+    strength_key = "burn_exposure"
+
+
+class SpongeTool(_RetouchTool):
+    id, name, shortcut, icon = "sponge", _t("海绵"), "O", "sponge"
+    tip = _t("海绵工具（O）：涂抹的地方去色（降低饱和度）或加色（提高饱和度）")
+    mode = "sponge"
+    strength_label, strength_key = _t("流量"), "sponge_flow"
+
+    def extra_options(self, bar):
+        bar.combo(_t("模式"), "sponge_mode", [("desat", _t("去色")), ("sat", _t("加色"))], "desat")
+
+    def _stroke_kw(self) -> dict:
+        kw = super()._stroke_kw()
+        kw["sat_up"] = self.opt("sponge_mode", "desat") == "sat"
+        return kw
+
+
+class BlurTool(_RetouchTool):
+    id, name, shortcut, icon = "blur", _t("模糊"), "R", "blur"
+    tip = _t("模糊工具（R）：涂抹的地方变柔和（磨皮、虚化背景的一小块）")
+    mode = "blur"
+
+
+class SharpenTool(_RetouchTool):
+    id, name, shortcut, icon = "sharpen", _t("锐化"), "R", "sharpen"
+    tip = _t("锐化工具（R）：涂抹的地方更清晰（眼睛、睫毛、头发）。强度不要太高，否则会出白边")
+    mode = "sharpen"
+    strength_default = 35
+    strength_key = "sharpen_strength"
+
+
+class SmudgeTool(_RetouchTool):
+    id, name, shortcut, icon = "smudge", _t("涂抹"), "R", "smudge"
+    tip = _t("涂抹工具（R）：像用手指抹湿颜料一样，把起点的颜色往拖动的方向推开")
+    mode = "smudge"
+    strength_default = 60
+    strength_key = "smudge_strength"
+
+
+# ---------------------------------------------------------------------------
+# 自由变换（Ctrl+T）：缩放 / 旋转 / 斜切 / 扭曲 / 透视 / 变形
+# ---------------------------------------------------------------------------
+
+TRANSFORM_MODES = [("free", _t("自由变换")), ("skew", _t("斜切")), ("distort", _t("扭曲")),
+                   ("perspective", _t("透视")), ("warp", _t("变形"))]
+_CORNER = {(-1, -1): 0, (1, -1): 1, (1, 1): 2, (-1, 1): 3}
+
+
+def _T(dx, dy):
+    return np.array([[1, 0, dx], [0, 1, dy], [0, 0, 1]], np.float64)
+
 
 class TransformTool(Tool):
     id, name, shortcut, icon = "transform", _t("自由变换"), "", "transform"
-    tip = _t("自由变换（Ctrl+T）：拖角缩放（等比，按住 Shift 不等比），拖边单向缩放，框内拖动移动，框外拖动旋转（Shift 每 15°）。回车应用，Esc 取消")
+    tip = _t("自由变换（Ctrl+T）：拖角缩放（等比，按住 Shift 不等比），拖边单向缩放，框内拖动移动，框外拖动旋转（Shift 每 15°）；"
+             "按住 Ctrl 拖角 = 扭曲、拖边 = 斜切。选项栏里可以切到透视 / 变形。回车应用，Esc 取消")
     cursor = Qt.CursorShape.ArrowCursor
 
     def __init__(self, win):
         super().__init__(win)
         self.layer = None
         self.drag = None
+        self.ctrl = None
+        self.H = np.eye(3)
+        self.angle = 0.0
 
     def options(self, bar):
+        bar.combo(_t("变换方式"), "xf_mode", TRANSFORM_MODES, "free", on_change=self._mode_changed)
         self.info = bar.label("")
         bar.button(_t("取消"), self.cancel)
         bar.button(_t("应用变换"), self.commit, "primary")
@@ -1075,9 +1196,11 @@ class TransformTool(Tool):
             return
         self.layer = l
         self.w, self.h = l.w, l.h
-        self.c = (l.x + l.w / 2, l.y + l.h / 2)
-        self.sx = self.sy = 1.0
+        self.H = _T(l.x, l.y)
+        self.ctrl = None
         self.angle = 0.0
+        if self.mode == "warp":
+            self.ctrl = W.grid_from_h(self.H, self.w, self.h)
         self._preview()
 
     def deactivate(self):
@@ -1087,81 +1210,177 @@ class TransformTool(Tool):
     def busy(self):
         return self.drag is not None
 
-    def matrix(self) -> np.ndarray:
-        a = math.radians(self.angle)
-        c, s = math.cos(a), math.sin(a)
-        A = np.array([[c * self.sx, -s * self.sy], [s * self.sx, c * self.sy]])
-        t = np.array(self.c) - A @ np.array([self.w / 2, self.h / 2])
-        return np.hstack([A, t[:, None]])
+    @property
+    def mode(self) -> str:
+        return self.opt("xf_mode", "free")
 
-    def _pt(self, u, v):
-        M = self.matrix()
-        return M[0, 0] * u + M[0, 1] * v + M[0, 2], M[1, 0] * u + M[1, 1] * v + M[1, 2]
+    def _mode_changed(self, v):
+        if self.layer is None:
+            return
+        if v == "warp" and self.ctrl is None:
+            self.ctrl = W.grid_from_h(self.H, self.w, self.h)
+        elif v != "warp" and self.ctrl is not None:          # 离开变形：只保留四个角（中间的弯曲不要了）
+            c = self.ctrl
+            self.H = W.quad_h(self.w, self.h, [c[0, 0], c[0, 3], c[3, 3], c[3, 0]])
+            self.ctrl = None
+        self._preview()
+
+    # ---- 几何 ----
+    def xform(self):
+        if self.ctrl is not None:
+            return {"mesh": self.ctrl.copy()}
+        return self.H[:2].copy() if W.is_affine(self.H) else self.H.copy()
+
+    def matrix(self) -> np.ndarray:
+        return self.H[:2].copy()
+
+    def _pt(self, u, v, H=None):
+        p = W.apply_h(self.H if H is None else H, [[u, v]])[0]
+        return float(p[0]), float(p[1])
+
+    def corners(self, H=None):
+        if self.ctrl is not None and H is None:
+            c = self.ctrl
+            return [tuple(c[0, 0]), tuple(c[0, 3]), tuple(c[3, 3]), tuple(c[3, 0])]
+        w, h = self.w, self.h
+        return [self._pt(u, v, H) for u, v in ((0, 0), (w, 0), (w, h), (0, h))]
 
     def _preview(self):
         if self.layer is None:
             return
-        self.layer.xform = self.matrix()
+        self.layer.xform = self.xform()
         self.layer.version += 1
         self.doc.version += 1
         self.cv.request_render(True)
         self._update_info()
 
     def _update_info(self):
-        if getattr(self, "info", None) is not None and self.layer is not None:
-            self.info.setText(_t('宽 {0:.1f}%   高 {1:.1f}%   角度 {2:+.1f}°', self.sx * 100, self.sy * 100, self.angle))
+        if getattr(self, "info", None) is None or self.layer is None:
+            return
+        c = np.array(self.corners())
+        sw = (np.linalg.norm(c[1] - c[0]) + np.linalg.norm(c[2] - c[3])) / 2 / max(1, self.w)
+        sh = (np.linalg.norm(c[3] - c[0]) + np.linalg.norm(c[2] - c[1])) / 2 / max(1, self.h)
+        ang = math.degrees(math.atan2(c[1][1] - c[0][1], c[1][0] - c[0][0]))
+        self.info.setText(_t('宽 {0:.1f}%   高 {1:.1f}%   角度 {2:+.1f}°', sw * 100, sh * 100, ang))
 
     def _handles(self):
         w, h = self.w, self.h
         return [((hx, hy), self._pt((hx + 1) / 2 * w, (hy + 1) / 2 * h)) for hx, hy in _HANDLES]
 
+    def _near(self, e, pt) -> bool:
+        q = self.cv.to_widget(*pt)
+        p = e.position()
+        return abs(q.x() - p.x()) <= 9 and abs(q.y() - p.y()) <= 9
+
+    # ---- 鼠标 ----
     def press(self, x, y, e):
         if self.layer is None:
             return
-        p = e.position()
+        _, _, ctrl = _mods(e)
+        if self.ctrl is not None:
+            hit = None
+            for j in range(4):
+                for i in range(4):
+                    if self._near(e, self.ctrl[j, i]):
+                        hit = ("pt", j, i)
+            if hit is None:
+                hit = ("all",)
+            self.drag = (hit, x, y, self.ctrl.copy())
+            return
         hit = None
-        for hnd, (hx, hy) in self._handles():
-            q = self.cv.to_widget(hx, hy)
-            if abs(q.x() - p.x()) <= 9 and abs(q.y() - p.y()) <= 9:
+        for hnd, pt in self._handles():
+            if self._near(e, pt):
                 hit = hnd
                 break
         if hit is None:
-            poly = QPolygonF([self.cv.to_widget(*self._pt(u, v)) for u, v in
-                              ((0, 0), (self.w, 0), (self.w, self.h), (0, self.h))])
-            hit = "move" if poly.containsPoint(p, Qt.FillRule.OddEvenFill) else "rotate"
-        self.drag = (hit, x, y, self.c, self.sx, self.sy, self.angle)
+            poly = QPolygonF([self.cv.to_widget(*p) for p in self.corners()])
+            hit = "move" if poly.containsPoint(e.position(), Qt.FillRule.OddEvenFill) else "rotate"
+        self.drag = (hit, x, y, self.H.copy(), self.angle, ctrl)
 
     def move(self, x, y, e):
         if self.drag is None:
             return
-        hit, x0, y0, c0, sx0, sy0, a0 = self.drag
         shift = _mods(e)[0]
+        if self.ctrl is not None:
+            hit, x0, y0, c0 = self.drag
+            d = np.array([x - x0, y - y0])
+            c = c0.copy()
+            if hit[0] == "pt":
+                c[hit[1], hit[2]] += d
+            else:
+                c += d
+            self.ctrl = c
+            self._preview()
+            return
+        hit, x0, y0, H0, a0, ctrl = self.drag
+        d = np.array([x - x0, y - y0])
+        w, h = self.w, self.h
+        mode = self.mode
         if hit == "move":
-            self.c = (c0[0] + x - x0, c0[1] + y - y0)
+            self.H = _T(*d) @ H0
         elif hit == "rotate":
-            da = math.degrees(math.atan2(y - c0[1], x - c0[0]) - math.atan2(y0 - c0[1], x0 - c0[0]))
+            cx, cy = self._pt(w / 2, h / 2, H0)
+            da = math.degrees(math.atan2(y - cy, x - cx) - math.atan2(y0 - cy, x0 - cx))
             ang = a0 + da
             if shift:
                 ang = round(ang / 15) * 15
-            self.angle = (ang + 180) % 360 - 180
+            ang = (ang + 180) % 360 - 180
+            r = math.radians(ang - a0)
+            co, si = math.cos(r), math.sin(r)
+            R = np.array([[co, -si, cx - co * cx + si * cy], [si, co, cy - si * cx - co * cy], [0, 0, 1]])
+            self.H = R @ H0
+            self.angle = ang
         else:
             hx, hy = hit
-            a = math.radians(a0)
-            c, s = math.cos(a), math.sin(a)
-            W0, H0 = self.w * sx0, self.h * sy0
-            ax, ay = -hx * W0 / 2, -hy * H0 / 2                      # 对边 / 对角（不动的那一点），局部坐标
-            A = (c0[0] + ax * c - ay * s, c0[1] + ax * s + ay * c)
-            dx, dy = x - A[0], y - A[1]
-            vx, vy = dx * c + dy * s, -dx * s + dy * c
-            nW = max(1.0, hx * vx) if hx else W0
-            nH = max(1.0, hy * vy) if hy else H0
-            if hx and hy and not shift:                            # 角：默认等比
-                k = max(nW / W0, nH / H0)
-                nW, nH = W0 * k, H0 * k
-            self.sx, self.sy = nW / self.w, nH / self.h
-            lx, ly = hx * nW / 2, hy * nH / 2
-            self.c = (A[0] + lx * c - ly * s, A[1] + lx * s + ly * c)
+            corner = bool(hx and hy)
+            quad = [np.array(p) for p in self.corners(H0)]
+            if corner and (mode in ("distort", "skew") or (mode == "free" and ctrl)):
+                quad[_CORNER[(hx, hy)]] = np.array([x, y])
+                self.H = self._quad(quad, H0)
+            elif corner and mode == "perspective":
+                i = _CORNER[(hx, hy)]
+                jh, jv = _CORNER[(-hx, hy)], _CORNER[(hx, -hy)]
+                eh, ev = quad[jh] - quad[i], quad[jv] - quad[i]
+                eh /= max(1e-9, np.linalg.norm(eh))
+                ev /= max(1e-9, np.linalg.norm(ev))
+                ph, pv = float(d @ eh), float(d @ ev)
+                k, jj, ee = (ph, jh, eh) if abs(ph) >= abs(pv) else (pv, jv, ev)
+                quad[i] = quad[i] + k * ee
+                quad[jj] = quad[jj] - k * ee
+                self.H = self._quad(quad, H0)
+            elif not corner and (mode in ("skew", "perspective", "distort") or (mode == "free" and ctrl)):
+                side = [_CORNER[(hx or s, hy or s)] for s in (-1, 1)]       # 这条边的两个角
+                a, b = quad[side[0]], quad[side[1]]
+                if mode == "distort":
+                    mv = d
+                else:                                                    # 斜切：只沿边的方向移动
+                    ed = (b - a) / max(1e-9, np.linalg.norm(b - a))
+                    mv = (d @ ed) * ed
+                for k in side:
+                    quad[k] = quad[k] + mv
+                self.H = self._quad(quad, H0)
+            else:                                                        # 缩放：在图层自己的坐标里算
+                u, v = W.apply_h(np.linalg.inv(H0), [[x, y]])[0]
+                ax, ay = (-hx + 1) / 2 * w, (-hy + 1) / 2 * h
+                px, py = (hx + 1) / 2 * w, (hy + 1) / 2 * h
+                sx = (u - ax) / (px - ax) if hx else 1.0
+                sy = (v - ay) / (py - ay) if hy else 1.0
+                if corner and not shift:
+                    k = sx if abs(sx) > abs(sy) else sy
+                    sx = sy = k
+                sx = math.copysign(max(0.01, abs(sx)), sx)
+                sy = math.copysign(max(0.01, abs(sy)), sy)
+                S = _T(ax, ay) @ np.diag([sx, sy, 1.0]) @ _T(-ax, -ay)
+                self.H = H0 @ S
         self._preview()
+
+    def _quad(self, quad, H0):
+        try:
+            H = W.quad_h(self.w, self.h, [tuple(p) for p in quad])
+            W.xform_bounds(H, self.w, self.h)                    # 角拖过了头（图层翻到“地平线”后面）：不接受
+            return H
+        except Exception:
+            return H0
 
     def release(self, x, y, e):
         self.drag = None
@@ -1182,13 +1401,14 @@ class TransformTool(Tool):
         l, self.layer = self.layer, None
         if l is None:
             return
-        M = self.matrix()
+        xf = self.xform()
         l.xform = None
         l.version += 1
-        ident = np.allclose(M, [[1, 0, l.x], [0, 1, l.y]], atol=1e-3)
+        ident = self.ctrl is None and np.allclose(self.H, _T(l.x, l.y), atol=1e-6)
+        self.ctrl = None
         if not ident:
             with _Busy(self.win, _t("正在变换…")):
-                self.doc.transform_layer(l.id, M)
+                self.doc.transform_layer(l.id, xf)
         else:
             self.doc.version += 1
             self.cv.request_render()
@@ -1197,6 +1417,7 @@ class TransformTool(Tool):
 
     def cancel(self):
         l, self.layer = self.layer, None
+        self.ctrl = None
         if l is not None:
             l.xform = None
             l.version += 1
@@ -1207,21 +1428,44 @@ class TransformTool(Tool):
     def paint(self, qp):
         if self.layer is None:
             return
-        poly = QPolygonF([self.cv.to_widget(*self._pt(u, v)) for u, v in
-                          ((0, 0), (self.w, 0), (self.w, self.h), (0, self.h))])
         qp.setBrush(Qt.BrushStyle.NoBrush)
+        if self.ctrl is not None:
+            P = W.surface(self.ctrl, 24, 24)
+            lines = [P[k * 8, :] for k in range(4)] + [P[:, k * 8] for k in range(4)]
+            for pen in (QPen(QColor(0, 0, 0, 140), 2.6), QPen(QColor("#1EC6E6"), 1)):
+                qp.setPen(pen)
+                for ln in lines:
+                    qp.drawPolyline(QPolygonF([self.cv.to_widget(*p) for p in ln]))
+            qp.setPen(QPen(QColor(255, 255, 255, 110), 1, Qt.PenStyle.DashLine))
+            for j in range(4):
+                qp.drawPolyline(QPolygonF([self.cv.to_widget(*self.ctrl[j, i]) for i in range(4)]))
+                qp.drawPolyline(QPolygonF([self.cv.to_widget(*self.ctrl[i, j]) for i in range(4)]))
+            qp.setBrush(QColor("#FFFFFF"))
+            qp.setPen(QPen(QColor("#000000"), 1))
+            for j in range(4):
+                for i in range(4):
+                    q = self.cv.to_widget(*self.ctrl[j, i])
+                    qp.drawRect(QRectF(q.x() - 3.5, q.y() - 3.5, 7, 7))
+            return
+        poly = QPolygonF([self.cv.to_widget(*p) for p in self.corners()])
         qp.setPen(QPen(QColor(0, 0, 0, 160), 3))
         qp.drawPolygon(poly)
         qp.setPen(QPen(QColor("#1EC6E6"), 1.2))
         qp.drawPolygon(poly)
         qp.setBrush(QColor("#FFFFFF"))
         qp.setPen(QPen(QColor("#000000"), 1))
-        for _, (hx, hy) in self._handles():
-            q = self.cv.to_widget(hx, hy)
+        for _, pt in self._handles():
+            q = self.cv.to_widget(*pt)
             qp.drawRect(QRectF(q.x() - 4, q.y() - 4, 8, 8))
-        c = self.cv.to_widget(*self.c)
+        c = self.cv.to_widget(*self._pt(self.w / 2, self.h / 2))
         qp.drawEllipse(c, 3, 3)
 
 
 TOOLS = [MoveTool, MarqueeTool, LassoTool, WandTool, ObjectTool, CropTool, EyedropperTool, HealTool, PaintTool,
-         CloneTool, EraserTool, BucketTool, GradientTool, TextTool, HandTool, ZoomTool]
+         CloneTool, EraserTool, BucketTool, GradientTool, DodgeTool, BurnTool, SpongeTool, BlurTool, SharpenTool,
+         SmudgeTool, TextTool, HandTool, ZoomTool]
+
+# 工具栏的格子：同一格里的工具共用一个按钮（右键 / 长按换），和 Photoshop 一样按住 Shift + 快捷键在组里轮换
+TOOL_SLOTS = [["move"], ["marquee"], ["lasso"], ["wand", "object"], ["crop"], ["eyedropper"],
+              ["heal"], ["brush"], ["clone"], ["eraser"], ["gradient", "bucket"], ["blur", "sharpen", "smudge"],
+              ["dodge", "burn", "sponge"], ["text"], ["hand"], ["zoom"]]

@@ -208,12 +208,16 @@ def curve_lut(points, n: int = 4096) -> np.ndarray:
 
 
 def _apply_lut(x, lut: np.ndarray):
-    """查表（就近取，表有 4096 项，误差 < 0.1/255）。x 可以是任意形状的 0–1 数组。"""
+    """查表（4096 项，相邻两项线性插值）。x 可以是任意形状的 0–1 数组。
+    插值而不是就近取：16 位图大幅拉伸时（色阶、曲线拉陡）仍然是连续的，不会变成一级一级的台阶。"""
     n = len(lut) - 1
     idx = x * np.float32(n)
-    idx += np.float32(0.5)
     np.clip(idx, 0, n, out=idx)
-    return lut[idx.astype(np.int32)]
+    i0 = idx.astype(np.int32)
+    np.minimum(i0, n - 1, out=i0)
+    frac = idx - i0
+    lo = lut[i0]
+    return lo + (lut[i0 + 1] - lo) * frac
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@
 
 本地照片分区整理终端（Windows 桌面应用）。在软件里选好分区条件、预览文件夹结构，确认后把照片**真正移动**到对应文件夹；每次操作都有日志，可一键撤销。
 
-> 当前版本 **v1.7.0**（修图新增「合并曝光（HDR）」）。每个版本的详细更新说明见 **[CHANGELOG.md](CHANGELOG.md)**。
+> 当前版本 **v1.8.0**（修图新增 RAW 显影、16 位、图层组与剪贴蒙版、透视 / 变形、减淡加深等修饰工具）。每个版本的详细更新说明见 **[CHANGELOG.md](CHANGELOG.md)**。
 
 - **分区条件**（可最多 4 级嵌套，或用模板自由组合）：拍摄日期 · 地区（国家/省/市/区县）· 色调（冷暖/主色/明暗）· 相机 · 镜头 · 文件类型（可把 RAW 与 JPG 分开放进 ARW/、JPG/）· 横竖幅 · 来源（相机/手机/截图）· 清晰度 · 焦段 · ISO · 分辨率 · 原文件夹名
 - **格式**：JPG、PNG、HEIC、TIFF、WebP，几乎所有相机 RAW（CR2/CR3/NEF/ARW/RAF/ORF/RW2/DNG/PEF…），以及视频（MP4/MOV/MTS/M2TS/AVI/MKV…，跟着日期、旅行一起归档）
@@ -20,6 +20,7 @@
 - **导出与分享**：一键导出发朋友圈 / 小红书的 JPG（缩小、加水印、去掉 GPS）；把一次旅行做成网页相册（按天分组 + 地图路线，双击打开）；场景 / 人物 / 旅行名可作为关键词写进 .xmp，Lightroom 里能搜
 - **修图（类似 Photoshop）**：图层（像素 / 文字 / 调整图层）、18 种混合模式、不透明度、图层蒙版；选框 / 套索 / 魔棒 / 对象选择（自动抠主体）；裁剪与拉直、自由变换；画笔、橡皮擦、仿制图章、污点修复画笔、内容识别填充、油漆桶、渐变；曝光 / 对比 / 高光 / 阴影 / 色温 / 曲线 / 色阶 / HSL / 分离色调 / 清晰度 / 锐化 / 降噪 / 暗角 / 颗粒，14 个一键预设（胶片、日系、电影感…）；高斯 / 动感模糊、USM 锐化、高反差保留等滤镜（实时预览）；无限撤销与历史记录。**原片只读**：导出写新文件（保留 EXIF），或存成 `.pcedit` 工程以后接着改
 - **合并曝光（HDR）**：同一场景、不同曝光的 2–9 张（包围曝光）合成一张亮部暗部都有细节的照片。手持拍的自动对齐到约 0.1 像素，参考帧不重新取样、清晰度不变；行人、树叶、水面等移动的物体自动去重影，残留的可以框出来、挑一张源图补上
+- **修图进阶**：RAW 显影（LibRaw 解马赛克，白平衡吸管、高光重建、降噪、色差校正）；**16 位**处理与 16 位 PNG / TIFF 导出；**图层组**与**剪贴蒙版**；自由变换的斜切 / 扭曲 / **透视** / **变形**网格；减淡 / 加深 / 海绵 / 模糊 / 锐化 / 涂抹工具
 - **界面语言**：简体中文 / English，「系统设置 → 外观 → 界面语言 · Language」切换（重启生效）；切换不影响已有数据。英文修图教程见 [docs/editor-tutorial.en.md](docs/editor-tutorial.en.md)
 - **其他功能**：统计概览（点任意条目查看对应照片）、模糊照片检测、操作记录与撤销、崩溃恢复、插件扩展、**F12 一键截图**、记住窗口位置（多显示器）
 - **界面**：工业科幻终端风格，浅色「终末地」/ 深色「方舟」两套主题（设置里切换）；导航滑动标记、短暂切页淡入、按钮反馈与进度扫光，可在「系统设置 → 外观 → 界面动效」即时关闭。小窗口下资源接入区支持滚动。
@@ -35,6 +36,8 @@
 ![修图：调整图层 + 曲线](docs/screenshots/editor_adjust.png)
 ![修图：自由变换（深色）](docs/screenshots/editor_dark.png)
 ![合并曝光（HDR）](docs/screenshots/editor_hdr.png)
+![RAW 显影](docs/screenshots/editor_raw.png)
+![变形网格、图层组与剪贴蒙版](docs/screenshots/editor_warp.png)
 
 ---
 
@@ -99,6 +102,10 @@
 | 裁剪、拉直 | 裁剪 C：选比例、拖框；按住 Ctrl 沿地平线拖一条线自动拉直；回车应用 |
 | 加字 | 文字 T：单击放文字，字体 / 字号 / 颜色 / 描边 / 投影都能改，以后还能再编辑 |
 | 合并曝光（HDR） | 挑片页选中几张包围曝光 → **合并曝光…**（或缩略图右键；修图窗口「文件 → 合并曝光」选电脑上的文件）。自动选曝光居中的一张当参考帧（不重新取样），其余自动对齐、去重影，用 Mertens 曝光融合合成一张，结果在修图窗口打开（各张源图作为隐藏图层保留）。还有重影：圈出来 →「图像 → 修补重影」，点预览挑一张源图补上（新图层 + 蒙版，亮度自动匹配） |
+| RAW、16 位 | 只有 RAW 的照片先弹出「RAW 显影」：白平衡（可用吸管）、曝光、高光重建、降噪，显影成 16 位；有 JPG 的照片用「文件 → 重新显影 RAW…」。「图像 → 模式」切换 8 / 16 位，16 位下大幅调色不出断层，导出 PNG / TIFF 可存 16 位 |
+| 图层组、剪贴蒙版 | Ctrl+G 编组（可折叠、整组移动 / 加蒙版，混合模式「穿透」或单独合成），Ctrl+Shift+G 取消；Ctrl+Alt+G 剪贴蒙版：调整图层只调下面那一层 |
+| 透视、变形 | Ctrl+T 后选项栏「变换方式」：斜切 / 扭曲 / 透视 / 变形（4×4 网格）；自由变换里按住 Ctrl 拖角 = 扭曲、拖边 = 斜切 |
+| 局部提亮、压暗、磨皮 | 减淡 / 加深 / 海绵（O，Shift+O 轮换，可只作用于暗部 / 中间调 / 高光）；模糊 / 锐化 / 涂抹（R，Shift+R 轮换） |
 | 保存 | 「导出图片」（Ctrl+Shift+S）：合成为一张 JPG / PNG / TIFF / WebP，默认存到原片旁边「原名_修图.jpg」，保留拍摄时间等 EXIF（可去掉 GPS），存到照片库文件夹里时自动重新扫描。「保存工程」（Ctrl+S）：保留全部图层存成 `原名.pcedit`，下次打开这张照片会问要不要接着改 |
 
 画面很大时，缩小显示用缩小的代理图计算，拖滑块时先出低分辨率预览、停手后再补清晰的一帧；按住 `\` 看原图（只显示背景层）。
@@ -160,7 +167,7 @@
 
 - 架构说明与插件接口：见 **[ARCHITECTURE.md](ARCHITECTURE.md)**。
 - 插件示例：`plugins_examples\`（文件大小分区 + 自定义页面；AI 场景分类骨架）。
-- 测试：`.venv\Scripts\python -m pytest tests -q`（写回 XMP 的用例需要设置环境变量 `PHOTOCRATE_TEST_EXIFTOOL` 指向 exiftool.exe）；界面自动化：`tests\ui_timeplace.py`、`tests\ui_culling.py`、`tests\ui_tier3.py`、`tests\ui_workflow.py`、`tests\ui_repartition.py`、`tests\ui_editor.py`（修图窗口；修图核心的单元测试在 `tests\test_editor.py`）、`tests\ui_merge.py`（合并曝光；引擎测试在 `tests\test_hdr.py`）（人脸用例需要环境变量 `PHOTOCRATE_TEST_MODELS` 指向放有 YuNet / SFace 模型的文件夹；“不是真人的脸”的真实模型用例另需 `PHOTOCRATE_TEST_CLIP` 指向放有中文 CLIP 模型的文件夹）
+- 测试：`.venv\Scripts\python -m pytest tests -q`（写回 XMP 的用例需要设置环境变量 `PHOTOCRATE_TEST_EXIFTOOL` 指向 exiftool.exe）；界面自动化：`tests\ui_timeplace.py`、`tests\ui_culling.py`、`tests\ui_tier3.py`、`tests\ui_workflow.py`、`tests\ui_repartition.py`、`tests\ui_editor.py`（修图窗口；修图核心的单元测试在 `tests\test_editor.py`）、`tests\ui_merge.py`（合并曝光；引擎测试在 `tests\test_hdr.py`）、`tests\ui_editor_pro.py`（RAW 显影、16 位、图层组、透视 / 变形、修饰工具；核心测试在 `tests\test_editor_pro.py`）（人脸用例需要环境变量 `PHOTOCRATE_TEST_MODELS` 指向放有 YuNet / SFace 模型的文件夹；“不是真人的脸”的真实模型用例另需 `PHOTOCRATE_TEST_CLIP` 指向放有中文 CLIP 模型的文件夹）
 - 生成测试照片：`.venv\Scripts\python tests\make_samples.py D:\测试照片`
 
 ## 七、数据与许可

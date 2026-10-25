@@ -5,17 +5,18 @@ import math
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QFontMetrics, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QGridLayout,
                                QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem, QPlainTextEdit,
                                QPushButton, QScrollArea, QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
 from ...edit import adjust
 from ...edit.blend import BLEND_MODES, BLEND_NAMES
+from ...edit.document import to8
 from .. import theme
 from ..theme import font
 from .canvas import checker_brush
-from .icons import paint_icon
+from .icons import icon_pixmap, paint_icon
 from ...i18n import t as _t
 
 
@@ -607,7 +608,8 @@ class PropertiesPanel(QScrollArea):
             self._build_empty()
             return
         w, lay = self._container()
-        title = QLabel({"adjust": _t("调整图层"), "text": _t("文字图层"), "pixel": _t("像素图层")}[l.kind] + f"  ·  {l.name}")
+        title = QLabel({"adjust": _t("调整图层"), "text": _t("文字图层"), "pixel": _t("像素图层"),
+                        "group": _t("图层组")}[l.kind] + f"  ·  {l.name}")
         title.setFont(font("cn", 10, 700))
         title.setWordWrap(True)
         lay.addWidget(title)
@@ -627,6 +629,13 @@ class PropertiesPanel(QScrollArea):
             b = QPushButton(_t("栅格化文字（变成普通像素图层）"))
             b.clicked.connect(lambda: doc.rasterize(l.id))
             lay.addWidget(b)
+        elif l.kind == "group":
+            n = len(doc.descendants(l.id))
+            info = QLabel(_t('组里有 {0} 个图层。混合模式「穿透」= 组里的图层（包括调整图层）照常作用到下面；'
+                             '换成别的模式时组先单独合成，组里的调整图层只调组里的图层。', n))
+            info.setWordWrap(True)
+            info.setProperty("role", "dim")
+            lay.addWidget(info)
         else:
             info = QLabel(_t('{0} × {1} 像素，位置 ({2}, {3})\n可以用画笔、仿制图章、修复、滤镜直接改它；想要可反复修改的调色，用调整图层。', l.w, l.h, l.x, l.y))
             info.setWordWrap(True)
@@ -704,7 +713,7 @@ def layer_thumb(layer, w: int = 44, h: int = 34, mask: bool = False) -> QPixmap:
     if mask:
         arr = layer.mask
     else:
-        arr = layer.pixels if layer.kind != "adjust" else None
+        arr = layer.pixels if not layer.canvas_sized else None
     if arr is not None:
         lvl = max(0, int(math.ceil(math.log2(max(1, max(arr.shape[0] / h, arr.shape[1] / w))))))
         if mask:
@@ -716,7 +725,7 @@ def layer_thumb(layer, w: int = 44, h: int = 34, mask: bool = False) -> QPixmap:
             img = QImage(small.data, small.shape[1], small.shape[0], small.shape[1], QImage.Format.Format_Grayscale8)
         else:
             small, _ = layer.proxy(lvl)
-            small = np.ascontiguousarray(small)
+            small = np.ascontiguousarray(to8(small))
             img = QImage(small.data, small.shape[1], small.shape[0], small.shape[1] * 4,
                          QImage.Format.Format_RGBA8888)
         s = min(w / img.width(), h / img.height())
@@ -725,7 +734,8 @@ def layer_thumb(layer, w: int = 44, h: int = 34, mask: bool = False) -> QPixmap:
         qp.drawImage(QRectF((w - tw) / 2, (h - th) / 2, tw, th), img)
     else:
         qp.fillRect(QRectF(0, 0, w, h), QColor("#2A2E33"))
-        paint_icon(qp, QRectF(0, 0, w, h).adjusted(8, 4, -8, -4), "adjust", QColor("#E6E6E6"))
+        paint_icon(qp, QRectF(0, 0, w, h).adjusted(8, 4, -8, -4), "folder" if layer.kind == "group" else "adjust",
+                   QColor("#E6E6E6"))
     if layer.kind == "text" and not mask:
         qp.fillRect(QRectF(0, h - 13, 13, 13), QColor(0, 0, 0, 170))
         qp.setPen(QColor("#FFFFFF"))
@@ -792,6 +802,20 @@ class LayerRow(QWidget):
         self.eye.toggled.connect(lambda on: panel.win.doc.set_props(
             self.lid, name=_t("显示图层") if on else _t("隐藏图层"), visible=on))
         lay.addWidget(self.eye)
+        depth = len(panel.win.doc.ancestors(layer))
+        self.indent = QWidget()
+        self.indent.setFixedWidth(14 * depth + (12 if layer.clip else 0))
+        lay.addWidget(self.indent)
+        self.arrow = QToolButton()                     # 组：折叠 / 展开；剪贴图层：↳ 标记
+        self.arrow.setAutoRaise(True)
+        self.arrow.setFixedSize(16, 24)
+        if layer.kind == "group":
+            self.arrow.setToolTip(_t("折叠 / 展开组"))
+            self.arrow.clicked.connect(lambda: panel.toggle_collapse(self.lid))
+        else:
+            self.arrow.setEnabled(False)
+        self.arrow.setVisible(layer.kind == "group" or layer.clip)
+        lay.addWidget(self.arrow)
         self.thumb = _Thumb()
         self.thumb.clicked.connect(lambda: panel.pick(self.lid, False))
         lay.addWidget(self.thumb)
@@ -819,8 +843,17 @@ class LayerRow(QWidget):
         fm = QFontMetrics(self.name.font())
         self.name.setText(fm.elidedText(layer.name, Qt.TextElideMode.ElideRight, 150))
         self.name.setToolTip(layer.name)
-        parts = [{"adjust": _t("调整"), "text": _t("文字"), "pixel": _t("像素")}[layer.kind]]
-        if layer.blend != "normal":
+        if layer.kind == "group":
+            self.arrow.setText("▸" if layer.collapsed else "▾")
+        elif layer.clip:
+            self.arrow.setIcon(QIcon(icon_pixmap("clip", QColor(theme.current().ink2), 14)))
+            self.arrow.setToolTip(_t("剪贴蒙版：只在下面那一层有像素的地方显示"))
+        parts = [{"adjust": _t("调整"), "text": _t("文字"), "pixel": _t("像素"), "group": _t("组")}[layer.kind]]
+        if layer.pixels is not None and layer.pixels.dtype == np.uint16 and layer.kind == "pixel":
+            parts.append(_t("16 位"))
+        if layer.clip:
+            parts.append(_t("剪贴"))
+        if layer.blend not in ("normal", "pass_through"):
             parts.append(BLEND_NAMES.get(layer.blend, layer.blend))
         if layer.opacity < 0.999:
             parts.append(f"{layer.opacity * 100:.0f}%")
@@ -857,6 +890,7 @@ class LayersPanel(QWidget):
         lay.setSpacing(6)
         r = QHBoxLayout()
         self.blend = QComboBox()
+        self.blend.addItem(_t("穿透"), "pass_through")          # 只给图层组用
         for k, t in BLEND_MODES:
             self.blend.addItem(t, k)
         self.blend.setToolTip(_t("混合模式"))
@@ -884,17 +918,22 @@ class LayersPanel(QWidget):
         btns = [(_t("＋ 图层"), _t("新建空白图层（Ctrl+Shift+N）"), lambda: win.doc.new_pixel_layer()),
                 (_t("◐ 调整"), _t("新建调整图层（曝光、曲线、HSL…）"), lambda: win.new_adjust()),
                 (_t("▣ 蒙版"), _t("给当前图层加蒙版（有选区时按选区）"), win.add_mask),
+                (_t("▤ 组"), _t("把当前图层放进新的图层组（Ctrl+G）"), lambda: win.doc.group_layers()),
                 (_t("复制"), _t("复制图层（Ctrl+J）"), lambda: win.doc.duplicate_layer(win.doc.active_id)),
                 ("↑", _t("上移一层（Ctrl+]）"), lambda: win.doc.move_layer(win.doc.active_id, 1)),
                 ("↓", _t("下移一层（Ctrl+[）"), lambda: win.doc.move_layer(win.doc.active_id, -1)),
-                (_t("合并"), _t("向下合并（Ctrl+E）"), lambda: win.doc.merge_down(win.doc.active_id)),
-                (_t("删除"), _t("删除图层"), lambda: win.doc.delete_layer(win.doc.active_id))]
+                (_t("剪贴"), _t("创建 / 释放剪贴蒙版（Ctrl+Alt+G）：只作用于下面那一层"),
+                 lambda: win.doc.toggle_clip()),
+                (_t("合并"), _t("向下合并 / 合并组（Ctrl+E）"), lambda: win.doc.merge_down(win.doc.active_id)),
+                (_t("删除"), _t("删除图层（组连同里面的图层）"), lambda: win.doc.delete_layer(win.doc.active_id))]
         for i, (t, tip, fn) in enumerate(btns):
             b = QPushButton(t)
             b.setToolTip(tip)
             b.clicked.connect(fn)
-            b.setStyleSheet("padding: 4px 6px;")
-            g.addWidget(b, i // 4, i % 4)
+            b.setStyleSheet("padding: 4px 4px;")
+            if t == _t("剪贴"):
+                b.setIcon(QIcon(icon_pixmap("clip", QColor(theme.current().ink2), 14)))
+            g.addWidget(b, i // 5, i % 5)
         lay.addLayout(g)
         self._ids: list[int] = []
         self._rows: dict[int, LayerRow] = {}
@@ -904,12 +943,14 @@ class LayersPanel(QWidget):
         doc = self.win.doc
         if doc is None:
             return
-        ids = [l.id for l in reversed(doc.layers)]
+        shown = [l for l in reversed(doc.layers) if not any(a.collapsed for a in doc.ancestors(l))]
+        ids = [l.id for l in shown]
+        sig = [(l.id, l.parent, l.clip, l.kind) for l in shown]
         self._updating = True
-        if ids != self._ids:
+        if sig != getattr(self, "_sig", None):
             self.list.clear()
             self._rows.clear()
-            for l in reversed(doc.layers):
+            for l in shown:
                 it = QListWidgetItem()
                 it.setSizeHint(QSize(10, 42))
                 self.list.addItem(it)
@@ -917,17 +958,24 @@ class LayersPanel(QWidget):
                 self._rows[l.id] = row
                 self.list.setItemWidget(it, row)
             self._ids = ids
+            self._sig = sig
         else:
-            for l in doc.layers:
+            for l in shown:
                 self._rows[l.id].update_from(l, thumbs)
-        if doc.active_id in self._ids:
-            self.list.setCurrentRow(self._ids.index(doc.active_id))
+        act = doc.active
+        while act is not None and act.id not in self._ids and doc.layer(act.parent) is not None:
+            act = doc.layer(act.parent)                    # 当前图层在折叠的组里：高亮那个组
+        if act is not None and act.id in self._ids:
+            self.list.setCurrentRow(self._ids.index(act.id))
             self.update_marks()
         l = doc.active
         if l is not None:
             self.blend.blockSignals(True)
             self.blend.setCurrentIndex(max(0, self.blend.findData(l.blend)))
             self.blend.setEnabled(l.kind != "adjust")
+            item = self.blend.model().item(0)
+            if item is not None:
+                item.setEnabled(l.kind == "group")
             self.blend.blockSignals(False)
             for w in (self.opacity, self.op_slider):
                 w.blockSignals(True)
@@ -945,6 +993,16 @@ class LayersPanel(QWidget):
         if self._updating or not 0 <= row < len(self._ids):
             return
         self.win.doc.set_active(self._ids[row])
+
+    def toggle_collapse(self, lid: int) -> None:
+        """折叠 / 展开组：只是面板上的显示，不进历史记录（但会随工程保存）。"""
+        doc = self.win.doc
+        g = doc.layer(lid)
+        if g is None or g.kind != "group":
+            return
+        g.collapsed = not g.collapsed
+        doc.modified = True
+        self.refresh(thumbs=False)
 
     def pick(self, lid: int, mask: bool) -> None:
         doc = self.win.doc

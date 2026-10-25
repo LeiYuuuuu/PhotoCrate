@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QGridLayout, 
                                QToolButton)
 
 from ...edit import hdr
-from ...edit.document import Layer, SourceInfo
+from ...edit.document import Layer, SourceInfo, convert, to8
 from ...i18n import t as _t
 from ..dialogs import _Base, info, run_with_progress
 from ..theme import font
@@ -310,7 +310,7 @@ class GhostFixDialog(_Base):
             b.setCheckable(True)
             b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             b.setIconSize(QSize(self.THUMB, self.THUMB))
-            inside = l.pixels[..., :3][sel > 127]
+            inside = to8(l.pixels)[..., :3][sel > 127]
             clipped = float(((inside.min(axis=1) > 250) | (inside.max(axis=1) < 8)).mean()) if inside.size else 0.0
             b.setText(l.name + (_t("\n（这里过曝 / 欠曝，没有细节）") if clipped > 0.5 else ""))
             b.setToolTip(l.name)
@@ -356,9 +356,9 @@ class GhostFixDialog(_Base):
         pad = max(24, round(0.35 * max(w, h)))
         H, W = self.sel.shape
         x0, y0, x1, y1 = max(0, x - pad), max(0, y - pad), min(W, x + w + pad), min(H, y + h + pad)
-        tgt = self.target.pixels
+        tgt = to8(self.target.pixels)
         for b, l in zip(self.tiles, self.sources):
-            r = hdr.ghost_patch(l.pixels, tgt, self.sel, float(self.feather.value()), self.match.isChecked())
+            r = hdr.ghost_patch(to8(l.pixels), tgt, self.sel, float(self.feather.value()), self.match.isChecked())
             view = tgt[y0:y1, x0:x1, :3].astype(np.float32)
             if r is not None:
                 px, mk, px0, py0 = r
@@ -398,12 +398,12 @@ def fix_ghost(win) -> None:
     if dlg.exec() != GhostFixDialog.DialogCode.Accepted:
         return
     src, feather, match = dlg.choice()
-    r = hdr.ghost_patch(src.pixels, target.pixels, d.selection, feather, match)
+    r = hdr.ghost_patch(to8(src.pixels), to8(target.pixels), d.selection, feather, match)
     if r is None:
         return
     px, mk, x, y = r
     name = src.name.split(" · ")[0] if " · " in src.name else src.name
-    l = Layer("pixel", _t("重影修补 · {0}", name), px, x, y, params={"ghost_fix": src.params.get("merge_source")})
+    l = Layer("pixel", _t("重影修补 · {0}", name), convert(px, d.dtype), x, y, params={"ghost_fix": src.params.get("merge_source")})
     l.mask = mk
     i = d.index_of(target.id) + 1
     while i < len(d.layers) and "ghost_fix" in d.layers[i].params:
