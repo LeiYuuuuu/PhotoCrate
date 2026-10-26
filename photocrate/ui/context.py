@@ -57,6 +57,8 @@ class AppContext(QObject):
         self.mover = Mover(journal, bool(settings.get("verify_hash")))
         self._workers: set[Worker] = set()
         self.busy = False
+        from .autosync import AutoSync
+        self.autosync = AutoSync(self)      # 自动同步数据源文件夹（主窗口启动后开始监视）
 
     def run(self, fn, on_progress=None, on_done=None, on_error=None) -> Worker:
         w = Worker(fn)
@@ -117,6 +119,7 @@ class AppContext(QObject):
         self.settings_changed.emit(key)
 
     def shutdown(self) -> None:
+        self.autosync.shutdown()
         for w in list(self._workers):
             w.cancel()
             w.wait(5000)

@@ -122,6 +122,7 @@ DEFAULTS: dict[str, Any] = {
     "exiftool_path": "",              # 留空 = 自动查找
     "recursive": True,
     "source_dirs": [],
+    "auto_sync": False,               # 自动同步：数据源文件夹里新增 / 删除 / 改动照片时自动更新照片库
     "target_dir": "",
     # 并行
     "parallel_mode": "process",       # process / thread

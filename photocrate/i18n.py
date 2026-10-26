@@ -31,6 +31,8 @@ def set_language(lang: str | None) -> str:
         table.update(PROVINCES)
         from .locale_en_photos import EN_PHOTOS
         table.update(EN_PHOTOS)          # 相册 / 修图工作台 / 文字识别（与 locale_en 同名的条目以 locale_en 为准）
+        from .locale_en_sync import EN_SYNC
+        table.update(EN_SYNC)            # 自动同步
         table.update(EN)
         _EN = table
     return LANG

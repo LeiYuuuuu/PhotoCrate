@@ -222,6 +222,22 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 | 基础编辑 `edit/quick.py` | `QuickState` = 滑块 + 自动增强参数 + 滤镜（按强度与“不调整”插值：数值、曲线偏离对角线的部分、HSL 都乘强度）+ 转 90° / 翻转 / 拉直（自动放大到没有空角）/ 裁剪框。像素全部交给 `adjust.develop`（与调整图层同一套算法）；预览在 ≤ 1100 px 的代理图上算，停手后用 1600 px 补一帧；存储时按原尺寸重新算，`io.export_image` 写「原名_编辑.jpg」（保留 EXIF），然后重新扫描并打开新照片 |
 | 修图模式 `ui/studio.py` | `open_editor()` 建好 `EditorWindow` 后，如果 `ctx.studio` 存在就交给 `StudioMode.adopt()`：去掉窗口标志、放进标签页，并把窗口里所有 `WindowShortcut` 的 QAction 改成 `WidgetWithChildrenShortcut`——单键快捷键（V、B、X…）只在这个标签页里生效，不会在相册或别的标签里误触发。关闭标签 = 调用修图窗口自己的 `close()`（会问要不要保存），窗口销毁后标签自动去掉；退出程序前逐个关闭，有一个取消就不退出 |
 
+## 9.56 自动同步（core/watch.py + Library.sync + ui/autosync.py）
+
+设置 `auto_sync` 打开时，一直监视「资源接入」里的文件夹（`source_dirs`，按 `recursive`），照片新增 / 删除 / 改动后增量更新照片库，不用重新扫描。
+
+| 部分 | 实现 |
+|---|---|
+| 快照 `watch.snapshot` | {normcase 路径: `Entry(路径, 大小, 修改时间)`}，与扫描同一套规则（`scanner._iter_dir`、`file_kind`、跳过 .pctmp / ~$）。根文件夹本身不在了（拔掉移动硬盘、网络盘断开）时沿用上一份快照里它的记录——离线不算删除 |
+| 监视 `FolderWatcher` | 后台线程。Windows：每个根文件夹一个 `ReadDirectoryChangesW`（ctypes，含子文件夹，`_Notifier` 线程只负责叫醒，停止时 `CancelIoEx`），平时每 60 秒兜底比较一次；其他系统 / 不支持通知的文件夹按 3 秒（快照很慢时 × 5）轮询。醒来后先清标志再拍快照，拍的过程中的新变化会再叫醒一次 |
+| 稳定才算数 `_settle` | 与已提交状态不同的文件，要在相隔 1 秒的两次快照里一样（删除 = 连续两次都不在），并且 `_ready`：`os.stat` 与目录列表一致（NTFS 的目录列表在文件关闭前可能是旧的）、`still_writing` 以“不许别人写”的共享方式打开不报共享冲突——正在复制的文件不会被读成半张图。一部分稳定了就先回调（大批拷贝时边拷边出现），只剩被占用的文件时间隔逐步放长到 30 秒。开始监视时 2 分钟内新建 / 改过的文件先当作“未稳定” |
+| 回调 `Change` | `files`（已提交的完整快照）+ added / removed / modified + `unsettled`（还在变的文件）。`poke(full=True)`：没变化也回调一次当前快照 |
+| 增量同步 `Library.sync` | 与 `scan` 共用 `Library._lock` 互斥。`build_groups` 按快照分组（`_FileEntry` 冒充 `os.DirEntry` 交给 `scanner.group_directory`，规则与扫描完全一致），与照片库对账：一组的文件全部在快照里且大小 / 修改时间不变、快照里对应的组恰好就是这些文件（跨文件夹配对的 RAW + JPG 在快照里是两组）→ 原样保留（同一个对象）；含 `unsettled` 文件的组也不动。其余快照组要分析：主图（其次任一文件）原来属于哪组就沿用那组的 gid，否则追加到末尾；对不上的旧组换成空组占位——**gid 永远等于下标且不挪动**，详情页、选择、AI 向量（按 gid 存）都不受影响。新 / 变了的组走 `_read_files`（扫描的 1–3 步，元数据与像素都先查缓存；任务按列表下标 `idx` 回填），之后跨文件夹配对（不 renumber）、`run_meta_analyzers`（只传有文件的组）、换上新列表，progress 发 `stage="ready"`，最后 `run_ai` 只算新照片（`SyncReport.ai_new`）。OCR 只载入缓存，没识别过的交给相册页在后台识别 |
+| 界面 `ui/autosync.AutoSync` | 挂在 `ctx.autosync`，主窗口启动 600 ms 后 `restart()`；`auto_sync` / `source_dirs` / `recursive` 等设置变化（`ctx.set_setting`，同一轮事件合并成一次）时重启监视，开始时按现状同步一次（照片库已是最新则什么都不变）。监视线程的 `Change` 经信号回到界面线程，只留最新一份；`ctx.busy` 或开着模态对话框时不同步、记 `_dirty`，空下来后丢掉旧快照、`poke(full=True)` 按现状补同步——本软件自己移动 / 改名的文件 `apply_moves` 早已更新，补同步时什么都不变。`Progress` 是同一个对象反复改写，跨线程前复制一份；收到 ready 就发 `library_changed`，AI 补完（`ai_new`）再发一次。全量扫描开始前 `cancel()` 正在进行的同步 |
+| 入口 | 资源接入页“自动同步”勾选框 + 一行状态；相册顶栏右侧「自动同步 ▾」菜单（添加要同步的文件夹…、开关、立即检查、文件夹列表）；相册空状态「选择照片文件夹…」= 加入数据源并开启自动同步 |
+
+测试：`tests/test_autosync.py`（快照与分组和扫描一致、离线根文件夹、从空库同步 = 扫描、增删改后 gid 与对象保留、unsettled、移除数据源、跨文件夹配对、监视线程的增删改 / 刚拷进的文件 / 写完才报 / Windows 变化通知、界面控制器的忙时推迟与开关）、`tests/ui_autosync.py`（真实主窗口走一遍并截图）。
+
 ## 9.6 合并曝光（edit/hdr.py + ui/editor/merge.py）
 
 同一场景、不同曝光的 2–9 张 → 一张。只用 numpy / OpenCV，不新增依赖。目标是**不损失清晰度**，所以每一步都围绕“少重新取样、对得准”来做：
@@ -377,7 +393,7 @@ PhotoCrate/
 ├─ photocrate/
 │  ├─ app.py  bootstrap.py  config.py  plugins.py  i18n.py  locale_en.py（英文界面文字）
 │  ├─ core/        models formats scanner metadata imaging pixelwork geo dates cache library stats
-│  │               pairing geotime places daybook trips videos smart（相册：时间线 / 智能相簿 / 搜索）
+│  │               pairing geotime places daybook trips videos smart（相册：时间线 / 智能相簿 / 搜索）watch（自动同步：文件夹快照 / 监视）
 │  ├─ ai/          models clip scenes faces people service visual ocr ocrindex（ocr = 照片里的文字）
 │  ├─ analyzers/   base builtin
 │  ├─ partition/   base dimensions engine
@@ -386,7 +402,7 @@ PhotoCrate/
 │  ├─ edit/        document adjust blend paint filters text io hdr（修图核心；hdr = 合并曝光）
 │  └─ ui/          theme context dialogs timeplace_dialogs culling_dialogs workflow_dialogs xmpflow viewer
 │                  main_window  pages/  widgets/（deco thumbgrid mapview）  editor/（window canvas tools panels icons tutorial merge）
-│                  photos/（相册：page grid detail canvas）  studio（修图模式：标签页）
+│                  photos/（相册：page grid detail canvas）  studio（修图模式：标签页）  autosync（自动同步）
 ├─ data/           geonames_cities1000.csv.gz  place_names_zh.json  clip_vocab_zh.txt
 ├─ assets/         app.ico app.png
 ├─ plugins/        用户插件放这里        plugins_examples/  示例插件

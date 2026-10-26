@@ -58,8 +58,21 @@ class SourcePage(Page):
         row.addStretch(1)
         self.recursive = QCheckBox(_t("包含子文件夹"))
         self.recursive.setChecked(bool(ctx.settings.get("recursive", True)))
+        self.recursive.toggled.connect(lambda on: self.ctx.set_setting("recursive", bool(on)))
         row.addWidget(self.recursive)
         src.body.addLayout(row)
+        row_sync = QHBoxLayout()
+        self.auto = QCheckBox(_t("自动同步"))
+        self.auto.setChecked(bool(ctx.settings.get("auto_sync")))
+        self.auto.setToolTip(_t("开启后一直监视这些文件夹：往里面拷进、删掉或改动照片，照片库会自动跟着更新，不用重新扫描。"))
+        self.auto.toggled.connect(lambda on: self.ctx.autosync.set_enabled(on))
+        self.sync_state = QLabel("")
+        self.sync_state.setFont(font("cn", 8.5))
+        self.sync_state.setProperty("role", "dim")
+        self.sync_state.setMinimumWidth(10)
+        row_sync.addWidget(self.auto)
+        row_sync.addWidget(self.sync_state, 1)
+        src.body.addLayout(row_sync)
         row2 = QHBoxLayout()
         self.b_scan = TacButton(_t("开始扫描"), "primary", en="SCAN", height=38)
         self.b_cancel = TacButton(_t("取消"), "secondary", height=38)
@@ -170,7 +183,10 @@ class SourcePage(Page):
         ctx.library_changed.connect(self._on_library)
         ctx.files_changed.connect(self.refresh_grid)
         ctx.settings_changed.connect(lambda k: self.grid.viewport().update())
+        ctx.settings_changed.connect(self._on_setting)
+        ctx.autosync.changed.connect(self._update_sync_state)
         self._update_tool_note()
+        self._update_sync_state()
 
     # ---- 文件夹 ----------------------------------------------------------
     def set_dirs(self, dirs: list[str]) -> None:
@@ -178,10 +194,37 @@ class SourcePage(Page):
         self.dirs.clear()
         for d in dirs:
             self.dirs.addItem(d)
-        self.ctx.settings.set("source_dirs", self._dirs())
+        self.ctx.set_setting("source_dirs", self._dirs())
 
     def _dirs(self) -> list[str]:
         return [self.dirs.item(i).text() for i in range(self.dirs.count())]
+
+    def _on_setting(self, key: str) -> None:
+        """别处（「相册」的“添加同步文件夹”）改了数据源 / 自动同步开关时，跟着更新列表与勾选框。"""
+        if key == "source_dirs":
+            dirs = self.ctx.settings.get("source_dirs") or []
+            if dirs != self._dirs():
+                self.dirs.clear()
+                for d in dirs:
+                    self.dirs.addItem(d)
+        elif key == "auto_sync":
+            self.auto.blockSignals(True)
+            self.auto.setChecked(bool(self.ctx.settings.get("auto_sync")))
+            self.auto.blockSignals(False)
+
+    def _update_sync_state(self) -> None:
+        a = self.ctx.autosync
+        text = a.describe() if a.state != "off" else _t("拷进 / 删掉照片时自动更新照片库")
+        self.sync_state.setToolTip(text)
+        fm = self.sync_state.fontMetrics()
+        self.sync_state.setText(fm.elidedText(text, Qt.TextElideMode.ElideRight, max(80, self.sync_state.width())))
+        self.sync_state.setProperty("role", "warn" if a.state == "error" else ("dim" if a.state != "off" else "faint"))
+        self.sync_state.style().unpolish(self.sync_state)
+        self.sync_state.style().polish(self.sync_state)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._update_sync_state()
 
     def _add_dir(self):
         start = self._dirs()[-1] if self._dirs() else os.path.expanduser("~")
@@ -190,7 +233,7 @@ class SourcePage(Page):
             d = os.path.normpath(d)
             if d not in self._dirs():
                 self.dirs.addItem(d)
-            self.ctx.settings.set("source_dirs", self._dirs())
+            self.ctx.set_setting("source_dirs", self._dirs())
 
     def import_media(self):
         """导入向导：存储卡 / 手机 / 文件夹 → 复制到电脑（跳过已导入的）→ 可选加入数据源并扫描。"""
@@ -236,13 +279,13 @@ class SourcePage(Page):
                           for d in self._dirs())
             if not covered:
                 self.dirs.addItem(os.path.normpath(dst))
-                self.ctx.settings.set("source_dirs", self._dirs())
+                self.ctx.set_setting("source_dirs", self._dirs())
             QTimer.singleShot(0, self.start_scan)
 
     def _rm_dir(self):
         for it in self.dirs.selectedItems():
             self.dirs.takeItem(self.dirs.row(it))
-        self.ctx.settings.set("source_dirs", self._dirs())
+        self.ctx.set_setting("source_dirs", self._dirs())
 
     def _update_tool_note(self):
         lib = self.ctx.library
@@ -264,6 +307,7 @@ class SourcePage(Page):
         self.ctx.settings.set("source_dirs", self._dirs())
         if not self.ctx.settings.get("target_dir"):
             self.ctx.settings.set("target_dir", dirs[0])
+        self.ctx.autosync.cancel()          # 全量扫描优先；扫描完自动同步按最新状态补一次
         self.b_scan.setEnabled(False)
         self.b_cancel.setEnabled(True)
         self.bar.busy = True

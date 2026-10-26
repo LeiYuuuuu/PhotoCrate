@@ -5,13 +5,14 @@
 - 搜索：一个框搜照片里的文字、地点、人物、场景、日期 / 时段、相机、相簿…；下面给出每个词命中的类别（点一下只按那类找），
   模型就绪时再补上 AI 画面搜索的结果。照片里的文字识别在后台进行（第一次下载约 16 MB 的模型）。
 - 单张照片：大图 + 信息 + 照片里的文字（命中的行高亮），可收藏、编辑（基础调整 / 滤镜 / 裁剪）、送去「修图」模式。
+- 自动同步：顶栏右边选一个文件夹，往里面拷进 / 删掉照片，这里自动跟着变（ui/autosync.py）。
 """
 from __future__ import annotations
 
 import os
 
 from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
+from PySide6.QtGui import QDesktopServices, QFontMetrics, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (QButtonGroup, QDialog, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSlider,
                                QStackedWidget, QVBoxLayout, QWidget)
@@ -148,6 +149,9 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
         self.zoom.setValue(int(ctx.settings.get("photos_zoom") or 5))
         self.zoom.valueChanged.connect(self._zoom)
         tl.addWidget(self.zoom)
+        self.b_sync = TacButton(_t("自动同步 ▾"), "secondary", height=32)
+        self.b_sync.clicked.connect(lambda: self._sync_menu(self.b_sync.mapToGlobal(self.b_sync.rect().bottomLeft())))
+        tl.addWidget(self.b_sync)
         self.root.addWidget(top)
         self.top_bar = top
 
@@ -263,7 +267,9 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
         ctx.library_changed.connect(self._library_changed)
         ctx.files_changed.connect(self._library_changed)
         ctx.ratings_changed.connect(self._repaint)
+        ctx.autosync.changed.connect(self._update_sync)
         self._library_changed()
+        self._update_sync()
 
     # ---- 基础 ----
     def status(self, text: str) -> None:
@@ -899,6 +905,40 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
             prog(i + 1, len(groups))
         return n
 
+    # ---- 自动同步 ----
+    def _update_sync(self) -> None:
+        a = self.ctx.autosync
+        text = {"off": _t("自动同步：关 ▾"), "syncing": _t("同步中… ▾"), "starting": _t("同步中… ▾"),
+                "error": _t("▲ 自动同步 ▾")}.get(a.state, _t("● 自动同步 ▾"))
+        self.b_sync.setText(text)
+        self.b_sync.setMinimumWidth(QFontMetrics(self.b_sync.font()).horizontalAdvance(text) + 40)
+        self.b_sync.setToolTip(a.describe() + "\n" + _t("选一个照片文件夹：往里面拷进、删掉照片，这里自动跟着更新。"))
+        loading = a.state in ("starting", "syncing") and not self._by_gid
+        self.empty_title.setText(_t("正在载入照片…") if loading else _t("相册还是空的"))
+
+    def _sync_menu(self, pos: QPoint) -> None:
+        a = self.ctx.autosync
+        m = QMenu(self)
+        m.addAction(_t("添加要同步的文件夹…"), lambda: a.add_folder(self))
+        act = m.addAction(_t("自动同步文件夹里的变化"))
+        act.setCheckable(True)
+        act.setChecked(a.enabled)
+        act.toggled.connect(a.set_enabled)
+        now = m.addAction(_t("立即检查"), a.check_now)
+        now.setEnabled(a.enabled)
+        roots = a.roots()
+        if roots:
+            m.addSeparator()
+            head = m.addAction(a.describe() if a.enabled else _t("照片文件夹（自动同步已关闭）："))
+            head.setEnabled(False)
+            for d in roots[:8]:
+                m.addAction("    " + d, lambda d=d: QDesktopServices.openUrl(QUrl.fromLocalFile(d)))
+            if len(roots) > 8:
+                m.addAction(_t("    …还有 {0} 个", len(roots) - 8)).setEnabled(False)
+        m.addSeparator()
+        m.addAction(_t("管理文件夹（资源接入）…"), lambda: self.ctx.navigate.emit("source"))
+        m.exec(pos)
+
     # ---- 空状态 ----
     def _empty_state(self) -> QWidget:
         w = QWidget()
@@ -907,14 +947,16 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
         t = QLabel(_t("相册还是空的"))
         t.setFont(font("cn", 18, 800))
         t.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_title = t
         v.addWidget(t)
-        s = caption(_t("先在「01 资源接入」添加照片文件夹并扫描；扫描过的话，点「扫描照片库」重新载入（有缓存，很快）。"), "dim", 10)
+        s = caption(_t("选一个照片文件夹，影匣会载入里面的照片，之后往文件夹里拷进、删掉照片也会自动同步。"
+                       "也可以在「01 资源接入」添加多个文件夹；扫描过的话，点「扫描照片库」重新载入（有缓存，很快）。"), "dim", 10)
         s.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(s)
         r = QHBoxLayout()
         r.addStretch(1)
-        b1 = TacButton(_t("添加照片文件夹"), "primary", height=36)
-        b1.clicked.connect(lambda: self.ctx.navigate.emit("source"))
+        b1 = TacButton(_t("选择照片文件夹…"), "primary", height=36)
+        b1.clicked.connect(lambda: self.ctx.autosync.add_folder(self))
         b2 = TacButton(_t("扫描照片库"), "secondary", height=36)
         b2.clicked.connect(self.ctx.rescan_requested.emit)
         r.addWidget(b1)

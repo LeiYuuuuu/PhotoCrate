@@ -411,6 +411,7 @@ class MainWindow(QMainWindow):
         self._clock.timeout.connect(self.status.update)
         self._clock.start(30_000)
         QTimer.singleShot(400, self._check_recovery)
+        QTimer.singleShot(600, ctx.autosync.restart)     # 开着「自动同步」时开始监视（顺带按文件夹现状载入照片库）
         self._last_shot = 0.0
         self._restore_window()
         QApplication.instance().installEventFilter(self)

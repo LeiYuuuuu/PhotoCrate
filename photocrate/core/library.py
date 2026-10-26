@@ -88,6 +88,19 @@ class ScanReport:
     paired_across: int = 0
 
 
+@dataclass
+class SyncReport(ScanReport):
+    """自动同步一次的结果（照片数按“组”计）。"""
+    added: int = 0          # 新出现的照片
+    updated: int = 0        # 原有照片的文件变了（多了 RAW / .xmp、被覆盖…），编号不变
+    removed: int = 0        # 文件都不在了的照片
+    ai_new: int = 0         # 新算了 AI 向量的照片
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.added or self.updated or self.removed)
+
+
 class Library:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -104,6 +117,7 @@ class Library:
         self.fill_stats: dict[str, int] = {}
         self.paired_across = 0
         self.trips: list = []                # 旅行自动分段的结果（core/trips.Trip）
+        self._lock = threading.RLock()       # 扫描与自动同步互斥
         from ..ai.service import AIService
         self.ai = AIService(self)            # 场景识别 / 文字搜图 / 人物分组（模型下载后可用）
         from ..ai.ocrindex import OcrIndex
@@ -129,6 +143,11 @@ class Library:
     def scan(self, roots: list[str], recursive: bool, progress: ProgressCb | None = None,
              cancel: threading.Event | None = None, pixels: bool = True) -> ScanReport:
         """pixels=False：只读元数据、不做缩略图与画面分析（导入向导预览存储卡时用，快很多）。"""
+        with self._lock:
+            return self._scan(roots, recursive, progress, cancel, pixels)
+
+    def _scan(self, roots: list[str], recursive: bool, progress: ProgressCb | None,
+              cancel: threading.Event | None, pixels: bool) -> ScanReport:
         t0 = time.time()
         cancel = cancel or threading.Event()
         rep = ScanReport()
@@ -175,6 +194,41 @@ class Library:
 
     def _analyze(self, groups: list[PhotoGroup], pg: Progress, emit: Callable[[], None],
                  cancel: threading.Event, rep: ScanReport, pixels: bool = True) -> list[PhotoGroup]:
+        self._read_files(groups, pg, emit, cancel, rep, pixels)
+        if cancel.is_set():
+            return groups
+
+        # 4) 跨文件夹配对 RAW + JPG（需要拍摄时间，所以放在读完元数据之后）
+        self.paired_across = 0
+        if self.settings.get("pair_across_folders", True):
+            self.paired_across = pair_across_folders(groups)
+            if self.paired_across:
+                groups = renumber(groups)
+
+        # 5) GPS 补全的参考数据（轨迹文件 + 参考照片文件夹，元数据有缓存）
+        pg.stage = "analyze"
+        pg.message = _t("正在读取参考轨迹 / 参考照片…")
+        emit()
+        try:
+            self.load_references(cancel=cancel)
+        except Exception as e:     # 参考数据出问题不影响扫描本身
+            log.warning("读取参考数据失败：%s", e)
+
+        # 6) 元数据分析器（日期 / 地区 / 相机 / 画幅 …）
+        pg.message = _t("正在整理日期与地点…")
+        emit()
+        self.run_meta_analyzers(groups)
+
+        # 7) AI：CLIP 向量索引 + 场景识别（模型已下载且开启时）
+        if pixels:
+            self.run_ai(groups, pg, emit, cancel)
+            # 8) 照片里的文字（模型已下载且开启时）
+            self.run_ocr(groups, pg, emit, cancel)
+        return groups
+
+    def _read_files(self, groups: list[PhotoGroup], pg: Progress, emit: Callable[[], None],
+                    cancel: threading.Event, rep: ScanReport, pixels: bool = True) -> None:
+        """读元数据 + 像素分析（缩略图 / 色调 / 清晰度…），都先查缓存；结果直接写进各组。"""
         # 1) 像素任务（缓存未命中的部分）先提交到进程池，与 ExifTool 读取并行
         prim_sigs = [g.primary_file.sig for g in groups]
         pix_cache = self.cache.get_pix_many(prim_sigs)
@@ -183,7 +237,7 @@ class Library:
         wanted = {a.id: a.version for a in pixel_analyzers() if a.available(snap)}
         troot = str(thumbs_dir())
         tasks = []
-        for g, sig in zip(groups, prim_sigs):
+        for i, (g, sig) in enumerate(zip(groups, prim_sigs)):
             have = pix_cache.get(sig, {})
             for aid, (ver, data) in have.items():
                 if aid in wanted and ver == wanted[aid]:
@@ -196,7 +250,7 @@ class Library:
             need_thumb = g.thumb is None
             if pixels and (need or need_thumb):
                 tasks.append({
-                    "gid": g.gid, "sig": sig, "path": g.primary, "kind": g.primary_file.role,
+                    "gid": g.gid, "idx": i, "sig": sig, "path": g.primary, "kind": g.primary_file.role,
                     "need": need, "need_thumb": need_thumb,
                     "thumb_path": thumb_path_for(troot, sig), "exiftool": self.exiftool_path,
                 })
@@ -245,7 +299,7 @@ class Library:
             g.meta = merge_group_meta(imgs, xmps)
         if cancel.is_set():
             self._stop_pool(pool, futures)
-            return groups
+            return
 
         # 3) 等像素任务全部完成
         pg.stage = "pixel"
@@ -256,36 +310,121 @@ class Library:
             emit()
         self._stop_pool(pool, futures)
         self.cache.commit()
+
+    # ---- 自动同步 --------------------------------------------------------
+    def sync(self, files: dict, roots: list[str], progress: ProgressCb | None = None,
+             cancel: threading.Event | None = None, unsettled: frozenset[str] = frozenset()) -> SyncReport:
+        """按文件夹快照（core/watch.snapshot，覆盖全部数据源）增量更新照片库：
+        文件没变的照片原样保留；新增 / 文件变了的照片读元数据、做画面分析（有缓存）；文件都不在了的照片隐藏。
+        编号尽量不变（照片多了 RAW / .xmp 还是原来的编号），新照片排在后面，打开着的照片、选择都不会跳。
+        unsettled：还在复制 / 变化中的文件，含有它们的照片这次不动。progress 在照片库换好时会收到 stage="ready"。"""
+        with self._lock:
+            return self._sync(files, roots, progress, cancel or threading.Event(), unsettled)
+
+    def _sync(self, files: dict, roots: list[str], progress: ProgressCb | None, cancel: threading.Event,
+              unsettled: frozenset[str]) -> SyncReport:
+        from .watch import build_groups
+        t0 = time.time()
+        rep = SyncReport()
+        pg = Progress("enumerate", _t("自动同步：比较文件夹…"))
+
+        def emit():
+            if progress:
+                progress(pg)
+
+        key = os.path.normcase
+        fresh = build_groups({k: e for k, e in files.items() if k not in unsettled},
+                             bool(self.settings.get("pair_live_photo", True)),
+                             bool(self.settings.get("include_videos", True)))
+        owner: dict[str, int] = {}                  # 文件 → 快照里的哪一组
+        for i, g in enumerate(fresh):
+            for f in g.files:
+                owner[key(f.path)] = i
+        old = self.groups
+        keep: set[int] = set()                      # 没变的照片
+        used: set[int] = set()                      # 已经对上号的快照组
+        for g in old:
+            if not g.files:
+                continue
+            ks = [key(f.path) for f in g.files]
+            if any(k in unsettled for k in ks):     # 有文件还在变：先不动它
+                keep.add(g.gid)
+                used.update(owner[k] for k in ks if k in owner)
+                continue
+            idx: set[int] = set()
+            same = True
+            for f, k in zip(g.files, ks):
+                e = files.get(k)
+                if e is None or e.path != f.path or e.size != f.size or e.mtime_ns != f.mtime_ns or k not in owner:
+                    same = False
+                    break
+                idx.add(owner[k])
+            # 快照里对应的组恰好就是这些文件（跨文件夹配对的 RAW + JPG 在快照里是两组）
+            if same and not idx & used and sum(len(fresh[i].files) for i in idx) == len(g.files):
+                keep.add(g.gid)
+                used |= idx
+        todo = [g for i, g in enumerate(fresh) if i not in used]
+        gone = [g for g in old if g.files and g.gid not in keep]
+        if not todo and not gone:
+            rep.seconds = time.time() - t0
+            return rep
+
+        # 编号：主图（其次任一文件）原来属于哪张照片就沿用它的编号，其余排到后面
+        was: dict[str, int] = {key(f.path): g.gid for g in gone for f in g.files}
+        groups = list(old)
+        claimed: set[int] = set()
+        for g in todo:
+            gid = next((c for f in sorted(g.files, key=lambda f: f.path != g.primary)
+                        if (c := was.get(key(f.path))) is not None and c not in claimed), None)
+            if gid is None:
+                gid = len(groups)
+                groups.append(g)
+            groups[gid] = g
+            g.gid = gid
+            claimed.add(gid)
+        for g in gone:
+            if g.gid not in claimed:
+                groups[g.gid] = PhotoGroup(gid=g.gid, files=[], primary=g.primary)
+                rep.removed += 1
+
+        # 新的 / 变了的照片：读元数据 + 画面分析（文件没变过的都有缓存）
+        rep.files = sum(len(g.files) for g in todo)
+        pg.groups = len(todo)
+        if todo:
+            self._read_files(todo, pg, emit, cancel, rep)
         if cancel.is_set():
-            return groups
-
-        # 4) 跨文件夹配对 RAW + JPG（需要拍摄时间，所以放在读完元数据之后）
-        self.paired_across = 0
-        if self.settings.get("pair_across_folders", True):
-            self.paired_across = pair_across_folders(groups)
-            if self.paired_across:
-                groups = renumber(groups)
-
-        # 5) GPS 补全的参考数据（轨迹文件 + 参考照片文件夹，元数据有缓存）
+            rep.cancelled = True
+            return rep
+        kept_files = {gid: groups[gid].files for gid in keep}
+        if self.settings.get("pair_across_folders", True) and pair_across_folders(groups):
+            self.paired_across = sum(1 for g in groups if g.files and g.cross_folder)
+        rep.added = sum(1 for g in todo if g.files and g.gid >= len(old))
+        rep.updated = (sum(1 for g in todo if g.files and g.gid < len(old))
+                       + sum(1 for gid, fs in kept_files.items() if groups[gid].files is not fs))   # 配对进了新 RAW
+        if not self.ref_sources and (self.settings.get("gps_track_files") or self.settings.get("gps_ref_dirs")):
+            try:
+                self.load_references(cancel=cancel)
+            except Exception as e:
+                log.warning("读取参考数据失败：%s", e)
         pg.stage = "analyze"
-        pg.message = _t("正在读取参考轨迹 / 参考照片…")
-        emit()
-        try:
-            self.load_references(cancel=cancel)
-        except Exception as e:     # 参考数据出问题不影响扫描本身
-            log.warning("读取参考数据失败：%s", e)
-
-        # 6) 元数据分析器（日期 / 地区 / 相机 / 画幅 …）
         pg.message = _t("正在整理日期与地点…")
         emit()
-        self.run_meta_analyzers(groups)
-
-        # 7) AI：CLIP 向量索引 + 场景识别（模型已下载且开启时）
-        if pixels:
-            self.run_ai(groups, pg, emit, cancel)
-            # 8) 照片里的文字（模型已下载且开启时）
-            self.run_ocr(groups, pg, emit, cancel)
-        return groups
+        live = [g for g in groups if g.files]
+        self.run_meta_analyzers(live)
+        self.ocr.load_cached(todo)               # 没识别过的交给「相册」页在后台识别
+        self.groups = groups
+        self.roots = list(roots)
+        self.selected &= {g.gid for g in live}
+        rep.groups = len(live)
+        pg.stage = "ready"
+        pg.message = _t("完成")
+        emit()
+        # AI 向量只算新照片；先把照片显示出来，再补场景（结果通过 ai_new 告诉界面）
+        rep.ai_new = int(self.run_ai(live, pg, emit, cancel).get("new") or 0)
+        rep.seconds = time.time() - t0
+        pg.stage = "done"
+        emit()
+        return rep
 
     def run_ocr(self, groups: list[PhotoGroup] | None = None, pg: Progress | None = None,
                 emit: Callable[[], None] | None = None, cancel: threading.Event | None = None,
@@ -389,7 +528,7 @@ class Library:
                 res = process_task(task)
             except Exception as e:
                 res = {"sig": task["sig"], "gid": task["gid"], "error": str(e), "feats": {}}
-            g = groups[task["gid"]]
+            g = groups[task["idx"]]
             if res.get("error"):
                 rep.errors.append(f"{g.primary}: {res['error']}")
             for aid, item in (res.get("feats") or {}).items():
