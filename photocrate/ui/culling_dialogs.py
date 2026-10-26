@@ -118,7 +118,7 @@ class CleanupDialog(_Base):
                 rows.append((os.path.basename(op.src), ROLE_NAMES.get(op.role, op.role), human_size(op.size),
                              os.path.dirname(op.src)))
         self.model.set_rows(rows)
-        self.panel.set_meta(f"{len(rows)} FILES · {human_size(plan.total_bytes)}")
+        self.panel.set_meta(_t("{0} 个文件 · {1}", len(rows), human_size(plan.total_bytes)))
         self.bo.setEnabled(bool(plan.items))
 
     def _confirm(self) -> None:
@@ -251,7 +251,7 @@ class RenameDialog(_Base):
                 rows.append((os.path.basename(op.src), os.path.basename(op.dst), os.path.dirname(op.src)))
                 colors.append(p.warn if it.renamed else None)
         self.model.set_rows(rows, colors)
-        self.panel.set_meta(f"{len(rows)} FILES")
+        self.panel.set_meta(_t("{0} 个文件", len(rows)))
         self.bo.setEnabled(bool(plan.items))
 
     def _confirm(self) -> None:

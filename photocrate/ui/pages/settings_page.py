@@ -65,8 +65,8 @@ class SettingsPage(Page):
         # ---- 外观 ----
         ap = Panel(_t("外观"), "Appearance")
         r = QHBoxLayout()
-        self.t_light = QRadioButton(_t("终末地 · 浅色工业"))
-        self.t_dark = QRadioButton(_t("方舟 · 深色终端"))
+        self.t_light = QRadioButton(_t("浅色"))
+        self.t_dark = QRadioButton(_t("深色"))
         g = QButtonGroup(self)
         g.addButton(self.t_light)
         g.addButton(self.t_dark)
@@ -343,13 +343,13 @@ class SettingsPage(Page):
         lib = self.ctx.library
         p = theme.current()
         if lib.exiftool_path:
-            self.et_status.setText(f"● ONLINE   v{lib.exiftool_ver}")
+            self.et_status.setText(_t("● 已就绪   v{0}", lib.exiftool_ver))
             self.et_status.setToolTip(lib.exiftool_path)
             if not self.et_path.text().strip():
                 self.et_path.setPlaceholderText(_t('自动找到：{0}', lib.exiftool_path))
             self.et_status.setStyleSheet(f"color: {p.ok};")
         else:
-            self.et_status.setText(_t("● OFFLINE  未找到 ExifTool，使用内置读取"))
+            self.et_status.setText(_t("● 未找到 ExifTool，使用内置读取"))
             self.et_status.setStyleSheet(f"color: {p.danger};")
 
     def _pick_exiftool(self):

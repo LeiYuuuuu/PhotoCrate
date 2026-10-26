@@ -147,7 +147,7 @@ class PeoplePage(Page):
             self.list.addItem(it)
         self.list.blockSignals(False)
         s = ai.stats(lib.groups)
-        self.list_panel.set_meta(f"{len(ai.people)} PEOPLE · {s['named']} NAMED · {s['faces']} FACES")
+        self.list_panel.set_meta(_t("{0} 人 · 已命名 {1} · {2} 张人脸", len(ai.people), s['named'], s['faces']))
         if not models.ready("face"):
             self.hint.setText(_t("人脸模型还没有下载：到「AI 搜图」页下载“人脸检测 + 识别”，然后分析照片。"))
         elif s["faces_done"] < s["photos"]:
@@ -192,7 +192,7 @@ class PeoplePage(Page):
         groups.sort(key=lambda g: (g.date is None, g.date or 0))
         self.grid.settings_snapshot = self.ctx.settings.snapshot()
         self.grid.set_groups(groups)
-        self.photo_panel.set_meta(f"{len(groups)} ITEMS · {title}")
+        self.photo_panel.set_meta(_t("{0} 项 · {1}", len(groups), title))
         self.name.setText(title if named else "")
         ok = cid not in (None, LONERS, NONFACE)
         self.b_name.setEnabled(ok)

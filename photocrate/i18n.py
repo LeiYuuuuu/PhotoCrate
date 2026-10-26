@@ -37,6 +37,8 @@ def set_language(lang: str | None) -> str:
         table.update(EN_SAFETY)          # 安全检查新增的提示
         from .locale_en_extras import EN_EXTRAS
         table.update(EN_EXTRAS)          # 闭眼 / 表情、隐藏、批量编辑、隐私体检、手机互传
+        from .locale_en_ui import EN_UI
+        table.update(EN_UI)              # 界面简化：顶栏、导航、修图右侧面板
         table.update(EN)
         _EN = table
     return LANG

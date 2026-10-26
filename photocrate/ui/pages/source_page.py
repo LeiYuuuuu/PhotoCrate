@@ -91,13 +91,13 @@ class SourcePage(Page):
         top.addWidget(src)
 
         # ---- 扫描状态 ----
-        st = Panel(_t("扫描状态"), "Index status", "IDLE")
+        st = Panel(_t("扫描状态"), "", _t("空闲"))
         self.status_panel = st
         self.bar = SegProgress()
         st.body.addWidget(self.bar)
         self.stage = QLabel(_t("等待扫描"))
         self.stage.setFont(font("cn", 10, 600))
-        self.counts = QLabel("META  —      PIXEL  —")
+        self.counts = QLabel(_t("元数据 —      像素 —"))
         self.counts.setFont(font("mono", 8.5))
         self.counts.setProperty("role", "dim")
         self.current = QLabel("")
@@ -159,7 +159,7 @@ class SourcePage(Page):
         tb.addWidget(self.search, 2)
         tb.addWidget(self.filter)
         tb.addWidget(self.sort)
-        tb.addWidget(micro_label("size"))
+        tb.addWidget(micro_label(_t("尺寸")))
         tb.addWidget(self.size)
         tb.addStretch(1)
         tb.addWidget(b_all)
@@ -312,7 +312,7 @@ class SourcePage(Page):
         self.b_cancel.setEnabled(True)
         self.bar.busy = True
         self.bar.set_value(0)
-        self.status_panel.set_meta("SCANNING")
+        self.status_panel.set_meta(_t("扫描中"))
         self._t0 = time.time()
         lib = self.ctx.library
         rec = self.recursive.isChecked()
@@ -335,7 +335,7 @@ class SourcePage(Page):
         if pg.stage == "ai" and pg.ai_total:
             stage += f" {pg.ai_done}/{pg.ai_total}"
         self.stage.setText(_t('{0} · 已发现 {1} 组照片', stage, pg.groups))
-        self.counts.setText(f"META  {pg.meta_done}/{pg.meta_total}      PIXEL  {pg.pix_done}/{pg.pix_total}")
+        self.counts.setText(_t("元数据 {0}/{1}      像素 {2}/{3}", pg.meta_done, pg.meta_total, pg.pix_done, pg.pix_total))
         self.current.setText(pg.current[-90:] if pg.current else "")
         self.bar.set_value(pg.fraction)
 
@@ -351,10 +351,10 @@ class SourcePage(Page):
         self._finish_ui()
         if rep.cancelled:
             self.stage.setText(_t("已取消"))
-            self.status_panel.set_meta("CANCELLED")
+            self.status_panel.set_meta(_t("已取消"))
             return
         self.bar.set_value(1)
-        self.status_panel.set_meta(f"DONE · {rep.seconds:.1f}s")
+        self.status_panel.set_meta(_t("完成 · {0:.1f} 秒", rep.seconds))
         paired = _t('（{0} 组 RAW+JPG 跨文件夹配对）', rep.paired_across) if rep.paired_across else ""
         self.stage.setText(_t('扫描完成：{0} 组照片 / {1} 个文件{2}', rep.groups, rep.files, paired))
         self.counts.setText(_t('缓存命中 {0}   新分析 {1}', rep.meta_cached + rep.pix_cached, rep.meta_read + rep.pix_computed)

@@ -304,4 +304,29 @@ def paint_icon(qp: QPainter, rect: QRectF, kind: str, col: QColor) -> None:
         qp.setPen(_pen(col, 1.8))
         qp.drawPolyline(_poly([(6, 4), (6, 16), (18, 16)]))
         qp.drawPolyline(_poly([(14, 12), (18, 16), (14, 20)]))
+    # ---- 图层面板底部的按钮 ----
+    elif kind == "new_layer":                              # 新建图层：方框里一个加号
+        qp.drawRoundedRect(QRectF(4, 4, 16, 16), 2, 2)
+        qp.drawLine(QPointF(12, 8), QPointF(12, 16))
+        qp.drawLine(QPointF(8, 12), QPointF(16, 12))
+    elif kind == "mask":                                   # 蒙版：方框里一个实心圆
+        qp.drawRoundedRect(QRectF(3, 5, 18, 14), 2, 2)
+        qp.setBrush(fill)
+        qp.drawEllipse(QPointF(12, 12), 3.6, 3.6)
+    elif kind == "duplicate":                              # 复制：两个叠着的方框
+        qp.drawRoundedRect(QRectF(8, 8, 12, 12), 2, 2)
+        qp.drawPolyline(_poly([(4, 15), (4, 4), (15, 4)]))
+    elif kind == "merge":                                  # 向下合并：箭头压到一条线上
+        qp.drawLine(QPointF(12, 4), QPointF(12, 15))
+        qp.drawPolyline(_poly([(8, 11), (12, 15), (16, 11)]))
+        qp.drawLine(QPointF(5, 20), QPointF(19, 20))
+    elif kind == "trash":
+        qp.drawLine(QPointF(5, 7), QPointF(19, 7))
+        qp.drawPolyline(_poly([(10, 7), (10, 4), (14, 4), (14, 7)]))
+        qp.drawPolyline(_poly([(7, 7), (8, 20), (16, 20), (17, 7)]))
+        qp.drawLine(QPointF(12, 10), QPointF(12, 17))
+    elif kind in ("arrow_up", "arrow_down"):
+        up = kind == "arrow_up"
+        qp.drawLine(QPointF(12, 5), QPointF(12, 19))
+        qp.drawPolyline(_poly([(7, 10), (12, 5), (17, 10)] if up else [(7, 14), (12, 19), (17, 14)]))
     qp.restore()

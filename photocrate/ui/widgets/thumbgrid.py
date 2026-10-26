@@ -309,7 +309,7 @@ class ThumbDelegate(QStyledItemDelegate):
         qp.setFont(font("mono", 7.5))
         qp.setPen(QColor(p.ink3))
         d = g.date
-        ds = d.strftime("%Y-%m-%d %H:%M") if d else "DATE UNKNOWN"
+        ds = d.strftime("%Y-%m-%d %H:%M") if d else _t("日期未知")
         qp.drawText(QRect(r.left() + 7, ty + 16, r.width() - 14, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, ds)
         # 边框
         if selected:

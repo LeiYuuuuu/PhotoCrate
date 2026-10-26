@@ -1,21 +1,21 @@
-"""主窗口：顶部机体条（含「相册 / 修图」模式切换）+ 左侧导航 + 页面区 + 底部状态条。
+"""主窗口：顶栏（含「相册 / 修图」模式切换）+ 左侧导航 + 页面区 + 底部状态条。
 
 两个主界面：
-- 相册（存储模式）：00 照片（类似 iOS 相册的图库 / 相簿 / 搜索）+ 01–11 整理工具页；
-- 修图（专业模式）：ui/studio.py，修图窗口作为标签页嵌在这里。
+- 相册（存储模式）：照片（类似 iOS 相册的图库 / 相簿 / 搜索）+ 整理工具页；
+- 修图（专业模式）：ui/studio.py，修图窗口作为标签页嵌在这里。切到修图时顶栏变矮、修图的文档标签
+  并进顶栏，底部状态条隐藏（修图窗口有自己的状态栏），画布比以前多出约 90 像素高。
 """
 from __future__ import annotations
 
 import os
 from datetime import datetime
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import (QColor, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QPainter, QPen, QPolygonF,
-                           QShortcut)
-from PySide6.QtWidgets import (QApplication, QHBoxLayout, QMainWindow, QSizePolicy, QStackedWidget, QVBoxLayout,
-                               QWidget)
+from PySide6.QtCore import QEvent, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QPainter, QPen, QShortcut
+from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow, QSizePolicy, QStackedWidget,
+                               QVBoxLayout, QWidget)
 
-from .. import APP_NAME, APP_NAME_EN, APP_TAGLINE, __version__
+from .. import APP_NAME, APP_NAME_EN, __version__
 from ..config import find_resource, screenshots_dir
 from ..plugins import PAGES
 from . import theme, motion
@@ -36,14 +36,14 @@ from .pages.travel_page import TravelPage
 from .photos import PhotosPage
 from .studio import StudioMode
 from .theme import font
-from .widgets.deco import Barcode, LogoMark
+from .widgets.deco import LogoMark
 from ..i18n import is_en, t as _t
 
 
 class ModeSwitch(QWidget):
-    """顶栏中间的两个主界面切换：相册（存储）/ 修图（专业）。"""
+    """顶栏里的两个主界面切换：相册（存储）/ 修图（专业）。"""
     changed = Signal(int)
-    MODES = [("Photos" if is_en() else "相册", "PHOTOS"), ("Studio" if is_en() else "修图", "STUDIO")]  # “相册”在别处是 Album
+    MODES = ["Photos" if is_en() else "相册", "Studio" if is_en() else "修图"]  # “相册”在别处是 Album
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -51,7 +51,7 @@ class ModeSwitch(QWidget):
         self.badge = 0                      # 修图里打开着几张
         self._hover = -1
         self.marker = motion.Motion(self, 0, 200)
-        self.setFixedSize(260, 40)
+        self.setFixedSize(180, 30)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAccessibleName(_t("主界面切换"))
@@ -87,35 +87,21 @@ class ModeSwitch(QWidget):
         qp.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
         half = w / 2
-        qp.setPen(QPen(QColor(p.slab2), 1))
-        qp.setBrush(QColor(p.slab))
-        qp.drawRect(QRectF(0.5, 0.5, w - 1, h - 1))
-        x = self.marker.value * half
-        poly = QPolygonF([QPointF(x + 3, 3), QPointF(x + half - 13, 3), QPointF(x + half - 3, 13),
-                          QPointF(x + half - 3, h - 3), QPointF(x + 3, h - 3)])
         qp.setPen(Qt.PenStyle.NoPen)
+        qp.setBrush(QColor(p.slab2))
+        qp.drawRoundedRect(QRectF(0, 0, w, h), 6, 6)
+        x = self.marker.value * half
         qp.setBrush(QColor(p.accent))
-        qp.drawPolygon(poly)
-        for i, (name, en) in enumerate(self.MODES):
+        qp.drawRoundedRect(QRectF(x + 3, 3, half - 6, h - 6), 4, 4)
+        for i, name in enumerate(self.MODES):
             r = QRectF(i * half, 0, half, h)
             active = i == self.current
-            if not active and i == self._hover:
-                qp.fillRect(r.adjusted(3, 3, -3, -3), QColor(p.slab2))
-            ink = QColor(p.accent_ink) if active else QColor(p.slab_ink)
-            ink2 = QColor(p.accent_ink) if active else QColor(p.slab_ink2)
-            f1 = font("cn", 11.5, 800)
-            f2 = font("mono", 6.5, 400, 1.2)
-            tw = QFontMetrics(f1).horizontalAdvance(name)
-            ew = QFontMetrics(f2).horizontalAdvance(en)
-            x0 = r.left() + (half - tw - 8 - ew) / 2
-            qp.setFont(f1)
+            ink = QColor(p.accent_ink) if active else QColor(p.slab_ink if i == self._hover else p.slab_ink2)
+            qp.setFont(font("cn", 10.5, 700))
             qp.setPen(ink)
-            qp.drawText(QRectF(x0, 0, tw + 2, h), Qt.AlignmentFlag.AlignVCenter, name)
-            qp.setFont(f2)
-            qp.setPen(ink2)
-            qp.drawText(QRectF(x0 + tw + 8, 1, ew + 2, h), Qt.AlignmentFlag.AlignVCenter, en)
+            qp.drawText(r, Qt.AlignmentFlag.AlignCenter, name)
             if i == 1 and self.badge:
-                b = QRectF(r.right() - 22, 5, 16, 14)
+                b = QRectF(r.right() - 20, 3, 16, 14)
                 qp.setPen(Qt.PenStyle.NoPen)
                 qp.setBrush(QColor(p.accent2))
                 qp.drawRoundedRect(b, 7, 7)
@@ -126,69 +112,57 @@ class ModeSwitch(QWidget):
 
 
 class TopBar(QWidget):
+    """标志 + 软件名 + 模式切换 + 插槽（修图模式下放文档标签）+ 右侧读数（照片数 / 已选 / ExifTool 缺失提示）。"""
+    HEIGHT, COMPACT = 48, 38
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(68)
+        self.setFixedHeight(self.HEIGHT)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(18, 0, 18, 0)
-        lay.setSpacing(12)
-        lay.addWidget(LogoMark(34))
-        self.readouts: list[tuple[str, str, str]] = []
-        lay.addSpacing(390)
+        lay.setContentsMargins(14, 0, 14, 0)
+        lay.setSpacing(10)
+        self.logo = LogoMark(24)
+        lay.addWidget(self.logo)
+        name = QLabel("PhotoCrate" if is_en() else APP_NAME)
+        name.setStyleSheet(f"color: {theme.current().slab_ink}; font-size: 12.5pt; font-weight: 800;")
+        name.setToolTip(f"{APP_NAME} {APP_NAME_EN.title()} {__version__}")
+        name.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        lay.addWidget(name)
+        lay.addSpacing(14)
         self.mode = ModeSwitch()
         lay.addWidget(self.mode)
-        lay.addStretch(1)
-        self.bc = Barcode(seed=11, w=84, h=20)
-        lay.addWidget(self.bc)
+        lay.addSpacing(6)
+        self.slot = QHBoxLayout()               # 修图模式：文档标签（add_to_slot 放进来，占满中间）
+        self.slot.setContentsMargins(0, 0, 0, 0)
+        self.slot.addStretch(0)                 # 插槽里没有东西时把读数推到最右边
+        lay.addLayout(self.slot, 1)
+        self.readouts: list[tuple[str, str, str]] = []
+        self.info = QLabel("")
+        self.info.setStyleSheet("font-size: 9pt;")
+        self.info.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        lay.addWidget(self.info)
+
+    def add_to_slot(self, w: QWidget) -> None:
+        self.slot.insertWidget(0, w, 1)
+
+    def set_compact(self, on: bool) -> None:
+        self.setFixedHeight(self.COMPACT if on else self.HEIGHT)
+        self.info.setVisible(not on)
 
     def set_readouts(self, items: list[tuple[str, str, str]]) -> None:
         """[(标签, 值, 颜色键)]"""
+        p = theme.current()
         self.readouts = items
-        self.update()
+        self.info.setText("&nbsp;&nbsp;&nbsp;&nbsp;".join(
+            f"<span style='color:{p.slab_ink2}'>{label}</span>&nbsp;"
+            f"<span style='color:{getattr(p, colkey, p.slab_ink)}; font-weight:600'>{value}</span>"
+            for label, value, colkey in items))
 
     def paintEvent(self, e):
         p = theme.current()
         qp = QPainter(self)
-        qp.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height()
         qp.fillRect(self.rect(), QColor(p.slab))
-        x = 64
-        f1 = font("cn", 17, 800)
-        qp.setFont(f1)
-        qp.setPen(QColor(p.slab_ink))
-        tw = QFontMetrics(f1).horizontalAdvance(APP_NAME)
-        qp.drawText(QRectF(x, 0, tw + 4, h), Qt.AlignmentFlag.AlignVCenter, APP_NAME)
-        x += tw + 12
-        qp.fillRect(QRectF(x, 16, 1, h - 32), QColor(p.slab_ink2))
-        x += 12
-        f2 = font("display", 14, 700, 2.5)
-        qp.setFont(f2)
-        qp.setPen(QColor(p.accent))
-        qp.drawText(QRectF(x, 9, 300, 24), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, APP_NAME_EN)
-        qp.setFont(font("mono", 7, 400, 1.6))
-        qp.setPen(QColor(p.slab_ink2))
-        qp.drawText(QRectF(x, 32, 400, 16), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                    f"{APP_TAGLINE} // V{__version__}")
-        # 右侧读数
-        rx = w - 120
-        fl = font("mono", 7, 400, 1.2)
-        fv = font("display", 10.5, 600)
-        for label, value, colkey in reversed(self.readouts):
-            vw = QFontMetrics(fv).horizontalAdvance(value)
-            lw = QFontMetrics(fl).horizontalAdvance(label)
-            bw = max(vw, lw) + 22
-            rx -= bw
-            qp.setPen(QPen(QColor(p.slab2), 1))
-            qp.drawLine(QPointF(rx, 14), QPointF(rx, h - 14))
-            qp.setFont(fl)
-            qp.setPen(QColor(p.slab_ink2))
-            qp.drawText(QRectF(rx + 11, 12, bw, 14), Qt.AlignmentFlag.AlignLeft, label)
-            qp.setFont(fv)
-            qp.setPen(QColor(getattr(p, colkey, p.slab_ink)))
-            qp.drawText(QRectF(rx + 11, 27, bw, 20), Qt.AlignmentFlag.AlignLeft, value)
-        # 底部强调线
-        qp.fillRect(QRectF(0, h - 2, w, 2), QColor(p.slab2))
-        qp.fillRect(QRectF(0, h - 2, 180, 2), QColor(p.accent))
+        qp.fillRect(QRectF(0, self.height() - 1, self.width(), 1), QColor(p.slab2))
         qp.end()
 
 
@@ -197,15 +171,15 @@ class NavRail(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(196)
-        self.items: list[tuple[str, str, str]] = []   # (编号, 中文, 英文)
+        self.setFixedWidth(184)
+        self.items: list[tuple[str, str, str]] = []   # (编号, 中文, 英文)；只显示中文（英文界面下是译文）
         self.current = 0
         self.marker = motion.Motion(self, 0, 220)
         self._hover = -1
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleName(_t("页面导航"))
-        self.row_h = 58
-        self.top = 18
+        self.row_h = 42
+        self.top = 12
         self.setMouseTracking(True)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
@@ -219,9 +193,9 @@ class NavRail(QWidget):
         self.update()
 
     def resizeEvent(self, e):
-        # 页面多、窗口矮时压缩每一行，给底部装饰留出位置
+        # 页面多、窗口矮时压缩每一行
         n = max(1, len(self.items))
-        self.row_h = int(max(42, min(58, (self.height() - self.top - 64) / n)))
+        self.row_h = int(max(32, min(42, (self.height() - self.top - 12) / n)))
         super().resizeEvent(e)
 
     def _at(self, y: float) -> int:
@@ -260,56 +234,34 @@ class NavRail(QWidget):
         p = theme.current()
         qp = QPainter(self)
         qp.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height()
+        w = self.width()
         qp.fillRect(self.rect(), QColor(p.slab))
-        qp.fillRect(QRectF(0, self.top + self.marker.value * self.row_h + 8, 3, self.row_h - 16), QColor(p.accent))
         for i, (idx, title, en) in enumerate(self.items):
             y = self.top + i * self.row_h
-            r = QRectF(10, y + 3, w - 20, self.row_h - 6)
+            r = QRectF(8, y + 2, w - 16, self.row_h - 4)
             active = i == self.current
-            if active:
-                poly = QPolygonF([QPointF(r.left(), r.top()), QPointF(r.right() - 10, r.top()),
-                                  QPointF(r.right(), r.top() + 10), QPointF(r.right(), r.bottom()),
-                                  QPointF(r.left(), r.bottom())])
-                qp.setPen(Qt.PenStyle.NoPen)
+            qp.setPen(Qt.PenStyle.NoPen)
+            if active or i == self._hover:
                 qp.setBrush(QColor(p.slab2))
-                qp.drawPolygon(poly)
-                ink, ink2 = QColor(p.slab_ink), QColor(p.accent)
-            else:
-                if i == self._hover:
-                    qp.fillRect(r, QColor(p.slab2))
-                ink, ink2 = QColor(p.slab_ink), QColor(p.slab_ink2)
-            qp.setFont(font("display", 16, 700))
-            qp.setPen(ink2 if not active else ink)
-            qp.drawText(QRectF(r.left() + 12, r.top(), 34, r.height()), Qt.AlignmentFlag.AlignVCenter, idx)
-            qp.setFont(font("cn", 11, 700))
-            qp.setPen(ink)
-            ty = r.top() + max(1.0, (r.height() - 37) / 2)       # 标题 22 + 英文 15，整体垂直居中
-            qp.drawText(QRectF(r.left() + 52, ty, r.width() - 56, 22), Qt.AlignmentFlag.AlignVCenter, title)
-            qp.setFont(font("mono", 7, 400, 0.5))
-            qp.setPen(ink2)
-            qp.drawText(QRectF(r.left() + 52, ty + 20, r.width() - 56, 15), Qt.AlignmentFlag.AlignVCenter, en.upper())
-            if active:
-                qp.fillRect(QRectF(r.right() - 5, r.top() + 12, 2, r.height() - 24), QColor(p.accent))
+                qp.drawRoundedRect(r, 5, 5)
+            qp.setFont(font("cn", 10.5, 700 if active else 500))
+            qp.setPen(QColor(p.slab_ink if active or i == self._hover else p.slab_ink2))
+            qp.drawText(r.adjusted(16, 0, -6, 0), Qt.AlignmentFlag.AlignVCenter, title)
             if self.hasFocus() and active:
                 qp.setPen(QPen(QColor(p.accent2), 1))
                 qp.setBrush(Qt.BrushStyle.NoBrush)
-                qp.drawRect(r.adjusted(1, 1, -1, -1))
-        # 只在导航下方有空间时绘制页脚，不与长菜单重叠。
-        if self.top + len(self.items) * self.row_h < h - 48:
-            qp.setFont(font("mono", 7, 400, 0.8))
-            qp.setPen(QColor(p.slab_ink2))
-            qp.drawText(QRectF(22, h - 40, w - 40, 16), Qt.AlignmentFlag.AlignLeft, "LOCAL / ARCHIVE")
-            qp.fillRect(QRectF(22, h - 16, 26, 2), QColor(p.accent))
-            qp.fillRect(QRectF(52, h - 16, w - 74, 2), QColor(p.slab2))
+                qp.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), 5, 5)
+        # 当前页左侧的强调色短条（跟着切换动画滑动）
+        y = self.top + self.marker.value * self.row_h
+        qp.fillRect(QRectF(8, y + self.row_h / 2 - 8, 3, 16), QColor(p.accent))
         qp.end()
 
 
 class StatusStrip(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(26)
-        self.msg = "READY"
+        self.setFixedHeight(24)
+        self.msg = ""
         self.right = ""
 
     def set_message(self, msg: str) -> None:
@@ -321,16 +273,12 @@ class StatusStrip(QWidget):
         qp = QPainter(self)
         w, h = self.width(), self.height()
         qp.fillRect(self.rect(), QColor(p.slab))
-        qp.fillRect(QRectF(0, 0, 196, h), QColor(p.slab2))
-        qp.setFont(font("mono", 7.5, 400, 1.2))
-        qp.setPen(QColor(p.accent))
-        qp.drawText(QRectF(14, 0, 180, h), Qt.AlignmentFlag.AlignVCenter, f"SYS // {datetime.now():%H:%M}")
         qp.setFont(font("cn", 8.5))
         qp.setPen(QColor(p.slab_ink))
-        qp.drawText(QRectF(210, 0, w - 420, h), Qt.AlignmentFlag.AlignVCenter, self.msg)
-        qp.setFont(font("mono", 7.5))
+        qp.drawText(QRectF(14, 0, w - 440, h), Qt.AlignmentFlag.AlignVCenter, self.msg)
         qp.setPen(QColor(p.slab_ink2))
-        qp.drawText(QRectF(w - 400, 0, 386, h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, self.right)
+        qp.drawText(QRectF(w - 420, 0, 406, h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+                    QFontMetrics(qp.font()).elidedText(self.right, Qt.TextElideMode.ElideMiddle, 406))
         qp.end()
 
 
@@ -367,6 +315,9 @@ class MainWindow(QMainWindow):
         self.studio = StudioMode(ctx)
         ctx.studio = self.studio                # open_editor 看到它就把修图窗口嵌进来
         self.modes.addWidget(self.studio)
+        self.studio_tabs = self.studio.take_tab_bar()       # 修图的文档标签放进顶栏，省一行
+        self.top.add_to_slot(self.studio_tabs)
+        self.studio_tabs.hide()
         root.addWidget(self.modes, 1)
         self.status = StatusStrip()
         root.addWidget(self.status)
@@ -407,9 +358,6 @@ class MainWindow(QMainWindow):
         ctx.theme_changed.connect(self._apply_theme)
         ctx.navigate.connect(lambda pid: pid in self.page_ids and (self.set_mode(0), self.go(self.page_ids.index(pid))))
         self._update_readouts()
-        self._clock = QTimer(self)
-        self._clock.timeout.connect(self.status.update)
-        self._clock.start(30_000)
         QTimer.singleShot(400, self._check_recovery)
         QTimer.singleShot(600, ctx.autosync.restart)     # 开着「自动同步」时开始监视（顺带按文件夹现状载入照片库）
         self._last_shot = 0.0
@@ -520,6 +468,9 @@ class MainWindow(QMainWindow):
         snapshot = self.modes.grab() if motion.enabled() and self.isVisible() else None
         self.modes.setCurrentIndex(i)
         self.top.mode.set_current(i)
+        self.top.set_compact(i == 1)
+        self.studio_tabs.setVisible(i == 1)
+        self.status.setVisible(i == 0)
         if i == 0:
             w = self.stack.currentWidget()
             if hasattr(w, "on_show"):
@@ -546,13 +497,11 @@ class MainWindow(QMainWindow):
     def _update_readouts(self):
         lib = self.ctx.library
         n = sum(1 for g in lib.groups if g.files)
-        et = f"V{lib.exiftool_ver}" if lib.exiftool_path else "OFFLINE"
-        self.top.set_readouts([
-            ("EXIFTOOL", et, "ok" if lib.exiftool_path else "danger"),
-            ("LIBRARY", f"{n:,}", "slab_ink"),
-            ("SELECTED", f"{len(lib.selected):,}", "accent"),
-        ])
-        self.status.right = f"DATA {os.path.dirname(str(self.ctx.journal.path))}"
+        items = [] if lib.exiftool_path else [("ExifTool", _t("未找到"), "danger")]
+        items += [(_t("照片"), f"{n:,}", "slab_ink"), (_t("已选"), f"{len(lib.selected):,}", "accent")]
+        self.top.set_readouts(items)
+        self.top.info.setToolTip(f"ExifTool {lib.exiftool_ver}" if lib.exiftool_path else "")
+        self.status.right = _t("数据：{0}", os.path.dirname(str(self.ctx.journal.path)))
         self.status.update()
 
     restart_requested = False

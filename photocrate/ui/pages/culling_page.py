@@ -226,7 +226,7 @@ class CullingPage(Page):
         self.grid.set_groups(show)
         if keep:
             self.grid.select_gids(keep)
-        self.gpanel.set_meta(f"{len(show)} ITEMS · {dict(VIEWS)[mode]}")
+        self.gpanel.set_meta(_t("{0} 项 · {1}", len(show), dict(VIEWS)[mode]))
         self._update_scope()
 
     def _stats(self, gs=None) -> None:
@@ -255,7 +255,7 @@ class CullingPage(Page):
         self._stats()
         if self.view_mode() in ("unrated", "rated", "pick", "reject"):
             # 不立刻从列表里拿走刚打完分的照片（否则连续打分时位置会乱跳），切换视图或回到本页时再筛选
-            self.gpanel.set_meta(_t('{0} ITEMS · {1} · 标记已变化，切换视图刷新', len(self.shown), dict(VIEWS)[self.view_mode()]))
+            self.gpanel.set_meta(_t('{0} 项 · {1} · 标记已变化，切换视图刷新', len(self.shown), dict(VIEWS)[self.view_mode()]))
 
     def _sel(self, gids: list[int]) -> None:
         self.sel = gids

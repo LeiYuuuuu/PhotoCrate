@@ -216,7 +216,7 @@ class PartitionPage(Page):
         mode_row.addStretch(1)
         cond.body.addLayout(mode_row)
         pr = QHBoxLayout()
-        pr.addWidget(micro_label("preset"))
+        pr.addWidget(micro_label(_t("预设")))
         self.preset = shrinkable(QComboBox())
         self.preset.addItem(_t("— 快速预设 —"), None)
         for ps in BUILTIN_PRESETS:
@@ -566,7 +566,7 @@ class PartitionPage(Page):
         top.setExpanded(True)
         self.tree.setCurrentItem(top)
         n_folders = root.folder_count()
-        self.tree_panel.set_meta(f"{n_folders} DIRS")
+        self.tree_panel.set_meta(_t("{0} 个文件夹", n_folders))
         notes = []
         if root.guess:
             notes.append(_t('{0} 张日期为推测（文件名/修改时间），缩略图上有橙色标记', root.guess))
@@ -619,7 +619,7 @@ class PartitionPage(Page):
                         break
         self.grid.set_groups(gs, labels)
         path = "/".join(node.path) or _t("（根目录）")
-        self.grid_panel.set_meta(f"{len(gs)} ITEMS")
+        self.grid_panel.set_meta(_t("{0} 项", len(gs)))
         self.grid_panel.setToolTip(path)
 
     # ---- 计划与执行 ------------------------------------------------------

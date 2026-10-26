@@ -132,7 +132,7 @@ class OverviewPage(Page):
         self.bars["orientation"][0].set_items((k, v, None) for k, v in st["orientation"])
         self.bars["blur"][0].set_items((k, v, None) for k, v in st["blur"])
         for key, (b, pnl) in self.bars.items():
-            pnl.set_meta(f"{len(b.items)} CLASSES")
+            pnl.set_meta(_t("{0} 类", len(b.items)))
 
     def _drill(self, key: str, label: str):
         lib = self.ctx.library
@@ -164,4 +164,4 @@ class OverviewPage(Page):
         self.grid.delegate.blur_threshold = thr
         self.grid.set_groups(gs)
         self.drill_note.setText(_t('「{0}」共 {1} 张照片', _t(label), len(gs)))
-        self.drill_panel.set_meta(f"{len(gs)} ITEMS")
+        self.drill_panel.set_meta(_t("{0} 项", len(gs)))

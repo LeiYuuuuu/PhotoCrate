@@ -39,7 +39,7 @@ STEPS: list[tuple[str | None, str, str]] = [
      "• <b>Ctrl+0</b> 适合窗口，<b>Ctrl+1</b> 看 100% 细节<br>"
      "• <b>按住 \\ 键</b>（或右下角的按钮）：临时看原图，对比修了多少")),
     ("props", _t("④ 属性：调色在这里"),
-     _t("最常用的调色方法：点图层面板里的 <b>◐ 调整</b>（或菜单「图像 → 调整」）新建一个<b>调整图层</b>，"
+     _t("最常用的调色方法：点图层面板底部的<b>调整图层按钮</b>（半黑半白的圆），或菜单「图像 → 调整」，新建一个<b>调整图层</b>，"
      "然后在这里拖<b>曝光、对比度、高光、阴影、色温、曲线、HSL</b>……<br><br>"
      "顶部的<b>「套用预设」</b>可以一键套用胶片、日系、电影感等效果，再慢慢微调。<br>"
      "调整图层不改像素，随时可以回来改、隐藏或删掉。")),
@@ -47,8 +47,9 @@ STEPS: list[tuple[str | None, str, str]] = [
      _t("每一次修改最好放在单独的图层上，互不影响：<br>"
      "• <b>眼睛</b>：显示 / 隐藏这一层，方便对比<br>"
      "• 上方的<b>混合模式</b>和<b>不透明度</b>：控制这一层的强弱<br>"
-     "• <b>▣ 蒙版</b>：只让一部分生效（在蒙版上用黑色画笔擦掉不要的地方）<br>"
-     "• 双击图层可以改名，用 ↑ ↓ 调整上下顺序")),
+     "• 底部的<b>蒙版按钮</b>（方框里一个圆）：只让一部分生效（在蒙版上用黑色画笔擦掉不要的地方）<br>"
+     "• 双击图层可以改名，用底部的上下箭头调整上下顺序<br>"
+     "• 旁边的<b>历史记录</b>标签：做过的每一步")),
     ("history", _t("⑥ 历史记录"),
      _t("做过的每一步都记在这里。<b>Ctrl+Z</b> 撤销、<b>Ctrl+Shift+Z</b> 重做，"
      "也可以直接点某一行，回到那一步时的样子。")),
@@ -64,7 +65,7 @@ STEPS: list[tuple[str | None, str, str]] = [
      "• <b>文件 → 保存工程</b>（Ctrl+S）：保留所有图层，下次打开这张照片可以接着改。<br><br>"
      "原片在任何情况下都不会被覆盖。")),
     (None, _t("试试这三个小练习"),
-     _t("<b>1. 一键调色</b>：图层面板点 ◐ 调整 → 右侧「套用预设」选「日系」。<br><br>"
+     _t("<b>1. 一键调色</b>：点图层面板底部的调整图层按钮 → 右侧「套用预设」选「日系」。<br><br>"
      "<b>2. 去掉一个小瑕疵</b>：在图层面板选中「背景」→ 按 J → 在瑕疵上涂一下。<br><br>"
      "<b>3. 裁剪</b>：按 C → 选项栏选比例 1 : 1 → 拖动框 → 回车。<br><br>"
      "想再看一遍这个教程：<b>帮助 → 新手教程</b>。祝修图愉快！")),
@@ -135,8 +136,11 @@ class TourOverlay(QWidget):
             mb = w.menuBar()
             r = mb.actionGeometry(menu.menuAction())
             return QRect(mb.mapTo(w, r.topLeft()), r.size())
+        tabs = getattr(w, "side_tabs", None)
+        if key in ("layers", "history") and tabs is not None:
+            w.show_side_tab(key)                       # 图层和历史记录在同一组标签页里：先切过去，照亮整组（连同标签）
         widget = {"toolbar": w.toolbar, "options": w.options, "canvas": w.canvas, "props": w.panel_props,
-                  "layers": w.panel_layers, "history": w.panel_history}.get(key)
+                  "layers": tabs or w.panel_layers, "history": tabs or w.panel_history}.get(key)
         if widget is None or not widget.isVisible():
             return None
         return QRect(widget.mapTo(w, widget.rect().topLeft()), widget.size())
@@ -181,6 +185,8 @@ class TourOverlay(QWidget):
         self.card.move(x, y)
 
     def finish(self) -> None:
+        if hasattr(self.win, "show_side_tab"):
+            self.win.show_side_tab("layers")
         self.win.removeEventFilter(self)
         self.hide()
         self.deleteLater()

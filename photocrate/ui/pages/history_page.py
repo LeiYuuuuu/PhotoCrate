@@ -153,7 +153,7 @@ class HistoryPage(Page):
                         it.setForeground(QColor(col))
                     it.setFont(font("cn", 9, 700))
                 self.table.setItem(r, c, it)
-        self.bpanel.set_meta(f"{len(self._batches)} BATCHES")
+        self.bpanel.set_meta(_t("{0} 批", len(self._batches)))
         if self._batches:
             # 有新批次时选中最新的；否则保持原来选中的批次（按编号，而不是按行号）
             new_top = self._batches[0]["id"] != old_top
@@ -185,7 +185,7 @@ class HistoryPage(Page):
             return
         ops = self.ctx.journal.ops(b["id"])
         self.ops_model.set_rows(ops)
-        self.opanel.set_meta(f"{len(ops)} FILES · BATCH #{b['id']}")
+        self.opanel.set_meta(_t("{0} 个文件 · 批次 #{1}", len(ops), b['id']))
 
     def _export(self):
         b = self._current()

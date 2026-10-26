@@ -1040,7 +1040,7 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
         self.empty_title = t
         v.addWidget(t)
         s = caption(_t("选一个照片文件夹，影匣会载入里面的照片，之后往文件夹里拷进、删掉照片也会自动同步。"
-                       "也可以在「01 资源接入」添加多个文件夹；扫描过的话，点「扫描照片库」重新载入（有缓存，很快）。"), "dim", 10)
+                       "也可以在「资源接入」添加多个文件夹；扫描过的话，点「扫描照片库」重新载入（有缓存，很快）。"), "dim", 10)
         s.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(s)
         r = QHBoxLayout()

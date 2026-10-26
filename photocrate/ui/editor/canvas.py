@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QWidget
 from ...edit.document import to_uint8
 from ...i18n import t as _t
 
-BG = QColor("#1E2023")
+BG = QColor("#232323")                  # 画布周围：中性灰，不影响对颜色的判断
 
 
 def checker_brush(size: int = 8) -> QBrush:
@@ -491,8 +491,8 @@ class CanvasView(QWidget):
         R = self.RULER
         qp.save()
         qp.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        qp.fillRect(QRectF(0, 0, self.width(), R), QColor("#2A2D31"))
-        qp.fillRect(QRectF(0, 0, R, self.height()), QColor("#2A2D31"))
+        qp.fillRect(QRectF(0, 0, self.width(), R), QColor("#2B2B2B"))
+        qp.fillRect(QRectF(0, 0, R, self.height()), QColor("#2B2B2B"))
         f = qp.font()
         f.setPixelSize(9)
         qp.setFont(f)
@@ -529,7 +529,7 @@ class CanvasView(QWidget):
             qp.setPen(QColor("#00C8FF"))
             qp.drawLine(QPointF(self.hover.x(), 0), QPointF(self.hover.x(), R))
             qp.drawLine(QPointF(0, self.hover.y()), QPointF(R, self.hover.y()))
-        qp.fillRect(QRectF(0, 0, R, R), QColor("#1E2023"))
+        qp.fillRect(QRectF(0, 0, R, R), BG)
         qp.restore()
 
     def mousePressEvent(self, e):

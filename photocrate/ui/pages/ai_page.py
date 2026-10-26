@@ -231,7 +231,7 @@ class AiPage(Page):
                  "ERROR")
             return
         if models.ready(key) and key == "expr":          # 只在挑片时用，不用重新分析全部照片
-            info(self, _t("下载完成"), _t("表情识别模型已就绪。到「05 挑片」页，连拍组会自动重新检查表情。"), "READY")
+            info(self, _t("下载完成"), _t("表情识别模型已就绪。到「挑片」页，连拍组会自动重新检查表情。"), "READY")
         elif models.ready(key):
             if ask(self, _t("下载完成"), _t("模型已就绪。现在分析全部照片吗？（会重新扫描一遍，已有结果走缓存）"),
                    ok=_t("开始分析"), cancel=_t("稍后"), en="READY"):
@@ -264,7 +264,7 @@ class AiPage(Page):
             labels[gid] = {"tag": fmt.format(score)}
         self.grid.settings_snapshot = self.ctx.settings.snapshot()
         self.grid.set_groups(groups, labels)
-        self.res_panel.set_meta(f"{len(groups)} ITEMS · {title}")
+        self.res_panel.set_meta(_t("{0} 项 · {1}", len(groups), title))
         self._set_target(target)
 
     def _set_target(self, g) -> None:
@@ -333,4 +333,4 @@ class AiPage(Page):
         self.grid.settings_snapshot = self.ctx.settings.snapshot()
         self.grid.set_groups(gs, {g.gid: {"tag": f"{label} {g.feats['scene']['prob']:.0%}"} for g in gs})
         self._set_target(None)
-        self.res_panel.set_meta(_t('{0} ITEMS · 场景：{1}（按把握度排序）', len(gs), label))
+        self.res_panel.set_meta(_t('{0} 项 · 场景：{1}（按把握度排序）', len(gs), label))

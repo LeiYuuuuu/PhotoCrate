@@ -6,9 +6,10 @@ import math
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QGridLayout,
-                               QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem, QPlainTextEdit,
-                               QPushButton, QScrollArea, QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QFrame,
+                               QGridLayout, QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem,
+                               QPlainTextEdit, QPushButton, QScrollArea, QSlider, QSpinBox, QStackedWidget, QToolButton,
+                               QVBoxLayout, QWidget)
 
 from ...edit import adjust
 from ...edit.blend import BLEND_MODES, BLEND_NAMES
@@ -159,6 +160,62 @@ class Section(QWidget):
         self.btn.setChecked(True)
 
 
+class SideTabs(QFrame):
+    """右侧的标签页面板（图层 / 历史记录）：外框和 Panel 一样，标题条换成几个可以切换的标签。"""
+    HEAD = 36
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        p = theme.current()
+        v = QVBoxLayout(self)
+        v.setContentsMargins(1, 1, 1, 1)
+        v.setSpacing(0)
+        head = QWidget()
+        head.setFixedHeight(self.HEAD)
+        self.head = QHBoxLayout(head)
+        self.head.setContentsMargins(8, 0, 8, 0)
+        self.head.setSpacing(2)
+        self.head.addStretch(1)
+        v.addWidget(head)
+        self.stack = QStackedWidget()
+        v.addWidget(self.stack, 1)
+        self.buttons: list[QToolButton] = []
+        self._css = (f"QToolButton {{ border: none; border-bottom: 2px solid transparent; padding: 6px 8px 5px 8px;"
+                     f" color: {p.ink3}; font-weight: 700; }}"
+                     f"QToolButton:hover {{ color: {p.ink2}; }}"
+                     f"QToolButton:checked {{ color: {p.ink}; border-bottom: 2px solid {p.sel_edge}; }}")
+
+    def add(self, title: str, w: QWidget) -> QWidget:
+        i = len(self.buttons)
+        b = QToolButton()
+        b.setText(title)
+        b.setCheckable(True)
+        b.setAutoExclusive(True)
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.setStyleSheet(self._css)
+        b.clicked.connect(lambda _=False, i=i: self.show_page(i))
+        self.head.insertWidget(i, b)
+        self.buttons.append(b)
+        self.stack.addWidget(w)
+        if i == 0:
+            b.setChecked(True)
+        return w
+
+    def show_page(self, i: int) -> None:
+        self.stack.setCurrentIndex(i)
+        self.buttons[i].setChecked(True)
+
+    def paintEvent(self, e):
+        p = theme.current()
+        qp = QPainter(self)
+        r = self.rect().adjusted(0, 0, -1, -1)
+        qp.fillRect(r, QColor(p.surface))
+        qp.setPen(QPen(QColor(p.line), 1))
+        qp.drawRect(r)
+        qp.drawLine(1, self.HEAD, r.width() - 1, self.HEAD)
+        qp.end()
+
+
 # ---------------------------------------------------------------------------
 # 直方图
 # ---------------------------------------------------------------------------
@@ -196,7 +253,7 @@ class Histogram(QWidget):
     def paintEvent(self, e):
         qp = QPainter(self)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        qp.fillRect(r, QColor("#16181A"))
+        qp.fillRect(r, QColor("#141414"))
         if self.h is not None:
             qp.setRenderHint(QPainter.RenderHint.Antialiasing)
             top = float(np.percentile(self.h[:3, 2:254], 99.5)) or 1.0
@@ -217,7 +274,7 @@ class Histogram(QWidget):
                 qp.setFont(font("cn", 8))
                 qp.setPen(QColor("#E6A23C"))
                 qp.drawText(r.adjusted(6, 3, -6, 0), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight, self.stats)
-        qp.setPen(QPen(QColor("#2C3034"), 1))
+        qp.setPen(QPen(QColor("#2E2E2E"), 1))
         qp.drawRect(r)
         qp.end()
 
@@ -310,7 +367,7 @@ class CurveEditor(QWidget):
         qp = QPainter(self)
         qp.setRenderHint(QPainter.RenderHint.Antialiasing)
         a = self._area()
-        qp.fillRect(QRectF(self.rect()), QColor("#16181A"))
+        qp.fillRect(QRectF(self.rect()), QColor("#141414"))
         if self.hist is not None:
             top = float(np.percentile(self.hist, 99)) or 1.0
             path = QPainterPath(QPointF(a.left(), a.bottom()))
@@ -319,12 +376,12 @@ class CurveEditor(QWidget):
             path.lineTo(a.right(), a.bottom())
             path.closeSubpath()
             qp.fillPath(path, QColor(255, 255, 255, 28))
-        qp.setPen(QPen(QColor("#33373C"), 1))
+        qp.setPen(QPen(QColor("#363636"), 1))
         for k in range(1, 4):
             qp.drawLine(QPointF(a.left() + a.width() * k / 4, a.top()), QPointF(a.left() + a.width() * k / 4, a.bottom()))
             qp.drawLine(QPointF(a.left(), a.top() + a.height() * k / 4), QPointF(a.right(), a.top() + a.height() * k / 4))
         qp.drawRect(a)
-        qp.setPen(QPen(QColor("#4A4F55"), 1, Qt.PenStyle.DashLine))
+        qp.setPen(QPen(QColor("#4C4C4C"), 1, Qt.PenStyle.DashLine))
         qp.drawLine(a.bottomLeft(), a.topRight())
         lut = adjust.curve_lut(self.pts, 256)
         path = QPainterPath(self._to_w(0, lut[0] * 255))
@@ -986,7 +1043,7 @@ def layer_thumb(layer, w: int = 44, h: int = 34, mask: bool = False) -> QPixmap:
         qp.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         qp.drawImage(QRectF((w - tw) / 2, (h - th) / 2, tw, th), img)
     else:
-        qp.fillRect(QRectF(0, 0, w, h), QColor("#2A2E33"))
+        qp.fillRect(QRectF(0, 0, w, h), QColor("#2C2C2C"))
         paint_icon(qp, QRectF(0, 0, w, h).adjusted(8, 4, -8, -4), "folder" if layer.kind == "group" else "adjust",
                    QColor("#E6E6E6"))
     if layer.kind in ("text", "shape", "smart") and not mask:
@@ -1007,7 +1064,6 @@ def layer_thumb(layer, w: int = 44, h: int = 34, mask: bool = False) -> QPixmap:
 class _Eye(QPushButton):
     def __init__(self, on: bool, parent=None):
         super().__init__(parent)
-        self.on_accent = False
         self.setCheckable(True)
         self.setChecked(on)
         self.setFixedSize(24, 24)
@@ -1018,10 +1074,9 @@ class _Eye(QPushButton):
         qp = QPainter(self)
         p = theme.current()
         if self.isChecked():
-            paint_icon(qp, QRectF(self.rect()).adjusted(3, 3, -3, -3), "eye",
-                       QColor(p.accent_ink if self.on_accent else p.ink2))
+            paint_icon(qp, QRectF(self.rect()).adjusted(3, 3, -3, -3), "eye", QColor(p.ink2))
         else:
-            qp.setPen(QPen(QColor(p.accent_ink if self.on_accent else p.line), 1))
+            qp.setPen(QPen(QColor(p.line), 1))
             qp.drawRect(QRectF(self.rect()).adjusted(7.5, 7.5, -7.5, -7.5))
         qp.end()
 
@@ -1127,12 +1182,7 @@ class LayerRow(QWidget):
             self.mthumb.setVisible(layer.mask is not None)
             if layer.mask is not None:
                 self.mthumb.setPixmap(layer_thumb(layer, mask=True))
-        active = doc.active_id == layer.id
-        p = theme.current()
-        self.name.setStyleSheet(f"color: {p.accent_ink};" if active else "")
-        self.sub.setStyleSheet(f"color: {p.accent_ink};" if active else "")
-        self.eye.on_accent = active
-        self.eye.update()
+        active = doc.active_id == layer.id            # 选中行的底色由列表的选中样式画（浅一档的灰 + 左侧色条）
         editing_mask = active and doc.mask_edit and layer.mask is not None
         self.thumb.active = active and not editing_mask
         self.mthumb.active = editing_mask
@@ -1150,26 +1200,29 @@ class LayersPanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 6, 8, 8)
         lay.setSpacing(6)
-        r = QHBoxLayout()
+        r = QHBoxLayout()                                  # 混合模式 + 不透明度（滑块和数值在同一行）
+        r.setSpacing(6)
         self.blend = QComboBox()
         self.blend.addItem(_t("穿透"), "pass_through")          # 只给图层组用
         for k, t in BLEND_MODES:
             self.blend.addItem(t, k)
         self.blend.setToolTip(_t("混合模式"))
+        self.blend.setFixedWidth(112)
         self.blend.currentIndexChanged.connect(self._blend)
-        r.addWidget(self.blend, 1)
-        r.addWidget(QLabel(_t("不透明度")))
+        r.addWidget(self.blend)
+        self.op_slider = QSlider(Qt.Orientation.Horizontal)
+        self.op_slider.setRange(0, 100)
+        self.op_slider.setToolTip(_t("不透明度"))
+        r.addWidget(self.op_slider, 1)
         self.opacity = QSpinBox()
         self.opacity.setRange(0, 100)
         self.opacity.setSuffix("%")
         self.opacity.setFixedWidth(68)
+        self.opacity.setToolTip(_t("不透明度"))
         self.opacity.valueChanged.connect(self._opacity)
+        self.op_slider.valueChanged.connect(self.opacity.setValue)
         r.addWidget(self.opacity)
         lay.addLayout(r)
-        self.op_slider = QSlider(Qt.Orientation.Horizontal)
-        self.op_slider.setRange(0, 100)
-        self.op_slider.valueChanged.connect(self.opacity.setValue)
-        lay.addWidget(self.op_slider)
         r = QHBoxLayout()                                  # 锁定 + 填充 + 图层样式
         r.setSpacing(3)
         lk = QLabel()
@@ -1210,27 +1263,35 @@ class LayersPanel(QWidget):
         self.list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.list.currentRowChanged.connect(self._row_changed)
         lay.addWidget(self.list, 1)
-        g = QGridLayout()
-        g.setSpacing(4)
-        btns = [(_t("＋ 图层"), _t("新建空白图层（Ctrl+Shift+N）"), lambda: win.doc.new_pixel_layer()),
-                (_t("◐ 调整"), _t("新建调整图层（曝光、曲线、HSL…）"), lambda: win.new_adjust()),
-                (_t("▣ 蒙版"), _t("给当前图层加蒙版（有选区时按选区）"), win.add_mask),
-                (_t("▤ 组"), _t("把当前图层放进新的图层组（Ctrl+G）"), lambda: win.doc.group_layers()),
-                (_t("复制"), _t("复制图层（Ctrl+J）"), lambda: win.doc.duplicate_layer(win.doc.active_id)),
-                ("↑", _t("上移一层（Ctrl+]）"), lambda: win.doc.move_layer(win.doc.active_id, 1)),
-                ("↓", _t("下移一层（Ctrl+[）"), lambda: win.doc.move_layer(win.doc.active_id, -1)),
-                (_t("剪贴"), _t("创建 / 释放剪贴蒙版（Ctrl+Alt+G）：只作用于下面那一层"),
-                 lambda: win.doc.toggle_clip()),
-                (_t("合并"), _t("向下合并 / 合并组（Ctrl+E）"), lambda: win.doc.merge_down(win.doc.active_id)),
-                (_t("删除"), _t("删除图层（组连同里面的图层）"), lambda: win.doc.delete_layer(win.doc.active_id))]
-        for i, (t, tip, fn) in enumerate(btns):
-            b = QPushButton(t)
+        g = QHBoxLayout()                                  # 底部一排图标按钮（文字在提示里）
+        g.setSpacing(2)
+        btns = [("arrow_up", _t("上移一层（Ctrl+]）"), lambda: win.doc.move_layer(win.doc.active_id, 1)),
+                ("arrow_down", _t("下移一层（Ctrl+[）"), lambda: win.doc.move_layer(win.doc.active_id, -1)),
+                None,
+                ("clip", _t("创建 / 释放剪贴蒙版（Ctrl+Alt+G）：只作用于下面那一层"), lambda: win.doc.toggle_clip()),
+                ("merge", _t("向下合并 / 合并组（Ctrl+E）"), lambda: win.doc.merge_down(win.doc.active_id)),
+                ("mask", _t("给当前图层加蒙版（有选区时按选区）"), win.add_mask),
+                ("adjust", _t("新建调整图层（曝光、曲线、HSL…）"), lambda: win.new_adjust()),
+                ("folder", _t("把当前图层放进新的图层组（Ctrl+G）"), lambda: win.doc.group_layers()),
+                ("duplicate", _t("复制图层（Ctrl+J）"), lambda: win.doc.duplicate_layer(win.doc.active_id)),
+                ("new_layer", _t("新建空白图层（Ctrl+Shift+N）"), lambda: win.doc.new_pixel_layer()),
+                ("trash", _t("删除图层（组连同里面的图层）"), lambda: win.doc.delete_layer(win.doc.active_id))]
+        self.actions_row: dict[str, QToolButton] = {}
+        for spec in btns:
+            if spec is None:
+                g.addStretch(1)
+                continue
+            kind, tip, fn = spec
+            b = QToolButton()
+            b.setAutoRaise(True)
+            b.setFixedSize(28, 26)
+            b.setIcon(QIcon(icon_pixmap(kind, QColor(theme.current().ink2), 18)))
+            b.setIconSize(QSize(18, 18))
             b.setToolTip(tip)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(fn)
-            b.setStyleSheet("padding: 4px 4px;")
-            if t == _t("剪贴"):
-                b.setIcon(QIcon(icon_pixmap("clip", QColor(theme.current().ink2), 14)))
-            g.addWidget(b, i // 5, i % 5)
+            self.actions_row[kind] = b
+            g.addWidget(b)
         lay.addLayout(g)
         self._ids: list[int] = []
         self._rows: dict[int, LayerRow] = {}

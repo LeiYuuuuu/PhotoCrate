@@ -27,7 +27,8 @@ from ..theme import font
 from ..widgets.deco import Panel, TacButton, caption
 from .canvas import CanvasView
 from .icons import paint_icon
-from .panels import (HistoryPanel, Histogram, LayersPanel, ParamSlider, PropertiesPanel, Swatches, TextEditor)
+from .panels import (HistoryPanel, Histogram, LayersPanel, ParamSlider, PropertiesPanel, SideTabs, Swatches,
+                     TextEditor)
 from .tools import TOOLS, TransformTool, _Busy
 from ...i18n import t as _t
 
@@ -273,12 +274,13 @@ class ToolButton(QPushButton):
         p = theme.current()
         qp = QPainter(self)
         r = QRectF(self.rect())
-        if self.isChecked():
-            qp.fillRect(r, QColor(p.accent))
-            col = QColor(p.accent_ink)
-        else:
-            if self._hover:
-                qp.fillRect(r, QColor(p.slab2))
+        if self.isChecked() or self._hover:
+            qp.setRenderHint(QPainter.RenderHint.Antialiasing)
+            qp.setPen(Qt.PenStyle.NoPen)
+            qp.setBrush(QColor(p.slab2))
+            qp.drawRoundedRect(r.adjusted(1, 1, -1, -1), 4, 4)
+        col = QColor(p.accent if self.isChecked() else p.slab_ink2)
+        if self._hover and not self.isChecked():
             col = QColor(p.slab_ink)
         paint_icon(qp, r.adjusted(9, 6, -9, -6), self.tool.icon, col)
         if len(self.tools) > 1:
@@ -675,41 +677,52 @@ class EditorWindow(QMainWindow):
         h.setSpacing(0)
         self.toolbar = ToolBar(self)
         h.addWidget(self.toolbar)
-        mid = QVBoxLayout()
+        midw = QWidget()
+        mid = QVBoxLayout(midw)
         mid.setContentsMargins(0, 0, 0, 0)
         mid.setSpacing(0)
         self.options = OptionsBar(self)
         mid.addWidget(self.options)
         mid.addWidget(self.canvas, 1)
-        h.addLayout(mid, 1)
+        # 右侧：直方图（视图菜单里可以关掉）+ 属性 + 「图层 / 历史记录」标签页；和画布之间的分隔条可以拖宽右侧
         right = QWidget()
-        right.setFixedWidth(356)
+        right.setMinimumWidth(300)
+        right.setMaximumWidth(560)
         rl = QVBoxLayout(right)
         rl.setContentsMargins(6, 6, 6, 6)
         rl.setSpacing(6)
-        hp = Panel(_t("直方图"), "HISTOGRAM", pad=6)
+        self.hist_box = Panel(pad=6)
         self.histogram = Histogram()
-        hp.body.addWidget(self.histogram)
-        rl.addWidget(hp)
+        self.hist_box.body.addWidget(self.histogram)
+        self.hist_box.setVisible(bool(self.opts.get("show_hist", True)))
+        rl.addWidget(self.hist_box)
         split = QSplitter(Qt.Orientation.Vertical)
-        pp = self.panel_props = Panel(_t("属性"), "PROPERTIES", pad=0)
+        pp = self.panel_props = Panel(_t("属性"), pad=0)
         self.props = PropertiesPanel(self)
         pp.body.addWidget(self.props)
-        lp = self.panel_layers = Panel(_t("图层"), "LAYERS", pad=0)
+        self.side_tabs = SideTabs()
         self.layers = LayersPanel(self)
-        lp.body.addWidget(self.layers)
-        hsp = self.panel_history = Panel(_t("历史记录"), "HISTORY", pad=6)
+        self.panel_layers = self.side_tabs.add(_t("图层"), self.layers)
+        hw = QWidget()
+        hl = QVBoxLayout(hw)
+        hl.setContentsMargins(6, 6, 6, 6)
         self.history = HistoryPanel(self)
-        hsp.body.addWidget(self.history)
-        for w in (pp, lp, hsp):
-            split.addWidget(w)
-        split.setSizes([360, 380, 110])
-        split.setStretchFactor(0, 5)
-        split.setStretchFactor(1, 5)
-        split.setStretchFactor(2, 1)
+        hl.addWidget(self.history)
+        self.panel_history = self.side_tabs.add(_t("历史记录"), hw)
+        split.addWidget(pp)
+        split.addWidget(self.side_tabs)
+        split.setSizes([420, 420])
         split.setChildrenCollapsible(False)
         rl.addWidget(split, 1)
-        h.addWidget(right)
+        hs = self.hsplit = QSplitter(Qt.Orientation.Horizontal)
+        hs.addWidget(midw)
+        hs.addWidget(right)
+        hs.setStretchFactor(0, 1)
+        hs.setStretchFactor(1, 0)
+        hs.setSizes([1100, int(self.opts.get("side_w", 340))])
+        hs.setChildrenCollapsible(False)
+        hs.splitterMoved.connect(lambda *_: self.opts.__setitem__("side_w", right.width()))
+        h.addWidget(hs, 1)
         self.setCentralWidget(central)
         sb = self.statusBar()
         self.msg = QLabel("")
@@ -738,13 +751,14 @@ class EditorWindow(QMainWindow):
     def _style(self) -> None:
         p = theme.current()
         self.setStyleSheet(f"""
-QMenuBar {{ background: {p.slab}; color: {p.slab_ink}; padding: 2px 6px; }}
-QMenuBar::item {{ background: transparent; padding: 6px 12px; }}
-QMenuBar::item:selected {{ background: {p.accent}; color: {p.accent_ink}; }}
+QMenuBar {{ background: {p.slab}; color: {p.slab_ink}; padding: 0 6px; }}
+QMenuBar::item {{ background: transparent; padding: 5px 10px; border-radius: 4px; }}
+QMenuBar::item:selected {{ background: {p.slab2}; color: {p.slab_ink}; }}
 QStatusBar {{ background: {p.slab}; color: {p.slab_ink2}; }}
 QStatusBar QLabel {{ color: {p.slab_ink2}; padding: 0 8px; }}
-QStatusBar QPushButton {{ background: {p.slab2}; color: {p.slab_ink}; border: 1px solid {p.slab2}; padding: 2px 10px; }}
-QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink}; }}
+QStatusBar QPushButton {{ background: {p.slab2}; color: {p.slab_ink}; border: 1px solid {p.slab2}; padding: 1px 10px;
+    border-radius: 3px; }}
+QStatusBar QPushButton:pressed {{ background: {p.sel}; color: {p.ink}; }}
 """)
 
     def _act(self, menu, text, fn, shortcut=None, tip=None) -> QAction:
@@ -915,7 +929,8 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         m.addSeparator()
         self.a_view = {}
         for key, label, sc, dv in (("show_rulers", _t("标尺"), "Ctrl+R", False), ("show_grid", _t("网格"), "Ctrl+'", False),
-                                   ("show_guides", _t("参考线"), "Ctrl+;", True), ("snap", _t("对齐（吸附）"), "Ctrl+Shift+;", True)):
+                                   ("show_guides", _t("参考线"), "Ctrl+;", True), ("snap", _t("对齐（吸附）"), "Ctrl+Shift+;", True),
+                                   ("show_hist", _t("直方图"), None, True)):
             a = self._act(m, label, lambda k=key: self.toggle_view(k), sc)
             a.setCheckable(True)
             a.setChecked(bool(self.opts.get(key, dv)))
@@ -1199,9 +1214,16 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         self.status_msg(_t('已转换为「{0}」：导出时带上这个配置文件', color.profile_name(self.doc.source.icc)))
 
     def toggle_view(self, key: str) -> None:
-        self.opts[key] = not self.opts.get(key, key in ("show_guides", "snap"))
+        self.opts[key] = not self.opts.get(key, key in ("show_guides", "snap", "show_hist"))
         self.a_view[key].setChecked(bool(self.opts[key]))
+        if key == "show_hist":
+            self.hist_box.setVisible(bool(self.opts[key]))
+            self._update_hist()
         self.canvas.update()
+
+    def show_side_tab(self, key: str) -> None:
+        """切到右下角的「图层」或「历史记录」标签（新手教程指到它们时用）。"""
+        self.side_tabs.show_page(1 if key == "history" else 0)
 
     def new_guide(self) -> None:
         from PySide6.QtWidgets import QInputDialog

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QApplication, QDialog, QFileDialog, QGridLayout, 
 from ..ops.pathsafe import human_size
 from . import theme
 from .theme import font
-from .widgets.deco import HazardStripe, Panel, SegProgress, StatCard, TacButton, caption
+from .widgets.deco import Panel, SegProgress, StatCard, TacButton, caption
 from ..i18n import t as _t
 
 
@@ -22,8 +22,11 @@ class _Base(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        if hazard:
-            root.addWidget(HazardStripe(10))
+        if hazard:                          # 危险操作：标题栏上方一条红线
+            bar = QWidget()
+            bar.setFixedHeight(3)
+            bar.setStyleSheet(f"background: {theme.current().danger};")
+            root.addWidget(bar)
         head = QWidget()
         head.setStyleSheet(f"background: {theme.current().slab};")
         hl = QHBoxLayout(head)
@@ -31,12 +34,7 @@ class _Base(QDialog):
         t = QLabel(title)
         t.setFont(font("cn", 13, 700))
         t.setStyleSheet(f"color: {theme.current().slab_ink};")
-        e = QLabel(en.upper())
-        e.setFont(font("mono", 8, 400, 2))
-        e.setStyleSheet(f"color: {theme.current().accent};")
         hl.addWidget(t)
-        hl.addSpacing(10)
-        hl.addWidget(e)
         hl.addStretch(1)
         root.addWidget(head)
         self.body = QVBoxLayout()

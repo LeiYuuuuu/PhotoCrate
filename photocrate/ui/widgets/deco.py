@@ -1,4 +1,7 @@
-"""自绘控件：工业终端风格的面板、标题、按钮、数据卡片、进度条与图表。"""
+"""自绘控件：面板、标题、按钮、数据卡片、进度条与图表。
+
+以前每个标题 / 按钮旁都配一行英文小字（参数 en），现在不再画出来：参数保留，调用处不用改。
+"""
 from __future__ import annotations
 
 import random
@@ -116,11 +119,13 @@ class LogoMark(QWidget):
 # ---------------------------------------------------------------------------
 
 class SectionHeader(QWidget):
+    """页面标题：强调色竖条 + 标题，下面一行说明。index / en（编号、英文副标题）不再画出来。"""
+
     def __init__(self, index: str, title: str, en: str, sub: str = "", parent=None):
         super().__init__(parent)
         self.index, self.title, self.en, self.sub = index, title, en, sub
         self._sub_lines = 1
-        self.setFixedHeight(76 if sub else 62)
+        self.setFixedHeight(64 if sub else 42)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
     def resizeEvent(self, e):
@@ -131,7 +136,7 @@ class SectionHeader(QWidget):
             lines = max(1, min(3, round(r.height() / max(1, fm.lineSpacing()))))
             if lines != self._sub_lines:
                 self._sub_lines = lines
-                self.setFixedHeight(56 + 20 * lines)
+                self.setFixedHeight(44 + 20 * lines)
         super().resizeEvent(e)
 
     def paintEvent(self, e):
@@ -140,49 +145,17 @@ class SectionHeader(QWidget):
         qp.setRenderHint(QPainter.RenderHint.Antialiasing)
         qp.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         w = self.width()
-        # 编号
-        f_idx = font("display", 30, QFont_bold())
-        qp.setFont(f_idx)
-        qp.setPen(QColor(p.ink3))
-        fm = QFontMetrics(f_idx)
-        idx_w = fm.horizontalAdvance(self.index)
-        qp.drawText(QRectF(0, 0, idx_w + 4, 48), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.index)
-        x = idx_w + 14
-        # 竖线
-        qp.fillRect(QRectF(x, 8, 3, 34), QColor(p.accent))
-        x += 14
+        qp.fillRect(QRectF(0, 9, 3, 22), QColor(p.accent))
         f_t = font("cn", 17, 700)
         qp.setFont(f_t)
         qp.setPen(QColor(p.ink))
-        t_w = QFontMetrics(f_t).horizontalAdvance(self.title)
-        qp.drawText(QRectF(x, 2, t_w + 6, 30), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.title)
-        f_en = font("mono", 8, 400, 2.0)
-        qp.setFont(f_en)
-        qp.setPen(QColor(p.ink2))
-        qp.drawText(QRectF(x, 30, 600, 16), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.en.upper())
-        # 右侧刻度线
-        lx = x + max(t_w, QFontMetrics(f_en).horizontalAdvance(self.en.upper())) + 24
-        y = 24
-        if lx < w - 120:
-            qp.setPen(QPen(QColor(p.line), 1))
-            qp.drawLine(QPointF(lx, y), QPointF(w - 92, y))
-            for i, tx in enumerate(range(int(lx), min(int(lx) + 100, int(w - 92)), 20)):
-                h = 6 if i % 5 == 0 else 3
-                qp.drawLine(QPointF(tx, y), QPointF(tx, y + h))
-            qp.setFont(font("mono", 8, 400, 1.0))
-            qp.setPen(QColor(p.ink3))
-            qp.drawText(QRectF(w - 88, y - 9, 88, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                        f"// SEC-{self.index}")
+        qp.drawText(QRectF(14, 0, w - 14, 40), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.title)
         if self.sub:
             qp.setFont(font("cn", 9.5))
             qp.setPen(QColor(p.ink2))
-            qp.drawText(QRectF(0, 52, w, 20 * self._sub_lines),
+            qp.drawText(QRectF(0, 40, w, 20 * self._sub_lines),
                         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap, self.sub)
         qp.end()
-
-
-def QFont_bold() -> int:
-    return 700
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +163,7 @@ def QFont_bold() -> int:
 # ---------------------------------------------------------------------------
 
 class Panel(QFrame):
-    """带角标与标题条的面板。往 .body（QVBoxLayout）里放内容。"""
+    """带标题条的面板。往 .body（QVBoxLayout）里放内容。"""
 
     def __init__(self, title: str = "", en: str = "", meta: str = "", parent=None, pad: int = 12):
         super().__init__(parent)
@@ -198,7 +171,7 @@ class Panel(QFrame):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(1, 1, 1, 1)
         outer.setSpacing(0)
-        self.header_h = 40 if title else 0
+        self.header_h = 36 if title else 0
         if title:
             self.header = QWidget()
             self.header.setFixedHeight(self.header_h)
@@ -229,26 +202,13 @@ class Panel(QFrame):
         qp.fillRect(r, QColor(p.surface))
         qp.setPen(QPen(QColor(p.line), 1))
         qp.drawRect(r)
-        # 单侧定位角标，避免每块面板重复四角造成视觉噪声。
-        qp.setPen(QPen(QColor(p.ink3), 1))
-        L = 9
-        for (x, y, dx, dy) in ((r.right(), r.top() + 1, -1, 1),):
-            qp.drawLine(x, y, x + dx * L, y)
-            qp.drawLine(x, y, x, y + dy * L)
         if self.title:
             h = self.header_h
-            qp.fillRect(QRectF(14, h / 2 - 6, 3, 12), QColor(p.accent2))
             qp.setPen(QColor(p.ink))
             f = font("cn", 10.5, 700)
             qp.setFont(f)
             tw = QFontMetrics(f).horizontalAdvance(self.title)
-            qp.drawText(QRectF(28, 0, tw + 4, h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.title)
-            fx = 28 + tw + 10
-            if self.en:
-                qp.setFont(font("mono", 7.5, 400, 1.5))
-                qp.setPen(QColor(p.ink3))
-                qp.drawText(QRectF(fx, 0, 300, h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                            self.en.upper())
+            qp.drawText(QRectF(14, 0, tw + 4, h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.title)
             if self._meta:
                 qp.setFont(font("mono", 8.5))
                 qp.setPen(QColor(p.ink2))
@@ -257,8 +217,6 @@ class Panel(QFrame):
                             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, self._meta)
             qp.setPen(QPen(QColor(p.line), 1))
             qp.drawLine(14, h - 1, r.width() - 14, h - 1)
-            qp.setPen(QPen(QColor(p.ink), 1))
-            qp.drawLine(14, h - 1, 54, h - 1)
         qp.end()
 
 
@@ -267,7 +225,10 @@ class Panel(QFrame):
 # ---------------------------------------------------------------------------
 
 class TacButton(QPushButton):
-    """切角按钮。variant: primary（黄）/ secondary（描边）/ danger（红）/ dark（深色）。"""
+    """圆角按钮。variant: primary（黄，实心）/ secondary（描边）/ danger（红）/ dark（深色）。
+    一个界面里只放一个 primary，其余用 secondary。en（英文小字）不再画出来。"""
+
+    RADIUS = 4
 
     def __init__(self, text: str, variant: str = "secondary", en: str = "", parent=None, height: int = 34):
         super().__init__(text, parent)
@@ -280,8 +241,7 @@ class TacButton(QPushButton):
         self._focus_visible = False
         f = font("cn", 10, 700 if variant in ("primary", "danger", "dark") else 500)
         self.setFont(f)
-        extra = QFontMetrics(font("mono", 7)).horizontalAdvance(en.upper()) + 10 if en else 0
-        self.setMinimumWidth(QFontMetrics(f).horizontalAdvance(text) + 40 + extra)
+        self.setMinimumWidth(QFontMetrics(f).horizontalAdvance(text) + 36)
 
     def sizeHint(self):
         s = super().sizeHint()
@@ -325,14 +285,8 @@ class TacButton(QPushButton):
         qp = QPainter(self)
         qp.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
-        c = 9
         path = QPainterPath()
-        path.moveTo(0.5, 0.5)
-        path.lineTo(w - c - 0.5, 0.5)
-        path.lineTo(w - 0.5, c + 0.5)
-        path.lineTo(w - 0.5, h - 0.5)
-        path.lineTo(0.5, h - 0.5)
-        path.closeSubpath()
+        path.addRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), self.RADIUS, self.RADIUS)
         enabled = self.isEnabled()
         down = self.isDown() or self.isChecked()
         v = self.variant
@@ -340,55 +294,30 @@ class TacButton(QPushButton):
             fill, ink, border = QColor(p.surface2), QColor(p.ink3), QColor(p.line)
         elif v == "primary":
             fill = QColor(p.accent_hover if (self._hover or down) else p.accent)
-            ink, border = QColor(p.accent_ink), QColor(p.ink)
+            ink, border = QColor(p.accent_ink), QColor(fill)
         elif v == "danger":
             fill = QColor(p.danger).darker(110) if (self._hover or down) else QColor(p.danger)
-            ink, border = QColor("#FFFFFF"), QColor(p.danger).darker(130)
+            ink, border = QColor("#FFFFFF"), QColor(fill)
         elif v == "dark":
             fill = QColor(p.slab2 if self._hover else p.slab)
-            ink, border = QColor(p.slab_ink), QColor(p.slab)
+            ink, border = QColor(p.slab_ink), QColor(p.slab2)
         else:
-            fill = QColor(p.surface2 if (self._hover or down) else p.surface)
-            ink, border = QColor(p.ink), QColor(p.ink if self._hover else p.ink2)
-            if down:
-                fill, ink = QColor(p.accent), QColor(p.accent_ink)
+            fill = QColor(p.sel if down else (p.surface2 if self._hover else p.surface))
+            ink, border = QColor(p.ink), QColor(p.ink3 if self._hover else p.line)
         qp.fillPath(path, fill)
-        if enabled and self.feedback.value > 0:
-            qp.save()
-            qp.setClipPath(path)
-            qp.fillRect(QRectF(10, h - 3, (w - 20) * self.feedback.value, 2), ink)
-            qp.restore()
         qp.setPen(QPen(border, 1))
         qp.drawPath(path)
-        # 左下角小三角
-        if enabled and v in ("primary", "danger", "dark"):
-            qp.setPen(Qt.PenStyle.NoPen)
-            qp.setBrush(ink)
-            qp.drawPolygon(QPolygonF([QPointF(3, h - 3), QPointF(9, h - 3), QPointF(3, h - 9)]))
         qp.setPen(ink)
         qp.setFont(self.font())
-        text_rect = QRectF(0, 0, w, h)
-        if self.en:
-            fm = QFontMetrics(self.font())
-            fe = font("mono", 7, 400, 1.2)
-            ew = QFontMetrics(fe).horizontalAdvance(self.en.upper())
-            tw = fm.horizontalAdvance(self.text())
-            total = tw + 8 + ew
-            x0 = (w - total) / 2
-            qp.drawText(QRectF(x0, 0, tw + 2, h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
-            qp.setFont(fe)
-            col = QColor(ink)
-            col.setAlpha(150)
-            qp.setPen(col)
-            qp.drawText(QRectF(x0 + tw + 8, 0, ew + 2, h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                        self.en.upper())
-        else:
-            qp.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self.text())
+        align = Qt.AlignmentFlag.AlignVCenter | (Qt.AlignmentFlag.AlignLeft if "text-align: left" in self.styleSheet()
+                                                 else Qt.AlignmentFlag.AlignHCenter)
+        tr = QRectF(12, 0, w - 24, h) if align & Qt.AlignmentFlag.AlignLeft else QRectF(0, 0, w, h)
+        qp.drawText(tr, align, QFontMetrics(self.font()).elidedText(self.text(), Qt.TextElideMode.ElideMiddle,
+                                                                   int(tr.width())))
         if self.hasFocus() and self._focus_visible and enabled:
-            qp.setBrush(Qt.BrushStyle.NoBrush)   # 之前画小三角时设置了画刷，不清掉会把整个按钮填黑
-            # 沿用按钮的切角轮廓，避免矩形虚线压住文字或跨过切角。
+            qp.setBrush(Qt.BrushStyle.NoBrush)
             qp.setPen(QPen(QColor(p.accent2), 2))
-            qp.drawPath(path)
+            qp.drawRoundedRect(QRectF(1, 1, w - 2, h - 2), self.RADIUS, self.RADIUS)
         qp.end()
 
 
@@ -482,13 +411,6 @@ class StatCard(QWidget):
         qp.setFont(font("cn", 9.5, 600))
         qp.setPen(QColor(p.ink2))
         qp.drawText(QRectF(16, 8, r.width() - 24, 18), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.label)
-        label_width = QFontMetrics(qp.font()).horizontalAdvance(self.label)
-        qp.setFont(font("mono", 7, 400, 1.2))
-        qp.setPen(QColor(p.ink3))
-        # 窄卡片优先保留中文，避免中英文标题互相覆盖。
-        if label_width + QFontMetrics(qp.font()).horizontalAdvance(self.en.upper()) + 48 < r.width():
-            qp.drawText(QRectF(16, 8, r.width() - 26, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                        self.en.upper())
         fv = font("display", 24, 600)
         qp.setFont(fv)
         qp.setPen(QColor(p.ink))
@@ -763,8 +685,9 @@ class TimelineChart(QWidget):
 # ---------------------------------------------------------------------------
 
 def micro_label(text: str, role: str = "faint") -> QLabel:
-    lab = QLabel(text.upper())
-    lab.setFont(font("mono", 7.5, 400, 1.5))
+    """一组控件上方的小标题。"""
+    lab = QLabel(text)
+    lab.setFont(font("cn", 8.5, 600))
     lab.setProperty("role", role)
     return lab
 

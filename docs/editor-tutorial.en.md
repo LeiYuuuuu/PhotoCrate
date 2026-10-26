@@ -31,13 +31,13 @@ Videos can't be edited. RAW-only photos open too (using the camera's embedded fu
 | ① | **Toolbar** (the strip on the far left) | All tools. Hover over an icon to see its name and how to use it. The two squares at the bottom are the **foreground / background colors**; click to change them |
 | ② | **Options bar** (along the top) | Settings for the current tool: brush size, hardness and opacity; crop ratio, straighten angle… |
 | ③ | **Canvas** (center) | Your photo. Scroll to zoom, hold Space and drag to move around |
-| ④ | **Properties** (top right) | Settings of the selected layer. **All the color sliders live here** |
-| ⑤ | **Layers** (middle right) | All layers, the eye (show / hide), blend mode, opacity, and buttons to add / copy / delete layers |
-| ⑥ | **History** (bottom right) | Every step you've taken; click a row to go back to that step |
+| ④ | **Properties** (upper right) | Settings of the selected layer. **All the color sliders live here** |
+| ⑤ | **Layers** (lower right, first tab) | All layers, the eye (show / hide), blend mode, opacity; the row of icon buttons at the bottom adds / copies / deletes layers, adds masks and adjustment layers (hover an icon to see its name) |
+| ⑥ | **History** (the tab next to Layers) | Every step you've taken; click a row to go back to that step |
 | ⑦ | **Image** and other menus | Adjustments, filters, selection, rotation, image size and more |
 | ⑧ | **File** menu | Export image, save project |
 
-The **Histogram** in the top right shows the photo's brightness distribution; it warns "Shadows clipped / Highlights clipped" when large areas are pure black or pure white.
+The **Histogram** in the top right shows the photo's brightness distribution; it warns "Shadows clipped / Highlights clipped" when large areas are pure black or pure white. Turn it off under **View → Histogram** when you don't need it. Drag the divider between the canvas and the right column to make the column wider.
 
 ### The toolbar tools you'll use most
 
@@ -59,7 +59,7 @@ The **Histogram** in the top right shows the photo's brightness distribution; it
 
 ### 1. Adjust color (the most common)
 
-1. Click **◐ Adjust** in the Layers panel (or the **Image → Adjust** menu). An "Adjustment" layer appears in the layer list.
+1. Click the **adjustment layer** button (the half-black, half-white circle) at the bottom of the Layers panel, or use the **Image → Adjust** menu. An "Adjustment" layer appears in the layer list.
 2. A set of sliders appears in **Properties** on the right:
    - **Basic**: Exposure (overall brightness), Contrast, Highlights (darken the sky), Shadows (lift dark areas)
    - **Color**: Temperature (cooler / warmer), Tint, Vibrance, Saturation
@@ -93,7 +93,7 @@ The **Histogram** in the top right shows the photo's brightness distribution; it
 ### Adjust only part of the photo (e.g. brighten just a face)
 
 1. Press **W** (Shift+W switches to Object Selection) and box the person (or draw an area with M / L). The flashing dashed line is the selection.
-2. Click **◐ Adjust** to create an adjustment layer — the selection automatically becomes the layer's **mask**, so the adjustment only affects the selected area.
+2. Click the **adjustment layer** button to create an adjustment layer — the selection automatically becomes the layer's **mask**, so the adjustment only affects the selected area.
 3. Edges too hard? Use **Select → Feather…** (Shift+F6) before creating the adjustment layer.
 
 Mask rule: **white = effect on, black = effect off**. Click the mask thumbnail on the layer, then paint on the photo with a black brush to remove the effect where you paint.
@@ -107,7 +107,7 @@ Press **T**, click on the photo, then type the text and choose the font, size an
 1. Box the subject with Object Selection (**W**, Shift+W to switch), then press **Ctrl+J**: the subject is copied to a new layer.
 2. **File → Place Image (as a new layer)…** (or copy an image elsewhere and press **Ctrl+V**) to bring in another picture.
 3. **Ctrl+T** free transform: drag the corners to scale, drag outside the box to rotate, Enter to apply.
-4. Use ↑ ↓ in the Layers panel to change the stacking order.
+4. Use the up / down arrows at the bottom of the Layers panel to change the stacking order.
 
 ### Merge exposures (HDR): several exposures into one photo
 
@@ -204,8 +204,8 @@ Enter applies, Esc cancels.
 
 ## 6. Troubleshooting
 
-- **The brush does nothing?** Check whether the selected layer is an **adjustment layer** (it has no pixels; you can only paint on its mask), or whether the layer is hidden (eye off). Select **Background**, or click **+ Layer** to create one, and paint again.
-- **Lost track and want to go back?** Look at **History** at the bottom right; click the top row, **Open**, to return to how the photo was when you opened it.
+- **The brush does nothing?** Check whether the selected layer is an **adjustment layer** (it has no pixels; you can only paint on its mask), or whether the layer is hidden (eye off). Select **Background**, or click the **new layer** button (a square with a plus) at the bottom of the Layers panel, and paint again.
+- **Lost track and want to go back?** Look at the **History** tab next to Layers; click the top row, **Open**, to return to how the photo was when you opened it.
 - **Picture too big / too small?** **Ctrl+0** fits the window, **Ctrl+1** shows 100% detail, the mouse wheel zooms around the cursor.
 - **Can't remember shortcuts?** Press **F1** for the full list; each tool's shortcut is also in its tooltip.
 - **Want to see the walkthrough again?** **Help → Beginner Tutorial**.

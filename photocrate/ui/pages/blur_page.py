@@ -54,9 +54,9 @@ class BlurPage(Page):
         thr = float(ctx.settings.get("blur_threshold", 60))
         self.slider.setValue(_to_slider(thr))
         self.spin.setValue(thr)
-        r.addWidget(micro_label("blurry"))
+        r.addWidget(micro_label(_t("模糊")))
         r.addWidget(self.slider, 1)
-        r.addWidget(micro_label("sharp"))
+        r.addWidget(micro_label(_t("清晰")))
         r.addWidget(self.spin)
         ctl.body.addLayout(r)
         fr = QHBoxLayout()
@@ -159,7 +159,7 @@ class BlurPage(Page):
         self.grid.delegate.blur_threshold = thr
         self.grid.settings_snapshot = self.ctx.settings.snapshot()
         self.grid.set_groups(show)
-        self.gpanel.set_meta(f"{len(show)} ITEMS · THRESHOLD {thr:.0f}")
+        self.gpanel.set_meta(_t("{0} 项 · 阈值 {1:.0f}", len(show), thr))
         self.b_move.setEnabled(nb > 0)
 
     def isolate(self):

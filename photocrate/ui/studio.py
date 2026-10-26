@@ -38,21 +38,17 @@ class StudioHome(QWidget):
         t.setFont(font("cn", 24, 800))
         t.setStyleSheet("font-size: 24pt; font-weight: 800;")     # 全局样式表会盖掉 setFont 的字号
         v.addWidget(t)
-        en = QLabel("STUDIO // LAYERS · MASKS · RETOUCH · HDR")
-        en.setFont(font("mono", 9, 400, 2))
-        en.setStyleSheet(f"color: {p.ink3};")
-        v.addWidget(en)
         v.addWidget(caption(_t("类似 Photoshop 的专业修图：图层与混合模式、蒙版、选区与抠图、调整图层、修复画笔 / 仿制图章 / 内容识别填充、"
                                "文字、滤镜、合并曝光（HDR）。原片只读：导出写新文件，或存成 .pcedit 工程以后接着改。"), "dim", 10))
         r = QHBoxLayout()
         r.setSpacing(10)
-        b1 = TacButton(_t("打开图片…"), "primary", en="OPEN", height=40)
+        b1 = TacButton(_t("打开图片…"), "primary", height=40)
         b1.clicked.connect(self.open_image)
         b2 = TacButton(_t("打开工程…"), "secondary", height=40)
         b2.clicked.connect(lambda: self.open_image(project=True))
         b3 = TacButton(_t("合并曝光（HDR）…"), "secondary", height=40)
         b3.clicked.connect(self.merge)
-        b4 = TacButton(_t("从相册选一张"), "dark", height=40)
+        b4 = TacButton(_t("从相册选一张"), "secondary", height=40)
         b4.setToolTip(_t("回到「相册」，选中照片后点「在修图中打开」"))
         b4.clicked.connect(lambda: self.studio.want_library.emit())
         for b in (b1, b2, b3, b4):
@@ -128,11 +124,15 @@ class StudioMode(QWidget):
         self.tabs.setElideMode(Qt.TextElideMode.ElideMiddle)
         self.tabs.setStyleSheet(f"""
 QTabBar {{ background: {p.slab}; }}
-QTabBar::tab {{ background: {p.slab}; color: {p.slab_ink2}; padding: 7px 16px; border: none; min-width: 90px; max-width: 280px; }}
-QTabBar::tab:selected {{ background: {p.slab2}; color: {p.slab_ink}; border-bottom: 2px solid {p.accent}; }}
+QTabBar::tab {{ background: {p.slab}; color: {p.slab_ink2}; padding: 5px 14px; margin: 0 2px; border: none;
+    border-radius: 4px; min-width: 70px; max-width: 260px; }}
+QTabBar::tab:selected {{ background: {p.slab2}; color: {p.slab_ink}; }}
 QTabBar::tab:hover {{ color: {p.slab_ink}; }}
+QTabBar::close-button {{ image: url("{theme.asset('close')}"); subcontrol-position: right; margin-left: 4px;
+    border-radius: 3px; }}
+QTabBar::close-button:hover {{ background: {p.line}; }}
 """)
-        bar = QWidget()
+        self.tab_bar = bar = QWidget()
         bar.setStyleSheet(f"background: {p.slab};")
         bl = QHBoxLayout(bar)
         bl.setContentsMargins(0, 0, 0, 0)
@@ -154,6 +154,11 @@ QTabBar::tab:hover {{ color: {p.slab_ink}; }}
         a.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         a.triggered.connect(lambda: self.tabs.setCurrentIndex((self.tabs.currentIndex() + 1) % self.tabs.count()))
         self.addAction(a)
+
+    def take_tab_bar(self) -> QWidget:
+        """把文档标签条交给主窗口放进顶栏（和模式切换同一行）；不调用时标签条留在修图区上方。"""
+        self.layout().removeWidget(self.tab_bar)
+        return self.tab_bar
 
     # ---- 标签页 ----
     def adopt(self, ew: QMainWindow) -> None:
