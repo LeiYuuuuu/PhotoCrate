@@ -270,7 +270,8 @@ class PeoplePage(Page):
         if not keys:
             return
         self.ctx.library.ai.mark_faces(keys, human=restore)
-        n = len({f.gid for f in faces if f.key in set(keys)})
+        marked = set(keys)
+        n = len({f.gid for f in faces if f.key in marked})
         self._recluster(_t('{0} 张照片里的脸已恢复为人脸', n) if restore else _t('{0} 张照片里的脸已标为“不是人脸”', n))
 
     def remove_selected(self):

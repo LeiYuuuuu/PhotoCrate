@@ -497,6 +497,10 @@ class Library:
         settings = self.settings.snapshot()
         pool: cf.Executor
         mode = self.settings.get("parallel_mode", "process")
+        # 已经在某个子进程里（调用影匣的脚本 / 插件没写 if __name__ == "__main__"，spawn 时又执行了一遍扫描）：
+        # 不再套一层进程池，否则每层 n 个进程成倍增长，几层就把内存耗光、电脑卡死
+        if mp.parent_process() is not None:
+            mode = "thread"
         if mode == "process" and n > 1 and len(tasks) > 8:
             try:
                 pool = cf.ProcessPoolExecutor(max_workers=n, mp_context=mp.get_context("spawn"),

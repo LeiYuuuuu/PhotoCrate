@@ -90,19 +90,31 @@ class _WorldIndex:
         return best, float(dist[list(idx).index(best)])
 
 
+# 城市索引、地名对照表、查询结果在整个程序里共用：每次重跑元数据分析器（扫描、改设置、改地点）
+# 都会新建 GeoService，以前每次都要重新解析 13 万个城市（约 0.5 秒）、所有坐标重新查一遍
+_SHARED_LOCK = threading.Lock()
+_SHARED: dict[str, Any] = {"world": None, "world_failed": False, "zh": None}
+_RESULTS: dict[tuple[bool, float, float], dict[str, Any]] = {}
+_RESULTS_MAX = 200_000
+
+
 class GeoService:
     def __init__(self, assume_gcj02: bool = False):
         self.assume_gcj02 = assume_gcj02
         self._lock = threading.Lock()
-        self._world: _WorldIndex | None = None
-        self._world_failed = False
         self._cn = None
         self._cn_failed = False
-        self._cache: dict[tuple[float, float], dict[str, Any]] = {}
         self._zh = self._load_zh()
 
     @staticmethod
     def _load_zh() -> dict[str, dict[str, str]]:
+        with _SHARED_LOCK:
+            if _SHARED["zh"] is None:
+                _SHARED["zh"] = GeoService._read_zh()
+            return _SHARED["zh"]
+
+    @staticmethod
+    def _read_zh() -> dict[str, dict[str, str]]:
         p = find_resource("data", "place_names_zh.json")
         if not p:
             return {"countries": {}, "admin1": {}, "cities": {}}
@@ -125,31 +137,33 @@ class GeoService:
         return self._cn
 
     def _world_index(self) -> _WorldIndex | None:
-        if self._world is None and not self._world_failed:
-            p = find_resource("data", "geonames_cities1000.csv.gz")
-            if p is None:
-                self._world_failed = True
-                log.warning("缺少 data/geonames_cities1000.csv.gz，海外地点无法识别")
-                return None
-            try:
-                self._world = _WorldIndex(p)
-            except Exception as e:
-                self._world_failed = True
-                log.warning("加载 GeoNames 数据失败：%s", e)
-        return self._world
+        with _SHARED_LOCK:
+            if _SHARED["world"] is None and not _SHARED["world_failed"]:
+                p = find_resource("data", "geonames_cities1000.csv.gz")
+                if p is None:
+                    _SHARED["world_failed"] = True
+                    log.warning("缺少 data/geonames_cities1000.csv.gz，海外地点无法识别")
+                    return None
+                try:
+                    _SHARED["world"] = _WorldIndex(p)
+                except Exception as e:
+                    _SHARED["world_failed"] = True
+                    log.warning("加载 GeoNames 数据失败：%s", e)
+            return _SHARED["world"]
 
     # ---- 查询 ------------------------------------------------------------
     def lookup(self, lat: float | None, lon: float | None) -> dict[str, Any] | None:
         if lat is None or lon is None:
             return None
-        key = (round(lat, 4), round(lon, 4))
-        with self._lock:
-            hit = self._cache.get(key)
-            if hit is not None:
-                return hit
-            res = self._lookup(lat, lon)
-            self._cache[key] = res
-            return res
+        key = (self.assume_gcj02, round(lat, 4), round(lon, 4))       # 约 10 米
+        hit = _RESULTS.get(key)
+        if hit is None:
+            with self._lock:
+                hit = self._lookup(lat, lon)
+            if len(_RESULTS) >= _RESULTS_MAX:
+                _RESULTS.clear()
+            _RESULTS[key] = hit
+        return dict(hit)                      # 调用方拿到自己的一份，改了也不影响缓存
 
     def _city_zh(self, cc: str, name: str | None) -> str | None:
         if not name:

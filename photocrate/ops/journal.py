@@ -37,6 +37,10 @@ class Journal:
                 src TEXT, dst TEXT, size INTEGER, mtime_ns INTEGER, role TEXT,
                 status TEXT, error TEXT);
             CREATE INDEX IF NOT EXISTS ops_batch ON ops(batch_id, seq);
+            -- 撤销时按路径追踪文件被移到了哪里（find_moved / later_dependents / removed_by_xmp_undo），
+            -- 没有这两个索引时每次都扫全表：日志有 20 万条时检查一次依赖要十几秒
+            CREATE INDEX IF NOT EXISTS ops_src_lower ON ops(lower(src));
+            CREATE INDEX IF NOT EXISTS ops_dst_lower ON ops(lower(dst));
             CREATE TABLE IF NOT EXISTS dirs(batch_id INTEGER, path TEXT);
             """
         )

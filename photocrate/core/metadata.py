@@ -14,12 +14,14 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
 import shutil
 import subprocess
 import threading
+from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -233,25 +235,110 @@ class MetadataBackend:
         pass
 
 
+class StayOpen:
+    """ExifTool 常驻进程，只用来批量读元数据（写 XMP 一次只改一个文件，仍用 PyExifTool）。
+
+    PyExifTool 每批先把 stdout 读完、再读 stderr。一批里有几十个读不了的文件（损坏 / 全是 0 的 RAW、
+    读的时候被删掉）时，每个文件一行的错误信息会写满 stderr 管道（Windows 只有 4 KB）：ExifTool 卡在写 stderr，
+    这边卡在等 stdout，扫描永远停住。这里由后台线程一直读 stderr；每批还有超时，超时就结束进程（下一批自动重启）。"""
+
+    def __init__(self, executable: str, common_args: list[str]):
+        if not (os.path.isfile(executable) or shutil.which(executable)):
+            raise FileNotFoundError(executable)
+        self._args = [executable, "-stay_open", "True", "-@", "-", "-common_args", *common_args]
+        self._p: subprocess.Popen | None = None
+        self._n = 0
+        self._lock = threading.Lock()
+        self.errors: deque[str] = deque(maxlen=20)         # 最近的错误信息（排查用）
+
+    def _start(self) -> subprocess.Popen:
+        if self._p is None or self._p.poll() is not None:
+            self._p = subprocess.Popen(self._args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE, **_hidden_startupinfo())
+            threading.Thread(target=self._drain, args=(self._p.stderr,), daemon=True).start()
+        return self._p
+
+    def _drain(self, pipe) -> None:
+        try:
+            for line in pipe:
+                self.errors.append(line.decode("utf-8", "replace").rstrip())
+        except (OSError, ValueError):
+            pass
+
+    def execute_json(self, args: list[str], timeout: float) -> list[dict[str, Any]]:
+        with self._lock:
+            p = self._start()
+            self._n += 1
+            end = f"{{ready{self._n}}}".encode()
+            buf = bytearray()
+            timer = threading.Timer(timeout, p.kill)        # 卡住时结束进程，下面的读取随之返回
+            timer.start()
+            ok = False
+            try:
+                p.stdin.write(("\n".join([*args, f"-execute{self._n}"]) + "\n").encode("utf-8"))
+                p.stdin.flush()
+                while True:
+                    tail = bytes(buf[-(len(end) + 2):])
+                    if tail.endswith(b"\n") and tail.rstrip(b"\r\n").endswith(end):   # JSON 字符串里不会有真的换行
+                        break
+                    chunk = p.stdout.read1(1 << 16)
+                    if not chunk:
+                        raise IOError("ExifTool 没有响应（超时或已退出）")
+                    buf += chunk
+                ok = True
+            finally:
+                timer.cancel()
+                if not ok:
+                    self._stop(p)
+        text = bytes(buf).rstrip()[:-len(end)].decode("utf-8", "replace").strip()
+        return json.loads(text) if text else []
+
+    def _stop(self, p: subprocess.Popen) -> None:
+        try:
+            p.kill()
+            p.wait(5)
+        except Exception:
+            pass
+        for f in (p.stdin, p.stdout):               # 进程没了，没写完的命令也不用再写（stderr 由读取线程读到结尾）
+            try:
+                f.close()
+            except OSError:
+                pass
+        if self._p is p:
+            self._p = None
+
+    def close(self) -> None:
+        p = self._p
+        if p is None:
+            return
+        try:
+            if p.poll() is None:
+                p.stdin.write(b"-stay_open\nFalse\n")
+                p.stdin.flush()
+                p.wait(5)
+        except Exception:
+            pass
+        if p.poll() is None:
+            self._stop(p)
+        self._p = None
+
+
 class ExifToolBackend(MetadataBackend):
     name = "exiftool"
     BATCH = 150
 
     def __init__(self, executable: str):
-        import exiftool  # PyExifTool
-
         self.executable = executable
-        self._et = exiftool.ExifToolHelper(
-            executable=executable,
-            encoding="utf-8",
+        self._et = StayOpen(
+            executable,
             # -charset filename=utf8：Windows 下中文文件名必需
             # QuickTimeUTC：HEIC/MOV 的 QuickTime 时间按 UTC 换算为本地时间
-            common_args=["-charset", "filename=utf8", "-api", "QuickTimeUTC=1", "-fast", "-m"],
-            check_execute=False,
+            ["-charset", "filename=utf8", "-api", "QuickTimeUTC=1", "-fast", "-m"],
         )
 
     def _read_batch(self, batch: list[str]) -> list[dict[str, Any]]:
-        return self._et.get_tags(batch, tags=EXIFTOOL_TAGS)
+        # 超时按文件数放宽（网络盘上的大 RAW 也够用）；超时后整批改为逐个读取
+        return self._et.execute_json(["-j", *[f"-{t}" for t in EXIFTOOL_TAGS], *batch], timeout=60 + 2 * len(batch))
 
     def read_many(self, paths, progress=None, cancel=None):
         out: dict[str, dict[str, Any]] = {}
@@ -288,10 +375,7 @@ class ExifToolBackend(MetadataBackend):
         return out
 
     def close(self) -> None:
-        try:
-            self._et.terminate()
-        except Exception:
-            pass
+        self._et.close()
 
 
 class FallbackBackend(MetadataBackend):

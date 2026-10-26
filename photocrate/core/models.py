@@ -10,15 +10,18 @@ import hashlib
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import lru_cache
 from typing import Any
 
 from .formats import KIND_LABELS, MEDIA_ROLES, ext_of
 
 
+@lru_cache(maxsize=1 << 17)
 def file_signature(path: str, size: int, mtime_ns: int) -> str:
     """与路径无关的文件指纹：文件名 + 大小 + 修改时间。
 
     移动文件不会改变它，所以移动后缓存依然命中，无需重新分析。
+    （纯函数、记住最近 13 万个：每次读标注都要取一遍组里各文件的指纹，一次扫描要算好几万次）
     """
     name = os.path.basename(path).lower()
     raw = f"{name}|{size}|{mtime_ns}".encode("utf-8", "surrogatepass")

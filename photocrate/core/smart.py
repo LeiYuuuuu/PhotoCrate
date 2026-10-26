@@ -691,7 +691,8 @@ def search(lib, marks: Marks | None, query: str, restrict: dict[int, str] | None
         combined = (combined or set()) | extra
     by_gid = {g.gid: g for g in idx.groups}
     res.gids = [g.gid for g in newest_first(by_gid[i] for i in (combined or set()) if i in by_gid)]
-    res.text_hits = {k: v for k, v in res.text_hits.items() if k in set(res.gids)}
+    keep = set(res.gids)                                 # 先建好集合：写在推导式里会每个元素重建一次（2 万张命中要卡 8 秒）
+    res.text_hits = {k: v for k, v in res.text_hits.items() if k in keep}
     res.suggestions.sort(key=lambda s: (s.token, CAT_ORDER.index(s.cat) if s.cat in CAT_ORDER else 99, -s.count))
     return res
 
