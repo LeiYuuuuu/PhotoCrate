@@ -43,17 +43,22 @@ def make(gid, dt="2026-05-01T10:00:00", name=None, role="jpeg", path=None):
 # 闭眼 / 表情
 # ---------------------------------------------------------------------------
 
-def face(x, pc=None, eo=0.15, ex=None, y=0.3, w=0.1, h=0.14):
+def face(x, pc=None, eo=0.15, ex=None, y=0.3, w=0.1, h=0.14, pn=None):
     f = {"b": [x, y, w, h], "eo": [eo, eo]}
     if pc is not None:
         f["pc"] = pc
+    if pn is not None:
+        f["pn"] = pn
     if ex is not None:
         f["ex"] = ex
     return f
 
 
+# 表情模型的 7 类：生气 嫌弃 害怕 开心 平静 难过 惊讶
 HAPPY = [0.01, 0.01, 0.01, 0.9, 0.05, 0.01, 0.01]
-SAD = [0.05, 0.05, 0.05, 0.05, 0.1, 0.65, 0.05]
+SAD = [0.05, 0.05, 0.05, 0.05, 0.1, 0.65, 0.05]          # 模型常把严肃 / 低头的脸判成这样
+ANGRY = [0.7, 0.1, 0.05, 0.02, 0.08, 0.03, 0.02]
+NEUTRAL = [0.01, 0.01, 0.01, 0.05, 0.9, 0.01, 0.01]
 
 
 def burst(faces_per_photo, blur=(120, 110, 100, 90)):
@@ -90,27 +95,54 @@ def test_squint_everywhere_is_not_closed():
     assert all(not g.feats["faceq"]["closed"] for g in gs)
 
 
-def test_no_clip_no_eye_verdict_but_expression_works():
-    gs = burst([[face(0.3, eo=0.02, ex=SAD)], [face(0.3, eo=0.2, ex=HAPPY)]], blur=(120, 100))
+def test_no_clip_no_eye_verdict_strong_expression_still_counts():
+    gs = burst([[face(0.3, eo=0.02, ex=ANGRY)], [face(0.3, eo=0.2, ex=NEUTRAL)]], blur=(120, 100))
     faceq.apply(gs)
     assert gs[0].feats["faceq"]["closed"] == []                   # 没有 CLIP 的判断：不标闭眼
-    assert gs[0].feats["faceq"]["bad"] == [0] and gs[1].feats["faceq"]["bad"] == []
+    assert gs[0].feats["faceq"]["bad"] == [0] and gs[1].feats["faceq"]["bad"] == []   # 生气单独就算
     assert gs[1].feats["similar"]["best"]
 
 
-NEUTRAL = [0.01, 0.01, 0.01, 0.05, 0.9, 0.01, 0.01]
-
-
-def test_expression_needs_a_smiling_reference():
-    # 别的几张只是平静（没在笑）：严肃 / 低头被模型看成“难过”也不提醒
+def test_sad_alone_is_not_bad_expression():
+    # 模型说“难过”、CLIP 没看出哭 / 皱眉（严肃、低头的脸）：不标，哪怕别的几张在笑
+    gs = burst([[face(0.3, ex=SAD, pn=0.2)], [face(0.3, ex=HAPPY, pn=0.05)]], blur=(120, 100))
+    faceq.apply(gs)
+    assert all(not g.feats["faceq"]["bad"] for g in gs)
+    # 没在笑只影响挑“最佳”：在笑的那张优先（不打标签，悬停说明里提一句）
+    assert gs[0].feats["faceq"]["nosmile"] == [0] and gs[1].feats["similar"]["best"]
+    assert faceq.issues(gs[0]) == (0, 0) and "没在笑" in faceq.describe(gs[0])
+    # 没有 CLIP 时“难过”同样不算
     gs = burst([[face(0.3, ex=SAD)], [face(0.3, ex=NEUTRAL)]], blur=(120, 100))
     faceq.apply(gs)
     assert all(not g.feats["faceq"]["bad"] for g in gs)
-    # 唯一在笑的那张闭着眼：不拿它当表情的参照
-    gs = burst([[face(0.3, pc=0.2, eo=0.16, ex=SAD)], [face(0.3, pc=0.95, eo=0.02, ex=HAPPY)],
-                [face(0.3, pc=0.25, eo=0.15, ex=NEUTRAL)]])
+
+
+def test_sad_confirmed_by_clip_is_bad_expression():
+    gs = burst([[face(0.3, ex=SAD, pn=0.8)], [face(0.3, ex=NEUTRAL, pn=0.1)]], blur=(120, 100))
     faceq.apply(gs)
-    assert gs[1].feats["faceq"]["closed"] == [0] and not gs[0].feats["faceq"]["bad"]
+    assert gs[0].feats["faceq"]["bad"] == [0] and gs[1].feats["similar"]["best"]
+    assert faceq.describe(gs[0]) == "1 人表情不佳"
+
+
+def test_same_expression_in_every_shot_not_flagged():
+    # 每张都一样“凶”（妆容、角色设定）：没有更好的一张可选，不标
+    gs = burst([[face(0.3, ex=ANGRY)], [face(0.3, ex=ANGRY)], [face(0.3, ex=ANGRY)]])
+    faceq.apply(gs)
+    assert all(not g.feats["faceq"]["bad"] for g in gs)
+
+
+def test_closed_frame_not_judged_for_expression():
+    gs = burst([[face(0.3, pc=0.95, eo=0.02, ex=SAD, pn=0.9)], [face(0.3, pc=0.25, eo=0.15, ex=NEUTRAL, pn=0.1)]])
+    faceq.apply(gs)
+    assert gs[0].feats["faceq"]["closed"] == [0] and gs[0].feats["faceq"]["bad"] == []
+
+
+def test_bad_score_rule():
+    assert faceq.bad_score({"ex": SAD}) == pytest.approx(0.15)                 # 只剩生气 / 嫌弃 / 害怕那部分
+    assert faceq.bad_score({"ex": SAD, "pn": 0.3}) == pytest.approx(0.3)       # 两边取小
+    assert faceq.bad_score({"ex": SAD, "pn": 0.9}) == pytest.approx(0.8)
+    assert faceq.bad_score({"ex": ANGRY}) == pytest.approx(0.85)
+    assert faceq.bad_score({}) is None
 
 
 def test_single_person_tracked_through_zoom():

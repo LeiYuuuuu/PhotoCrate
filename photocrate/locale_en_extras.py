@@ -8,6 +8,7 @@ EN_EXTRAS = {
     # ---- 闭眼 / 表情 ----
     '{0} 人闭眼': '{0} with eyes closed',
     '{0} 人表情不佳': '{0} with a poor expression',
+    '{0} 人没在笑（别的几张在笑）': '{0} not smiling (smiling in other shots)',
     '表情识别（MobileFaceNet · 连拍里挑表情好的）': 'Facial expression (MobileFaceNet · picks good expressions in bursts)',
     '闭眼 / 表情': 'Eyes / expression',
     '检查': 'Check',

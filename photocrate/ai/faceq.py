@@ -1,5 +1,6 @@
 """连拍里的闭眼 / 表情检查：同一组连拍里，每个人只和他自己在其他几张里比——
-别的几张睁着眼、这张闭着，就标“闭眼”；表情明显比其他几张差（皱眉、哭丧着脸、话说到一半），就标“表情不佳”。
+别的几张睁着眼、这张闭着，就标“闭眼”；这张在哭、皱眉、做鬼脸、生气，而别的几张没有，就标“表情不佳”。
+没在笑不算表情不佳（严肃、平静都是正常表情），只在挑“最佳”时让在笑的那张优先。
 每组的“最佳”优先挑没人闭眼、表情好、又够清晰的那张，其余的“建议待确认”也就跟着变。
 
 - 人脸：在长边 1600 的预览上用 YuNet 重新检测（要五官关键点对齐；扫描时缓存的人脸没有关键点），
@@ -9,7 +10,12 @@
   和戴美瞳的睁眼，CLIP 偶尔把眯眼看成闭眼，两个合起来最稳（在约 300 张真实人脸上人工标注检验过）。
   再和同一个人在同一组里最“睁眼”的那张比：分够高、又比它高出一截才算闭眼；只出现在一张里的人不判断。
   没有下载 CLIP 模型时不判断闭眼（只看像素误报太多）。
-- 表情：OpenCV Zoo 的 MobileFaceNet 表情识别（7 类，4.8 MB，可选下载）。同样只和自己在别的几张里比。
+- 表情：OpenCV Zoo 的 MobileFaceNet 表情识别（7 类，4.8 MB，可选下载）。它常把严肃、低头、闭眼的脸判成“难过”
+  （本机约 260 张没有一张真的表情不好的人脸里，“负面 ≥ 0.5”误报 19 张，全来自“难过”；生气 / 嫌弃 / 害怕最高只到 0.17）。
+  所以“难过”单独不算数，要中文 CLIP 也看出“在哭 / 皱眉 / 做鬼脸”才算（两者同时误报 0 张）；生气 / 嫌弃 / 害怕把握够高可以单独算。
+  用 30 张公开授权的图（Wikimedia Commons）检验：16 张真·表情不好里标出 11 张，7 张平静 / 严肃的 0 误报；
+  漏掉的是闭眼大哭（会被标成闭眼）、皱纹很深的老人皱眉、露齿的鬼脸（模型看成在笑）。
+  同样只和自己在别的几张里比，闭着眼的那张不判断表情。
 - 结果按主图指纹缓存在 cache.db（借用 ocr 表按版本键存 JSON 的通用存储，键 FACEQ_KEY），移动 / 改名后依然命中。
 """
 from __future__ import annotations
@@ -27,16 +33,15 @@ from ..i18n import t as _t
 
 log = logging.getLogger(__name__)
 
-FACEQ_KEY = "faceq-v1"
+FACEQ_KEY = "faceq-v2"        # v2：多存 CLIP 的“哭 / 皱眉 / 鬼脸”把握（pn）
 PREVIEW_SIDE = 1600
 MIN_FACE = 48                 # 预览里比这小的脸不看（像素太少，量不准）
 CLOSED_SCORE = 0.70           # 闭眼分至少这么高……
 CLOSED_MARGIN = 0.15          # ……而且比同组里自己最低的一张高出这么多，才算闭眼
 DEFAULT_OPEN = 0.15           # 量不出睁眼程度（墨镜、过暗）时按“正常睁着”算，只看 CLIP
-EXPR_DROP = 0.3               # 表情分比同组里自己最好的一张低这么多……
-EXPR_BAD = 0.5                # ……负面表情的把握超过这个……
-EXPR_SMILE = 0.5              # ……而且那张“最好的”确实在笑，才算表情不佳（模型常把严肃、低头、闭眼看成“难过”，
-                              #   只有“别的几张在笑、这张没笑还像在皱眉”才值得提醒；在本机约 300 张人脸上看过）
+BAD_SCORE = 0.5               # 表情不佳分至少这么高……
+BAD_MARGIN = 0.3              # ……而且比同组里自己最好的一张高出这么多，才算表情不佳
+SMILE_HI, SMILE_LO = 0.7, 0.3  # 别的几张笑的把握 ≥ 0.7、这张 < 0.3：“没在笑”（不标，只影响挑最佳）
 
 TEMPLATE = np.array([[38.2946, 51.6963], [73.5318, 51.5014], [56.0252, 71.7366],
                      [41.5493, 92.3655], [70.7299, 92.2041]], np.float32)       # 112×112 上的五个点
@@ -45,8 +50,19 @@ EXPR_LABELS = ["angry", "disgust", "fearful", "happy", "neutral", "sad", "surpri
 EXPR_NAMES = {"angry": "生气", "disgust": "嫌弃", "fearful": "害怕", "happy": "开心", "neutral": "平静",
               "sad": "难过", "surprised": "惊讶"}
 BAD = (0, 1, 2, 5)
+STRONG = (0, 1, 2)            # 生气 / 嫌弃 / 害怕：在平静的脸上几乎不会误报
 CLOSED_PROMPTS = ["一个闭着眼睛的人", "闭上眼睛的人像照片", "眨眼的瞬间，眼睛闭上了", "a person with closed eyes"]
 OPEN_PROMPTS = ["一个睁着眼睛的人", "睁大眼睛看着前方的人像照片", "眼睛睁开的人", "a person with open eyes"]
+# “哭 / 皱眉 / 鬼脸”对“平静 / 严肃 / 低头 / 闭眼 / 浓妆”：中英各一套合在一起。比较过几组描述：本机 263 张 + 公开图 7 张正常表情上
+# 0 误报的前提下，这一组在 16 张公开的真·表情不好（哭、皱眉、做鬼脸、生气喊叫）里抓到 11 张（只用中文的抓 12 张但有 2 张误报）
+NEG_PROMPTS = ["一个正在哭的人", "一个哭泣的婴儿", "一个皱着眉头、愁眉苦脸的人", "一个表情痛苦的人", "一个生气地大喊大叫的人",
+               "一个龇牙咧嘴、表情扭曲的人", "一个满脸不高兴的人",
+               "a person crying", "a crying baby", "a person frowning unhappily", "a person in pain",
+               "a person shouting angrily", "a person grimacing", "an upset, unhappy person"]
+CALM_PROMPTS = ["一个表情平静的人", "一个表情严肃的人", "一个面无表情的人", "一个微笑的人", "一个低着头的人",
+                "一个闭着眼睛的人", "一个化着浓妆的人",
+                "a person with a calm face", "a person with a serious face", "an expressionless face", "a smiling person",
+                "a person looking down", "a person with eyes closed", "a person wearing heavy makeup"]
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +162,23 @@ def expr_score(p) -> tuple[float, float]:
     return float(good), float(bad)
 
 
+def bad_score(f: dict) -> float | None:
+    """表情不佳分：生气 / 嫌弃 / 害怕的把握；或者“负面（含难过）”与 CLIP 的“哭 / 皱眉 / 鬼脸”两者里较小的那个
+    （难过要两边都同意才算）。没有表情模型的结果时 None。"""
+    ex = f.get("ex")
+    if not ex or len(ex) < 7:
+        return None
+    strong = float(sum(ex[i] for i in STRONG))
+    pn = f.get("pn")
+    both = min(expr_score(ex)[1], float(pn)) if pn is not None else 0.0
+    return max(strong, both)
+
+
+def smile(f: dict) -> float | None:
+    ex = f.get("ex")
+    return float(ex[3]) if ex and len(ex) >= 7 else None
+
+
 class FaceQEngine:
     def __init__(self, det_path: str, expr_path: str | None):
         import cv2
@@ -155,17 +188,24 @@ class FaceQEngine:
         self._lock = threading.Lock()
         self._prompts = None
 
-    def closed_probs(self, clip, faces_bgr: list[np.ndarray]) -> list[float]:
-        """中文 CLIP 看对齐后的整张脸：是“闭着眼”的把握（8 条描述 softmax 后闭眼那 4 条的和）。"""
+    def clip_probs(self, clip, faces_bgr: list[np.ndarray]) -> list[tuple[float, float]]:
+        """中文 CLIP 看对齐后的整张脸 → [(闭着眼的把握, 在哭 / 皱眉 / 做鬼脸的把握)]。
+        两组描述各自 softmax，取前一半（闭眼 / 负面表情）的和；同一次图像特征算两样。"""
         from PIL import Image
         if self._prompts is None:
-            self._prompts = clip.encode_texts(CLOSED_PROMPTS + OPEN_PROMPTS)
+            self._prompts = (clip.encode_texts(CLOSED_PROMPTS + OPEN_PROMPTS), clip.encode_texts(NEG_PROMPTS + CALM_PROMPTS))
         ims = [Image.fromarray(self.cv2.cvtColor(f, self.cv2.COLOR_BGR2RGB)) for f in faces_bgr]
-        logits = 100.0 * (clip.encode_images(ims) @ self._prompts.T)
-        logits -= logits.max(axis=1, keepdims=True)
-        p = np.exp(logits)
-        p /= p.sum(axis=1, keepdims=True)
-        return [round(float(v), 4) for v in p[:, :len(CLOSED_PROMPTS)].sum(axis=1)]
+        emb = clip.encode_images(ims)
+
+        def part(T, n):
+            logits = 100.0 * (emb @ T.T)
+            logits -= logits.max(axis=1, keepdims=True)
+            p = np.exp(logits)
+            p /= p.sum(axis=1, keepdims=True)
+            return p[:, :n].sum(axis=1)
+        pc = part(self._prompts[0], len(CLOSED_PROMPTS))
+        pn = part(self._prompts[1], len(NEG_PROMPTS))
+        return [(round(float(a), 4), round(float(b), 4)) for a, b in zip(pc, pn)]
 
     def expression(self, bgr112: np.ndarray) -> list[float]:
         cv2 = self.cv2
@@ -178,7 +218,8 @@ class FaceQEngine:
 
     def analyze(self, rgb: np.ndarray, clip=None) -> dict:
         """一张预览（RGB uint8）→ {"w", "h", "fer", "clip", "faces": [{"b": [x,y,w,h]（0–1）, "eo": [右, 左],
-        "pc": 闭着眼的把握, "ex": 7 类表情概率}]}。clip = 中文 CLIP 引擎（没有就不判断闭眼）。"""
+        "pc": 闭着眼的把握, "pn": 在哭 / 皱眉 / 做鬼脸的把握, "ex": 7 类表情概率}]}。
+        clip = 中文 CLIP 引擎（没有就不判断闭眼，表情只认生气 / 嫌弃 / 害怕）。"""
         cv2 = self.cv2
         bgr = cv2.cvtColor(np.ascontiguousarray(rgb), cv2.COLOR_RGB2BGR)
         h, w = bgr.shape[:2]
@@ -204,8 +245,8 @@ class FaceQEngine:
                 bigs.append(big)
             if clip is not None and bigs:
                 try:
-                    for face, pc in zip(out, self.closed_probs(clip, bigs)):
-                        face["pc"] = pc
+                    for face, (pc, pn) in zip(out, self.clip_probs(clip, bigs)):
+                        face["pc"], face["pn"] = pc, pn
                 except Exception as e:
                     log.warning("闭眼判断（CLIP）失败：%s", e)
                     clip = None
@@ -315,7 +356,8 @@ def _tracks(gs: list) -> dict[tuple[int, int], int]:
 
 
 def judge(gs: list) -> None:
-    """给一组连拍里的每张照片写上 feats["faceq"]["closed"] / ["bad"]（闭眼 / 表情不佳的人脸序号）。"""
+    """给一组连拍里的每张照片写上 feats["faceq"]["closed"] / ["bad"]（闭眼 / 表情不佳的人脸序号，会标在缩略图上）
+    和 ["nosmile"]（别的几张在笑、这张没笑：不标，只在挑“最佳”时往后排）。"""
     owner = _tracks(gs)
     by_gid = {g.gid: g for g in gs}
     least_closed: dict[int, float] = {}
@@ -331,30 +373,35 @@ def judge(gs: list) -> None:
         sc = closed_score(f)
         return sc is not None and sc >= CLOSED_SCORE and sc - least_closed.get(t, sc) >= CLOSED_MARGIN
 
-    best: dict[int, tuple[float, float]] = {}          # 每个人睁着眼的几张里表情最好的：(好的程度, 笑的把握)
+    least_bad: dict[int, float] = {}                   # 每个人睁着眼的几张里最低的表情不佳分
+    most_smile: dict[int, float] = {}                  # ……和笑得最明显的把握
     for (gid, i), t in owner.items():
         f = by_gid[gid].feats["faceq"]["faces"][i]
-        if f.get("ex") and not is_closed(f, t):
-            good = expr_score(f["ex"])[0]
-            if good > best.get(t, (-1.0, 0.0))[0]:
-                best[t] = (good, float(f["ex"][3]))
+        if is_closed(f, t):
+            continue
+        b, s = bad_score(f), smile(f)
+        if b is not None:
+            least_bad[t] = min(least_bad.get(t, b), b)
+        if s is not None:
+            most_smile[t] = max(most_smile.get(t, s), s)
     for g in gs:
         fq = g.feats.get("faceq")
         if fq is None:
             continue
-        closed, bad = [], []
+        closed, bad, nosmile = [], [], []
         for i, f in enumerate(fq.get("faces") or []):
             t = owner.get((g.gid, i))
             if t is None or count[t] < 2:
                 continue
             if is_closed(f, t):
                 closed.append(i)
-            elif f.get("ex") and t in best:
-                good, neg = expr_score(f["ex"])
-                ref_good, ref_smile = best[t]
-                if neg >= EXPR_BAD and ref_smile >= EXPR_SMILE and ref_good - good >= EXPR_DROP:
-                    bad.append(i)
-        fq["closed"], fq["bad"] = closed, bad
+                continue
+            b, s = bad_score(f), smile(f)
+            if b is not None and b >= BAD_SCORE and b - least_bad.get(t, b) >= BAD_MARGIN:
+                bad.append(i)
+            elif s is not None and s < SMILE_LO and most_smile.get(t, 0.0) >= SMILE_HI:
+                nosmile.append(i)
+        fq["closed"], fq["bad"], fq["nosmile"] = closed, bad, nosmile
 
 
 def issues(g) -> tuple[int, int]:
@@ -363,11 +410,13 @@ def issues(g) -> tuple[int, int]:
 
 
 def rerank(gs: list, blur_threshold: float = 60.0) -> None:
-    """组内重新排“最佳”：先看清不清楚（低于模糊阈值的往后放），再看几个人闭眼、几个人表情不佳，最后比清晰度。"""
+    """组内重新排“最佳”：先看清不清楚（低于模糊阈值的往后放），再看几个人闭眼、几个人表情不佳、
+    几个人在别的几张里笑了这张却没笑，最后比清晰度。"""
     def key(g):
         sc = float(g.feat("blur", "score") or 0)
         n_closed, n_bad = issues(g)
-        return (sc < blur_threshold, n_closed, n_bad, -sc, -g.total_size, g.name)
+        n_nosmile = len((g.feats.get("faceq") or {}).get("nosmile") or ())
+        return (sc < blur_threshold, n_closed, n_bad, n_nosmile, -sc, -g.total_size, g.name)
     for r, g in enumerate(sorted(gs, key=key)):
         g.feats["similar"]["rank"] = r + 1
         g.feats["similar"]["best"] = r == 0
@@ -381,7 +430,7 @@ def apply(groups, cache=None, blur_threshold: float = 60.0) -> int:
     for g in groups:                        # 不在连拍组里了：没有可比的，不标
         fq = g.feats.get("faceq")
         if fq is not None and g.gid not in member:
-            fq["closed"], fq["bad"] = [], []
+            fq["closed"], fq["bad"], fq["nosmile"] = [], [], []
     n = 0
     for gs in cs.values():
         if any("faceq" in g.feats for g in gs):
@@ -398,6 +447,9 @@ def describe(g) -> str:
         parts.append(_t("{0} 人闭眼", n_closed))
     if n_bad:
         parts.append(_t("{0} 人表情不佳", n_bad))
+    n_nosmile = len((g.feats.get("faceq") or {}).get("nosmile") or ())
+    if n_nosmile:                                     # 只在悬停说明里提一句，不打标签
+        parts.append(_t("{0} 人没在笑（别的几张在笑）", n_nosmile))
     return _t("、").join(parts)
 
 
