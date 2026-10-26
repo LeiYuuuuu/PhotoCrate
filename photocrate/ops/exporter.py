@@ -7,6 +7,7 @@
 - 长边缩到指定像素（或保持原尺寸），按 EXIF 方向转正，sRGB 色彩配置文件照旧保留；
 - 隐私：默认去掉 GPS（拍摄时间、相机型号保留）；也可以去掉全部 EXIF；
 - 可加文字水印（右下 / 左下 / 居中…，透明度可调）；
+- 分享前隐私体检（可选，默认关）：ops/privacy 找出手机号、身份证、车牌、快递单、二维码、路人脸，确认后只在导出的副本上打码；
 - 文件名：沿用原名，或按改名模板（与批量重命名相同）；重名自动加编号，绝不覆盖。
 视频不导出（会在结果里列出跳过了几个）。
 """
@@ -38,6 +39,8 @@ class ExportOptions:
     wm_opacity: float = 0.7
     wm_scale: float = 0.028          # 字号 = 长边 × 比例
     name_template: str = ""          # 空 = 原文件名
+    redact: dict = field(default_factory=dict)    # gid → [(x0, y0, x1, y1)]（0–1，转正后的图）：要打码的区域
+    redact_style: str = "mosaic"                  # mosaic / blur / block
 
 
 @dataclass
@@ -188,6 +191,10 @@ def render_one(g, opts: ExportOptions, exiftool: str | None = None, long_edge: i
     from PIL import Image
 
     im, exif, icc = load_full(g, exiftool)
+    boxes = opts.redact.get(g.gid) if opts.redact else None
+    if boxes:                                  # 先在原尺寸上打码，再缩小（缩小后的马赛克格子大小才一致）
+        from .privacy import redact
+        im = redact(im, boxes, opts.redact_style)
     le = opts.long_edge if long_edge is None else long_edge
     if le and max(im.size) > le:
         im.thumbnail((le, le), Image.Resampling.LANCZOS)
@@ -296,7 +303,8 @@ def export_album(groups, dst_dir: str, title: str, opts: ExportOptions, subtitle
         try:
             im, _, icc = render_one(g, ExportOptions(long_edge=opts.long_edge or 1920, watermark=opts.watermark,
                                                      wm_pos=opts.wm_pos, wm_opacity=opts.wm_opacity,
-                                                     strip_all=True), exiftool)
+                                                     strip_all=True, redact=opts.redact,
+                                                     redact_style=opts.redact_style), exiftool)
             name = os.path.basename(_unique(pdir, f"{i:04d}_{g.stem}", ".jpg", taken))
             kw = {"quality": int(opts.quality), "optimize": True, "progressive": True}
             if icc:

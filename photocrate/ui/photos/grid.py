@@ -533,7 +533,7 @@ class CardGrid(_SectionGrid):
         qp.drawText(QRectF(rect.left(), img.bottom() + 5, rect.width(), 20), Qt.AlignmentFlag.AlignVCenter, title)
         qp.setFont(font("cn", 8.5))
         qp.setPen(QColor(p.ink3))
-        sub = (f"{c.count:,}" if c.cover is not None or c.count else "") + (f" · {c.sub}" if c.sub else "")
+        sub = " · ".join(x for x in ((f"{c.count:,}" if c.cover is not None or c.count else ""), c.sub) if x)
         sub = QFontMetrics(font("cn", 8.5)).elidedText(sub, Qt.TextElideMode.ElideRight, int(rect.width()))
         qp.drawText(QRectF(rect.left(), img.bottom() + 24, rect.width(), 18), Qt.AlignmentFlag.AlignVCenter, sub)
 

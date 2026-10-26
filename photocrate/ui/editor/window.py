@@ -902,7 +902,7 @@ QStatusBar QPushButton:pressed {{ background: {p.accent}; color: {p.accent_ink};
         for title, fids in ((P_BLUR, ("gaussian", "motion", "surface", "lensblur")),
                             (_t("扭曲"), ("twirl", "wave", "ripple", "spherize", "pinch", "polar")),
                             (_t("锐化"), ("unsharp",)), (_t("杂色"), ("denoise", "noise")), (_t("人像"), ("skin",)),
-                            (_t("其他"), ("highpass", "mosaic", "posterize", "threshold"))):
+                            (_t("其他"), ("highpass", "mosaic", "posterize", "threshold", "negative"))):
             sub = m.addMenu(title)
             for fid in fids:
                 self._act(sub, FILTERS[fid].name + "…", lambda f=fid: self.run_filter(f))

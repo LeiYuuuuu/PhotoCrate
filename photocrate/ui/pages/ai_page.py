@@ -38,7 +38,7 @@ class AiPage(Page):
         mp.setFixedWidth(560 if is_en() else 520)
         self.model_panel = mp
         self.rows: dict[str, tuple[QLabel, TacButton]] = {}
-        for key in ("clip", "face", "ocr"):
+        for key in ("clip", "face", "expr", "ocr"):
             r = QHBoxLayout()
             name = QLabel(models.MODELS[key]["label"])
             name.setMinimumWidth(220)
@@ -230,7 +230,9 @@ class AiPage(Page):
             info(self, _t("下载失败"), _t('{0}<br><br>可以在“下载源”里换成国内镜像再试；或手动下载后放进 {1}。', last, models.models_dir()),
                  "ERROR")
             return
-        if models.ready(key):
+        if models.ready(key) and key == "expr":          # 只在挑片时用，不用重新分析全部照片
+            info(self, _t("下载完成"), _t("表情识别模型已就绪。到「05 挑片」页，连拍组会自动重新检查表情。"), "READY")
+        elif models.ready(key):
             if ask(self, _t("下载完成"), _t("模型已就绪。现在分析全部照片吗？（会重新扫描一遍，已有结果走缓存）"),
                    ok=_t("开始分析"), cancel=_t("稍后"), en="READY"):
                 self.analyze()

@@ -4,6 +4,8 @@
 - 智能相簿：人物（人脸分组）、地点（城市）、旅行（自动切分的行程）、事物与场景（CLIP）、
   媒体类型（视频 / 截图 / RAW / 实况 / 全景 / 含文字 / 文档 / 收藏 / 最近添加）、我的相簿。都随照片库自动更新。
 - 收藏 ♥ 和手动相簿存在 annotations.db（按图片文件指纹，移动 / 改名后依然有效），不改动照片文件。
+- 隐藏：隐藏的照片不出现在图库、相簿、搜索和局域网相册里，只在「已隐藏」相簿里看（可设密码，PBKDF2 存哈希）。
+  只是本软件里不显示，文件还在原来的文件夹，专业模式的整理页面（分区、挑片…）照样处理它们。
 - 搜索：一句话按空格拆成几个词，每个词在 照片里的文字 / 地点 / 人物 / 场景 / 日期与时段 / 相机 / 旅行 / 文件名 /
   类型 里找，几个词同时满足才算（“东京 拉面”= 在东京、照片里有“拉面”两个字…或场景是拉面）。
   每个词命中的类别给出“建议”，点一个就只按那一类找。AI 画面搜索（CLIP）由界面在后台另外补上。
@@ -33,6 +35,11 @@ PANORAMA_RATIO = 2.2
 
 def visible(groups: Iterable) -> list:
     return [g for g in groups if g.files]
+
+
+def shown(groups: Iterable, marks: "Marks | None") -> list:
+    """图库、相簿、搜索里能看到的照片：有文件、没有被隐藏。"""
+    return [g for g in groups if g.files and (marks is None or not marks.is_hidden(g))]
 
 
 def sort_key(g) -> tuple:
@@ -177,8 +184,11 @@ class Marks:
         self.store = store
         self.reload()
 
+    unlocked = False                 # 「已隐藏」相簿这次是否已经输过密码（离开相簿就重新锁上）
+
     def reload(self) -> None:
         self.fav: set[str] = set(self.store.all("favorite"))
+        self.hidden: set[str] = set(self.store.all("hidden"))
         self.items: dict[str, list[str]] = {s: list(d.get("ids") or []) for s, d in self.store.all("album_items").items()}
         self.albums: dict[str, UserAlbum] = {}
         for aid, d in self.store.all("albums").items():
@@ -203,6 +213,50 @@ class Marks:
         on = not all(self.is_fav(g) for g in groups)
         self.set_fav(groups, on)
         return on
+
+    # ---- 隐藏 ----
+    def is_hidden(self, g) -> bool:
+        return bool(self.hidden) and any(s in self.hidden for s in g.member_sigs)
+
+    def set_hidden(self, groups: list, on: bool) -> int:
+        sigs = [s for g in groups if g.files for s in g.member_sigs]
+        if on:
+            self.store.set_many({s: {"hidden": True} for s in sigs}, "hidden")
+            self.hidden.update(sigs)
+        else:
+            self.store.clear_many(sigs, "hidden")
+            self.hidden.difference_update(sigs)
+        return len(groups)
+
+    def hidden_gids(self, groups: Iterable) -> list[int]:
+        return [g.gid for g in newest_first(visible(groups)) if self.is_hidden(g)]
+
+    def has_password(self) -> bool:
+        return bool(self.store.all("lock").get("hidden"))
+
+    def set_password(self, pw: str | None) -> None:
+        """设置 / 去掉「已隐藏」相簿的密码（只存加盐的 PBKDF2 哈希）。"""
+        if not pw:
+            self.store.clear_many(["hidden"], "lock")
+            return
+        import hashlib
+        import os as _os
+        salt = _os.urandom(16)
+        it = 200_000
+        h = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt, it)
+        self.store.set_many({"hidden": {"salt": salt.hex(), "hash": h.hex(), "iter": it}}, "lock")
+
+    def check_password(self, pw: str) -> bool:
+        import hashlib
+        import hmac
+        rec = self.store.all("lock").get("hidden")
+        if not rec:
+            return True
+        try:
+            h = hashlib.pbkdf2_hmac("sha256", (pw or "").encode("utf-8"), bytes.fromhex(rec["salt"]), int(rec["iter"]))
+            return hmac.compare_digest(h.hex(), rec["hash"])
+        except (KeyError, ValueError):
+            return False
 
     # ---- 相簿 ----
     def album_list(self) -> list[UserAlbum]:
@@ -355,8 +409,11 @@ def recent_added(groups: Iterable, n: int = 300) -> list:
     return sorted(visible(groups), key=lambda g: g.primary_file.mtime_ns, reverse=True)[:n]
 
 
+HIDDEN_KEY = "media:hidden"
+
+
 def shelves(lib, marks: Marks | None) -> list[AlbumShelf]:
-    groups = visible(lib.groups)
+    groups = shown(lib.groups, marks)
     by_gid = {g.gid: g for g in groups}
     out: list[AlbumShelf] = []
 
@@ -370,6 +427,11 @@ def shelves(lib, marks: Marks | None) -> list[AlbumShelf]:
             gs = newest_first(g for g in groups if f(g))
         if gs or key == "favorite":
             media.albums.append(Album(f"media:{key}", _t(name), "", [g.gid for g in gs], _cover(gs), icon))
+    if marks is not None and (marks.hidden or marks.has_password()):
+        # 锁着时不给张数和封面（别人看不出藏了什么）；输过密码才列出照片
+        hid = marks.hidden_gids(lib.groups) if marks.unlocked or not marks.has_password() else []
+        sub = _t("已锁定") if marks.has_password() and not marks.unlocked else ""
+        media.albums.append(Album(HIDDEN_KEY, _t("已隐藏"), sub, hid, None, "⊘"))
     out.append(media)
 
     # 我的相簿
@@ -580,7 +642,8 @@ class SearchIndex:
     def __init__(self, lib, marks: Marks | None):
         self.lib = lib
         self.marks = marks
-        self.groups = visible(lib.groups)
+        self.groups = shown(lib.groups, marks)
+        ok = {g.gid for g in self.groups}
         self.text: dict[int, str] = {}
         self.place: dict[int, str] = {}
         self.camera: dict[int, str] = {}
@@ -621,6 +684,8 @@ class SearchIndex:
         for c in getattr(lib.ai, "people", []) or []:
             if c.named:
                 for gid in c.gids:
+                    if gid not in ok:
+                        continue
                     self.person[gid].add(norm(c.name))
                     self.person_names[norm(c.name)].add(gid)
 

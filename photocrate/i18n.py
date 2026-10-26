@@ -35,6 +35,8 @@ def set_language(lang: str | None) -> str:
         table.update(EN_SYNC)            # 自动同步
         from .locale_en_safety import EN_SAFETY
         table.update(EN_SAFETY)          # 安全检查新增的提示
+        from .locale_en_extras import EN_EXTRAS
+        table.update(EN_EXTRAS)          # 闭眼 / 表情、隐藏、批量编辑、隐私体检、手机互传
         table.update(EN)
         _EN = table
     return LANG

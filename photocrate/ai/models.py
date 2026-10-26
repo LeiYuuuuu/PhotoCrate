@@ -6,6 +6,7 @@
 - face：OpenCV Zoo 的 YuNet（人脸检测，230 KB）+ SFace（人脸特征，37 MB）—— 人物分组。来源 GitHub。
 - ocr：PaddleOCR PP-OCRv4 移动版的文字检测（4.7 MB）+ 识别（10.9 MB），RapidOCR 转成 ONNX
        —— 识别照片里的文字，「相册」里搜文字就能找到照片。来源 Hugging Face（可用镜像）。
+- expr：OpenCV Zoo 的 MobileFaceNet 表情识别（4.8 MB）—— 挑片时连拍组里找出表情不佳的。来源 GitHub。
 也可以手动把文件放进 models\\ 文件夹（或程序目录下的 models\\），文件名与下表一致即可。
 """
 from __future__ import annotations
@@ -41,6 +42,9 @@ FILES: dict[str, tuple[list[str], int]] = {
     "face_recognition_sface_2021dec.onnx": (
         [f"{GH_LFS}/face_recognition_sface/face_recognition_sface_2021dec.onnx",
          f"{GH_RAW}/face_recognition_sface/face_recognition_sface_2021dec.onnx"], 38_696_353),
+    "facial_expression_recognition_mobilefacenet_2022july.onnx": (
+        [f"{GH_LFS}/facial_expression_recognition/facial_expression_recognition_mobilefacenet_2022july.onnx",
+         f"{GH_RAW}/facial_expression_recognition/facial_expression_recognition_mobilefacenet_2022july.onnx"], 4_791_892),
     "ch_PP-OCRv4_det_infer.onnx": (
         [f"{HF}/{OCR_PATH}/ch_PP-OCRv4_det_infer.onnx", f"{HF_MIRROR}/{OCR_PATH}/ch_PP-OCRv4_det_infer.onnx"], 4_745_517),
     "ch_PP-OCRv4_rec_infer.onnx": (
@@ -53,6 +57,8 @@ SHA256: dict[str, str] = {
     "chinese_clip_vocab.txt": "45bbac6b341c319adc98a532532882e91a9cefc0329aa57bac9ae761c27b291c",
     "face_detection_yunet_2023mar.onnx": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
     "face_recognition_sface_2021dec.onnx": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+    "facial_expression_recognition_mobilefacenet_2022july.onnx":
+        "4f61307602fc089ce20488a31d4e4614e3c9753a7d6c41578c854858b183e1a9",
     "ch_PP-OCRv4_det_infer.onnx": "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9",
     "ch_PP-OCRv4_rec_infer.onnx": "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b",
 }
@@ -63,6 +69,9 @@ MODELS = {
     "face": {"label": _t("人脸检测 + 识别（YuNet · SFace）"),
              "files": ["face_detection_yunet_2023mar.onnx", "face_recognition_sface_2021dec.onnx"],
              "optional": [], "license": _t("OpenCV Zoo：MIT / Apache 2.0")},
+    "expr": {"label": _t("表情识别（MobileFaceNet · 连拍里挑表情好的）"),
+             "files": ["facial_expression_recognition_mobilefacenet_2022july.onnx"],
+             "optional": [], "license": _t("OpenCV Zoo：Apache 2.0")},
     "ocr": {"label": _t("文字识别（PP-OCRv4 · 照片里的文字可搜索）"),
             "files": ["ch_PP-OCRv4_det_infer.onnx", "ch_PP-OCRv4_rec_infer.onnx"],
             "optional": [], "license": _t("PaddleOCR：Apache 2.0；ONNX 转换：RapidOCR")},

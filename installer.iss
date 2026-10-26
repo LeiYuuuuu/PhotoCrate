@@ -1,6 +1,6 @@
 ﻿; Inno Setup 6 安装脚本：把 dist\PhotoCrate 打成 PhotoCrate-Setup.exe
 #define AppName "PhotoCrate"
-#define AppVersion "2.2.2"
+#define AppVersion "2.3.0"
 
 [Setup]
 AppId={{6E3B2E7A-8C1D-4F5B-9A3E-5C2D7B1A9F40}

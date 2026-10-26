@@ -150,6 +150,7 @@ class QuickEditPanel(QWidget):
     tab_changed = Signal(str)
     save = Signal()
     cancel = Signal()
+    copy = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -185,12 +186,19 @@ class QuickEditPanel(QWidget):
         r = QHBoxLayout()
         self.b_reset = TacButton(_t("还原"), "secondary", height=32)
         self.b_reset.clicked.connect(self.reset)
+        self.b_copy = TacButton(_t("拷贝编辑"), "secondary", height=32)
+        self.b_copy.setToolTip(_t("记下这些调整，之后在别的照片上右键 →「粘贴编辑」一次套到很多张（存储时也会自动记下）"))
+        self.b_copy.clicked.connect(self.copy.emit)
         self.b_cancel = TacButton(_t("取消"), "secondary", height=32)
         self.b_cancel.clicked.connect(self.cancel.emit)
         self.b_save = TacButton(_t("存储为新照片"), "primary", en="SAVE", height=32)
         self.b_save.setToolTip(_t("在原片旁边另存一张（原名_编辑.jpg，保留 EXIF），原片不会被修改"))
         self.b_save.clicked.connect(self.save.emit)
-        r.addWidget(self.b_reset)
+        r0 = QHBoxLayout()                    # 面板只有 340 宽：四个按钮分两行
+        r0.addWidget(self.b_reset)
+        r0.addWidget(self.b_copy)
+        r0.addStretch(1)
+        v.addLayout(r0)
         r.addWidget(self.b_cancel)
         r.addStretch(1)
         r.addWidget(self.b_save)
@@ -234,8 +242,32 @@ QPushButton[preset="true"]:checked {{ border-color: {p.accent}; color: {p.ink}; 
             v.addWidget(micro_label(title))
             for key, name in keys:
                 v.addLayout(self._slider(key, _t(name)))
+        v.addSpacing(6)
+        v.addWidget(micro_label(_t("底片")))
+        nr = QHBoxLayout()
+        self.b_neg = TacButton(_t("负片反转"), "secondary", height=30)
+        self.b_neg.setCheckable(True)
+        self.b_neg.setToolTip(_t("用相机翻拍 / 扫描的底片转成正片：自动去掉彩色负片的橙色片基、校正偏色"))
+        self.b_neg.toggled.connect(self._negative)
+        self.neg_mode = QComboBox()
+        from ...edit.negative import MODES
+        for k, name in MODES:
+            self.neg_mode.addItem(name, k)
+        self.neg_mode.currentIndexChanged.connect(lambda _: self._negative(self.b_neg.isChecked()))
+        nr.addWidget(self.b_neg)
+        nr.addWidget(self.neg_mode, 1)
+        v.addLayout(nr)
         v.addStretch(1)
         return self._scroll(w)
+
+    def _negative(self, on: bool) -> None:
+        if self._mute:
+            return
+        self.state.negative = self.neg_mode.currentData() if on else None
+        if self.state.auto:                    # 自动增强要按反转后的样子重新算
+            self._auto(True)
+            return
+        self._emit()
 
     def _slider(self, key: str, name: str) -> QHBoxLayout:
         _, lo, hi, dec = adjust.SLIDERS[key]
@@ -275,7 +307,8 @@ QPushButton[preset="true"]:checked {{ border-color: {p.accent}; color: {p.ink}; 
     def _auto(self, on: bool) -> None:
         if self._mute:
             return
-        self.state.auto = quick.auto_params(self.base) if on and getattr(self, "base", None) is not None else {}
+        base = getattr(self, "base", None)
+        self.state.auto = quick.auto_params(quick.pre_color(base, self.state)) if on and base is not None else {}
         self._emit()
 
     def _filter_page(self) -> QWidget:
@@ -435,6 +468,9 @@ QPushButton[preset="true"]:checked {{ border-color: {p.accent}; color: {p.ink}; 
             s.setValue(int(round(float(st.sliders.get(key, 0.0)) * mul)))
             self._slid_label(key)
         self.b_auto.setChecked(bool(st.auto))
+        self.b_neg.setChecked(bool(st.negative))
+        if st.negative:
+            self.neg_mode.setCurrentIndex(max(0, self.neg_mode.findData(st.negative)))
         self.preset_btns.get(st.preset, self.preset_btns[None]).setChecked(True)
         self.amount.setValue(int(st.amount))
         self.angle.setValue(int(round(st.angle * 10)))
@@ -530,6 +566,7 @@ class PhotoDetail(QWidget):
         self.edit.aspect_changed.connect(self._apply_aspect)
         self.edit.save.connect(self.save_edit)
         self.edit.cancel.connect(self.cancel_edit)
+        self.edit.copy.connect(self.copy_edit)
         self.side.addWidget(self.info)
         self.side.addWidget(self.edit)
         mid.addWidget(self.side)
@@ -738,6 +775,14 @@ class PhotoDetail(QWidget):
         self.edit.state.crop = (0.0, 0.0, 1.0, 1.0) if r is None else centered_aspect(r, w, h)
         self._render(final=True)
 
+    def copy_edit(self) -> None:
+        st = self.edit.state
+        if st.is_identity():
+            self.page.status(_t("还没有做任何调整，没有可拷贝的"))
+            return
+        self.page.copied_edit = (st.copy(), self.group.name if self.group else "")
+        self.page.status(_t("已拷贝编辑（{0}）：在别的照片上右键 →「粘贴编辑」", quick.describe(st)))
+
     def save_edit(self) -> None:
         g = self.group
         st = self.edit.state.copy()
@@ -746,6 +791,7 @@ class PhotoDetail(QWidget):
         if st.is_identity():
             info(self, _t("没有修改"), _t("还没有做任何调整。"), "NOTICE")
             return
+        self.page.copied_edit = (st.copy(), g.name)          # 存储的同时记下，方便马上粘贴到别的照片
         lib = self.ctx.library
 
         def job(prog, cancel):

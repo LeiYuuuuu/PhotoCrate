@@ -404,9 +404,14 @@ class ExportDialog(_Base):
         self.cb_gps.setChecked(bool(s.get("export_strip_gps", True)))
         self.cb_all = QCheckBox(_t("去掉全部 EXIF 信息"))
         self.cb_all.setChecked(bool(s.get("export_strip_all", False)))
+        self.cb_priv = QCheckBox(_t("分享前隐私体检：找出手机号、证件号、车牌、快递单、二维码和路人的脸，确认后打码"))
+        self.cb_priv.setToolTip(_t("导出前逐张检查，在确认窗口里勾选要遮住的地方；只在导出的照片上打码，原片不变。"
+                                   "照片里的文字需要文字识别模型（「相册」页可下载）。"))
+        self.cb_priv.setChecked(bool(s.get("export_privacy_check", False)))
         pv = QVBoxLayout()
         pv.addWidget(self.cb_gps)
         pv.addWidget(self.cb_all)
+        pv.addWidget(self.cb_priv)
         g.addLayout(pv, 4, 1)
         g.addWidget(QLabel(_t("文件名")), 5, 0)
         nr = QHBoxLayout()
@@ -510,6 +515,7 @@ class ExportDialog(_Base):
         s.set("export_wm_opacity", o.wm_opacity)
         s.set("export_strip_gps", o.strip_gps)
         s.set("export_strip_all", o.strip_all)
+        s.set("export_privacy_check", self.cb_priv.isChecked())
         if self.cb_name.isChecked():
             s.set("export_name_template", o.name_template)
         self.accept()
@@ -525,6 +531,13 @@ def run_export(ctx, parent, dlg: ExportDialog) -> None:
     d = dlg.dst.text().strip()
     groups = dlg.groups
     et = ctx.library.exiftool_path
+    if dlg.cb_priv.isChecked():
+        from .privacy_dialog import check_before_export
+        checked = check_before_export(ctx, parent, groups)
+        if checked is None:                       # 在确认窗口里取消了导出
+            ctx.status.emit(_t("已取消导出"))
+            return
+        o.redact, o.redact_style = checked
     if dlg.album:
         title = dlg.title.text().strip() or _t("相册")
         show_map = dlg.cb_map.isChecked()

@@ -622,7 +622,13 @@ class Library:
         """按当前设置重新做连拍 / 相似分组（只用缓存的指纹，几毫秒）。"""
         s = self.settings
         groups = self.groups if groups is None else groups
-        return group_similar(groups, float(s.get("similar_gap_seconds", 10)), int(s.get("similar_threshold", 12)))
+        n = group_similar(groups, float(s.get("similar_gap_seconds", 10)), int(s.get("similar_threshold", 12)))
+        try:                                     # 检查过闭眼 / 表情的连拍组：重排每组的“最佳”
+            from ..ai import faceq
+            faceq.apply(groups, self.cache, float(s.get("blur_threshold", 60)))
+        except Exception as e:
+            log.warning("闭眼 / 表情检查结果载入失败：%s", e)
+        return n
 
     # ---- GPS 补全的参考数据 ------------------------------------------------
     def load_references(self, progress: Callable[[str], None] | None = None,

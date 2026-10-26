@@ -164,6 +164,7 @@ DEFAULTS: dict[str, Any] = {
     "import_template": "{年}/{年月日}",  # 导入向导：存储卡照片放到哪个文件夹
     "import_dir": "",
     "export_dir": "",
+    "export_privacy_check": False,    # 导出前做隐私体检（手机号、证件、车牌、二维码、路人脸），确认后打码
     "xmp_update_existing": True,      # 已有 .xmp 时更新其中对应字段（先备份，可撤销）
     # 批量重命名
     "rename_template": "{日期}_{市|省|国家|未知地点}_{序号}",
@@ -181,6 +182,10 @@ DEFAULTS: dict[str, Any] = {
     "ai_faces": True,                 # 模型就绪后，扫描时自动检测人脸
     "ocr_enabled": True,              # 文字识别模型就绪后，扫描时自动识别照片里的文字
     "photos_zoom": 5,                 # 「相册」网格每行几张（3–12）
+    "faceq_auto": True,               # 打开「挑片」页时自动检查连拍组里的闭眼 / 表情
+    "lan_upload_dir": "",             # 手机互传：上传的照片放到哪里（空 = 第一个照片文件夹下的「手机上传」）
+    "lan_allow_upload": True,
+    "lan_allow_browse": True,         # 手机互传：允许在手机 / 电视上浏览相册（只读）
     "ai_mirror": "auto",              # 模型下载源：auto（先官方后镜像）/ hf / mirror
     "face_threshold": 0.42,           # 人脸相似度（余弦）达到多少算同一人
     "face_min_size": 40,              # 预览图（长边 1024）里小于多少像素的脸忽略

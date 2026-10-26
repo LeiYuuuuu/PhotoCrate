@@ -2,7 +2,8 @@
 
 只是一组参数（QuickState），像素计算全部交给 adjust.develop，与修图窗口的调整图层是同一套算法。
 预览在缩小的图上算（RenderCtx.scale 让半径类效果看起来一致），保存时在原尺寸上再算一次，写成新文件——原片只读。
-处理顺序：转 90° / 翻转 → 拉直（自动放大到没有空角）→ 裁剪 → 调整。
+处理顺序：转 90° / 翻转 → 拉直（自动放大到没有空角）→ 裁剪 → 负片反转 → 统一色调 → 调整。
+「复制编辑」把一份 QuickState 存下来，「粘贴编辑」按勾选的部分（paste_state）套到别的照片上。
 """
 from __future__ import annotations
 
@@ -36,14 +37,21 @@ class QuickState:
     flip: bool = False                                # 水平翻转
     angle: float = 0.0                                # 拉直角度（度，顺时针为正）
     crop: tuple = (0.0, 0.0, 1.0, 1.0)                # 在“转正、拉直之后”的图上的裁剪框（0–1）
+    negative: str | None = None                       # 负片反转：None / "color" / "bw"
+    match: dict | None = None                         # 统一色调：参考照片的 Lab 统计 + {"amount": 0–1, "ref": 文件名}
+    reauto: bool = False                              # 粘贴时：自动增强按每张照片重新算
 
     def copy(self) -> "QuickState":
         return copy.deepcopy(self)
 
+    def match_on(self) -> bool:
+        return bool(self.match) and float(self.match.get("amount") or 0) > 0
+
     def is_identity(self) -> bool:
-        return (not any(abs(float(v)) > 1e-6 for v in self.sliders.values()) and not self.auto
+        return (not any(abs(float(v)) > 1e-6 for v in self.sliders.values()) and not self.auto and not self.reauto
                 and (self.preset is None or self.amount <= 0) and self.rot % 4 == 0 and not self.flip
-                and abs(self.angle) < 1e-3 and tuple(self.crop) == (0.0, 0.0, 1.0, 1.0))
+                and abs(self.angle) < 1e-3 and tuple(self.crop) == (0.0, 0.0, 1.0, 1.0)
+                and not self.negative and not self.match_on())
 
     def geometry_changed(self) -> bool:
         return self.rot % 4 != 0 or self.flip or abs(self.angle) > 1e-3 or tuple(self.crop) != (0.0, 0.0, 1.0, 1.0)
@@ -143,9 +151,21 @@ def apply_geometry(rgb: np.ndarray, st: QuickState) -> np.ndarray:
     return np.ascontiguousarray(out[t:b, l:r])
 
 
+def pre_color(img: np.ndarray, st: QuickState) -> np.ndarray:
+    """调整之前的整体换色：负片反转、统一色调（都按这张图自己的统计量算）。"""
+    if st.negative:
+        from .negative import invert
+        img = invert(img, st.negative)
+    if st.match_on():
+        from .colormatch import transfer
+        img = transfer(img, st.match, float(st.match["amount"]))
+    return img
+
+
 def apply(rgb: np.ndarray, st: QuickState, scale: float = 1.0, geometry: bool = True) -> np.ndarray:
     """float32 RGB（0–1）→ 编辑后的 float32 RGB。scale = 这张图相对原尺寸的比例（预览时 < 1）。"""
     img = apply_geometry(rgb, st) if geometry else rgb
+    img = pre_color(img, st)
     p = st.params()
     if adjust.is_identity(p):
         return img
@@ -172,10 +192,67 @@ def to_rgba8(rgb: np.ndarray) -> np.ndarray:
     return out
 
 
+PASTE_PARTS = [("adjust", "调整滑块"), ("auto", "自动增强（每张按自己的明暗重新算）"), ("filter", "滤镜"),
+               ("negative", "负片反转"), ("match", "统一色调"), ("geometry", "裁剪与旋转")]
+
+
+def parts_of(st: QuickState) -> list[str]:
+    """这份编辑里有哪些部分（粘贴对话框只列出有内容的）。"""
+    out = []
+    if any(abs(float(v)) > 1e-6 for v in st.sliders.values()):
+        out.append("adjust")
+    if st.auto or st.reauto:
+        out.append("auto")
+    if st.preset and st.amount > 0:
+        out.append("filter")
+    if st.negative:
+        out.append("negative")
+    if st.match_on():
+        out.append("match")
+    if st.geometry_changed():
+        out.append("geometry")
+    return out
+
+
+def paste_state(st: QuickState, parts) -> QuickState:
+    """只保留勾选的部分；自动增强改成“每张重新算”（不同照片明暗不同，照搬数值没意义）。"""
+    out = QuickState()
+    parts = set(parts)
+    if "adjust" in parts:
+        out.sliders = dict(st.sliders)
+    if "auto" in parts and (st.auto or st.reauto):
+        out.reauto = True
+    if "filter" in parts:
+        out.preset, out.amount = st.preset, st.amount
+    if "negative" in parts:
+        out.negative = st.negative
+    if "match" in parts and st.match:
+        out.match = copy.deepcopy(st.match)
+    if "geometry" in parts:
+        out.rot, out.flip, out.angle, out.crop = st.rot, st.flip, st.angle, tuple(st.crop)
+    return out
+
+
+def for_photo(st: QuickState, rgb: np.ndarray) -> QuickState:
+    """粘贴到某一张时的最终参数：需要的话按这张照片重新算自动增强。"""
+    if not st.reauto:
+        return st
+    out = st.copy()
+    out.reauto = False
+    base = pre_color(apply_geometry(rgb, st), st)
+    small = base[:: max(1, base.shape[0] // 600), :: max(1, base.shape[1] // 600)]
+    out.auto = auto_params(small)
+    return out
+
+
 def describe(st: QuickState) -> str:
     """一句话说明改了什么（状态栏、保存提示用）。"""
     parts = []
-    if st.auto:
+    if st.negative:
+        parts.append(_t("负片反转"))
+    if st.match_on():
+        parts.append(_t("统一色调 {0:.0f}%", float(st.match["amount"]) * 100))
+    if st.auto or st.reauto:
         parts.append(_t("自动增强"))
     if st.preset and st.amount > 0:
         parts.append(_t("滤镜 {0} {1:.0f}%", _t(st.preset), st.amount))

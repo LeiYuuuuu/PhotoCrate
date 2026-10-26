@@ -176,6 +176,8 @@ FILTERS: dict[str, FilterSpec] = {
 def _register_more() -> None:
     from .filters2 import SPECS
     FILTERS.update(SPECS)
+    from .negative import _specs
+    FILTERS.update(_specs())
 
 
 _register_more()

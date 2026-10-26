@@ -86,6 +86,7 @@ class PhotosPage(Page):
         self._dl_worker = None
         self._ai_token = 0
         self.pending_open: str | None = None
+        self.copied_edit = None              # (QuickState, 来源照片名)：「拷贝编辑」后可粘贴到别的照片
         p = theme.current()
         self.setStyleSheet(f"""
 QPushButton[seg="true"] {{ background: {p.surface2}; color: {p.ink2}; border: 1px solid {p.line}; padding: 4px 14px; }}
@@ -152,6 +153,10 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
         self.b_sync = TacButton(_t("自动同步 ▾"), "secondary", height=32)
         self.b_sync.clicked.connect(lambda: self._sync_menu(self.b_sync.mapToGlobal(self.b_sync.rect().bottomLeft())))
         tl.addWidget(self.b_sync)
+        self.b_phone = TacButton(_t("手机互传"), "secondary", height=32)
+        self.b_phone.setToolTip(_t("手机扫码：把照片传到电脑，或在手机 / 电视上浏览相册（同一个 Wi-Fi）"))
+        self.b_phone.clicked.connect(self.open_phone)
+        tl.addWidget(self.b_phone)
         self.root.addWidget(top)
         self.top_bar = top
 
@@ -203,9 +208,15 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
         self.b_sel_studio.clicked.connect(lambda: self._studio(self.current_grid().selected_groups()))
         self.b_sel_merge = TacButton(_t("合并曝光"), "secondary", height=28)
         self.b_sel_merge.clicked.connect(lambda: self._merge(self.current_grid().selected_groups()))
+        self.b_sel_hide = TacButton(_t("隐藏"), "secondary", height=28)
+        self.b_sel_hide.clicked.connect(lambda: self._toggle_hidden(self.current_grid().selected_groups()))
+        self.b_sel_more = TacButton(_t("更多 ▾"), "secondary", height=28)
+        self.b_sel_more.clicked.connect(lambda: self.photo_menu(self.b_sel_more.mapToGlobal(self.b_sel_more.rect().bottomLeft()),
+                                                                self.current_grid().selected_groups()))
         self.b_sel_clear = TacButton(_t("取消选择"), "secondary", height=28)
         self.b_sel_clear.clicked.connect(lambda: self.current_grid().clear_selection())
-        for b in (self.b_sel_fav, self.b_sel_album, self.b_sel_remove, self.b_sel_studio, self.b_sel_merge, self.b_sel_clear):
+        for b in (self.b_sel_fav, self.b_sel_album, self.b_sel_remove, self.b_sel_studio, self.b_sel_merge,
+                  self.b_sel_hide, self.b_sel_more, self.b_sel_clear):
             sl.addWidget(b)
         self.sel_bar.hide()
         self.root.addWidget(self.sel_bar)
@@ -233,9 +244,12 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
         self.b_album_rename.clicked.connect(lambda: self._rename_album(self.album_key))
         self.b_album_delete = TacButton(_t("删除相簿"), "danger", height=30)
         self.b_album_delete.clicked.connect(lambda: self._delete_album(self.album_key))
+        self.b_album_lock = TacButton(_t("设置密码…"), "secondary", height=30)
+        self.b_album_lock.clicked.connect(self._hidden_password)
         ah.addWidget(self.b_album_back)
         ah.addSpacing(8)
         ah.addWidget(self.album_title, 1)
+        ah.addWidget(self.b_album_lock)
         ah.addWidget(self.b_album_rename)
         ah.addWidget(self.b_album_delete)
         av.addLayout(ah)
@@ -276,7 +290,8 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
         self.ctx.status.emit(text)
 
     def groups(self) -> list:
-        return [g for g in self.ctx.library.groups if g.files]
+        """图库里显示的照片（隐藏的不算）。"""
+        return smart.shown(self.ctx.library.groups, self.marks)
 
     def search_index(self) -> smart.SearchIndex:
         if self._index is None:
@@ -293,6 +308,10 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
             self._history.append(cur)
             self._history = self._history[-20:]
         self.stack.setCurrentIndex(v)
+        if self.marks.unlocked and not (v in (V_ALBUM, V_DETAIL) and self.album_key == smart.HIDDEN_KEY):
+            self.marks.unlocked = False                    # 离开「已隐藏」就重新锁上
+            if v == V_ALBUMS:
+                self._build_albums(keep_scroll=True)
         self.level_box.setVisible(v in (V_CARDS, V_GRID))
         self.zoom.setVisible(v in (V_GRID, V_ALBUM, V_SEARCH))
         self.top_bar.setVisible(v != V_DETAIL)
@@ -324,8 +343,8 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
     # ---- 照片库变化 ----
     def _library_changed(self) -> None:
         self._index = None
-        self._by_gid = {g.gid: g for g in self.groups()}
         self.marks.reload()
+        self._by_gid = {g.gid: g for g in self.ctx.library.groups if g.files}      # 含隐藏的（「已隐藏」相簿要用）
         if not self._by_gid:
             self.show_view(V_EMPTY, push=False)
             self._update_banner()
@@ -469,6 +488,10 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
         self.open_album(c.key)
 
     def open_album(self, key: str) -> None:
+        if key == smart.HIDDEN_KEY and not self.marks.unlocked:
+            from .hidden import unlock
+            if not unlock(self, self.marks):
+                return
         self.album_key = key
         self._fill_album(key, keep_scroll=False)
         self.show_view(V_ALBUM)
@@ -484,6 +507,8 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
         user = key.startswith("user:")
         self.b_album_rename.setVisible(user)
         self.b_album_delete.setVisible(user)
+        self.b_album_lock.setVisible(key == smart.HIDDEN_KEY)
+        self.b_album_lock.setText(_t("修改密码…") if self.marks.has_password() else _t("设置密码…"))
         gs = [self._by_gid[i] for i in a.gids if i in self._by_gid]
         if key.startswith(("people:", "scene:", "user:", "media:")) and key != "media:recent":
             secs = []
@@ -494,7 +519,9 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
                     for s in reversed(smart.timeline(gs, "day"))]          # 旅行按时间顺序看
         else:
             secs = [GridSection(key, "", "", gs, header=False)]
-        self.album_grid.empty_text = _t("这个相簿还是空的：在图库里选中照片，点「加入相簿」") if user else _t("这里还没有照片")
+        self.album_grid.empty_text = (_t("这个相簿还是空的：在图库里选中照片，点「加入相簿」") if user
+                                      else _t("没有隐藏的照片：在照片上右键 →「隐藏」") if key == smart.HIDDEN_KEY
+                                      else _t("这里还没有照片"))
         self.album_grid.set_sections(secs, keep_scroll)
 
     def _album_card_menu(self, pos: QPoint, c: Card) -> None:
@@ -568,12 +595,54 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
         self._build_albums(True)
         self.status(_t("已从相簿移出 {0} 张（照片本身还在）", n))
 
+    # ---- 隐藏 ----
+    def set_hidden(self, groups: list, on: bool) -> None:
+        if not groups:
+            return
+        if on and not self.marks.hidden and not self.marks.has_password():
+            if not ask(self, _t("隐藏照片"), _t("隐藏的 {0} 张照片不会出现在图库、相簿、搜索和局域网相册里，"
+                                             "只能在「相簿 → 已隐藏」里看到。<br><br>{1}", len(groups),
+                                             _t("照片文件还在原来的文件夹，没有加密。之后可以在「已隐藏」相簿里设置密码。")),
+                       ok=_t("隐藏")):
+                return
+        self.marks.set_hidden(groups, on)
+        self._index = None
+        for grid in (self.grid, self.album_grid, self.search_grid):
+            grid.clear_selection()
+        if self.stack.currentIndex() == V_DETAIL:          # 正在看的这张离开了当前列表
+            self.go_back()
+        self._rebuild(keep_scroll=True)
+        self._lan_refresh()
+        self.status(_t("已隐藏 {0} 张：在「相簿 → 已隐藏」里查看", len(groups)) if on
+                    else _t("已取消隐藏 {0} 张", len(groups)))
+
+    def open_phone(self) -> None:
+        from .phone import open_phone
+        open_phone(self)
+
+    def _lan_refresh(self) -> None:
+        d = getattr(self, "_phone", None)
+        if d is not None and d.server is not None:
+            d.refresh()
+
+    def _toggle_hidden(self, groups: list) -> None:
+        if groups:
+            self.set_hidden(groups, not all(self.marks.is_hidden(g) for g in groups))
+
+    def _hidden_password(self) -> None:
+        from .hidden import set_password
+        if set_password(self, self.marks):
+            self.status(_t("已设置「已隐藏」相簿的密码") if self.marks.has_password() else _t("「已隐藏」相簿不再需要密码"))
+            if self.album_key:
+                self._fill_album(self.album_key, True)
+
     # ---- 收藏 ----
     def toggle_fav(self, groups: list) -> None:
         if not groups:
             return
         on = self.marks.toggle_fav(groups)
         self._index = None
+        self._lan_refresh()
         self.status(_t("已收藏 {0} 张", len(groups)) if on else _t("已取消收藏 {0} 张", len(groups)))
         self._repaint()
         self._build_albums(True)
@@ -592,6 +661,7 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
             stills = [g for g in gs if not g.is_video]
             self.b_sel_studio.setVisible(len(stills) == 1)
             self.b_sel_merge.setVisible(len(stills) >= 2)
+            self.b_sel_hide.setText(_t("取消隐藏") if all(self.marks.is_hidden(g) for g in gs) else _t("隐藏"))
             self.ctx.library.selected = {g.gid for g in gs}
             self.ctx.selection_changed.emit()
 
@@ -629,6 +699,10 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
         self._fill_album_menu(sub, groups)
         if (self.album_key or "").startswith("user:") and self.stack.currentIndex() == V_ALBUM:
             m.addAction(_t("从这个相簿移出"), self._remove_from_album)
+        if all(self.marks.is_hidden(x) for x in groups):
+            m.addAction(_t("取消隐藏"), lambda: self.set_hidden(groups, False))
+        else:
+            m.addAction(_t("隐藏"), lambda: self.set_hidden(groups, True))
         m.addSeparator()
         stills = [x for x in groups if not x.is_video]
         if len(stills) == 1:
@@ -637,6 +711,13 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
             m.addAction(_t("在修图中打开（图层 / 蒙版 / 修复）"), lambda: self._studio(stills))
         if len(stills) >= 2:
             m.addAction(_t("合并曝光（HDR，{0} 张）…", len(stills)), lambda: self._merge(stills))
+        if stills:
+            from .batch import match_colors, paste_edits
+            if self.copied_edit:
+                m.addAction(_t("粘贴编辑（{0} 张）…", len(stills)), lambda: paste_edits(self, stills))
+            if len(stills) >= 2:
+                m.addAction(_t("统一色调（{0} 张）…", len(stills)), lambda: match_colors(self, stills))
+            m.addAction(_t("导出分享（{0} 张）…", len(stills)), lambda: self._export(stills))
         if HOOKS.rate is not None:
             rs = m.addMenu(_t("打星"))
             for n in range(0, 6):
@@ -660,6 +741,14 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
     def _merge(self, groups: list) -> None:
         if len(groups) >= 2:
             self.ctx.merge_exposures(groups, self.window())
+
+    def _export(self, groups: list) -> None:
+        from ..workflow_dialogs import ExportDialog, run_export
+        if not groups:
+            return
+        dlg = ExportDialog(self, self.ctx, groups, _t("选中的 {0} 张照片", len(groups)))
+        if dlg.exec() == ExportDialog.DialogCode.Accepted:
+            run_export(self.ctx, self, dlg)
 
     def _reocr(self, groups: list) -> None:
         for g in groups:
@@ -700,7 +789,8 @@ QPushButton[chip="true"]:hover {{ border-color: {p.accent}; }}
         gs = [self._by_gid[i] for i in r.gids if i in self._by_gid]
         secs = [GridSection("match", _t("“{0}”", r.query), _t("{0} 张", len(gs)), gs)]
         shown = set(r.gids)
-        extra = [self._by_gid[i] for i in self.ai_hits if i in self._by_gid and i not in shown]
+        extra = [self._by_gid[i] for i in self.ai_hits
+                 if i in self._by_gid and i not in shown and not self.marks.is_hidden(self._by_gid[i])]
         if extra:
             secs.append(GridSection("ai", _t("AI 画面搜索"), _t("画面看起来像“{0}”的照片（按相似度）", r.query), extra))
         self.search_grid.badges = {gid: _t("文字") for gid in r.text_hits}

@@ -7,6 +7,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (QButtonGroup, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QRadioButton, QSpinBox,
                                QVBoxLayout)
 
+from ...ai import faceq
 from ...ops.planner import build_plan
 from ...partition.base import PartitionContext
 from ...partition.engine import PartitionSpec, Rule
@@ -17,8 +18,8 @@ from ..widgets.thumbgrid import ThumbGrid
 from .base import Page
 from ...i18n import t as _t
 
-VIEWS = [("all", _t("全部")), ("similar", _t("相似组")), ("unrated", _t("未标记")), ("rated", _t("已打星")), ("pick", _t("留用")),
-         ("reject", _t("弃用"))]
+VIEWS = [("all", _t("全部")), ("similar", _t("相似组")), ("faces", _t("闭眼 / 表情")), ("unrated", _t("未标记")),
+         ("rated", _t("已打星")), ("pick", _t("留用")), ("reject", _t("弃用"))]
 
 
 def _rt(g) -> dict:
@@ -62,7 +63,7 @@ class CullingPage(Page):
 
         # ---- 相似照片 ----
         sp = Panel(_t("连拍 / 相似照片"), "Bursts // perceptual hash")
-        sp.setFixedWidth(500)
+        sp.setFixedWidth(600)                 # 四张统计卡（含闭眼 / 表情）
         r = QHBoxLayout()
         r.addWidget(QLabel(_t("相邻间隔 ≤")))
         self.gap = QSpinBox()
@@ -83,9 +84,20 @@ class CullingPage(Page):
         self.c_sets = StatCard(_t("相似组"), "SETS")
         self.c_in = StatCard(_t("组内照片"), "PHOTOS", accent=p.ink2)
         self.c_extra = StatCard(_t("建议待确认"), "EXTRAS", accent=p.warn)
-        for c in (self.c_sets, self.c_in, self.c_extra):
+        self.c_eyes = StatCard(_t("闭眼 / 表情"), "EYES", accent=p.danger)
+        for c in (self.c_sets, self.c_in, self.c_extra, self.c_eyes):
             cr.addWidget(c)
         sp.body.addLayout(cr)
+        fr = QHBoxLayout()
+        self.fq_lab = caption("", "dim", 8.5)
+        self.fq_lab.setWordWrap(True)
+        fr.addWidget(self.fq_lab, 1)
+        self.b_fq = TacButton(_t("检查"), "secondary", en="EYES", height=28)
+        self.b_fq.setToolTip(_t("看看连拍组里谁闭眼了、谁表情不好（和同一个人在同组其他几张里比），每组“最佳”会避开这些照片"))
+        self.b_fq.clicked.connect(self._fq_action)
+        fr.addWidget(self.b_fq)
+        sp.body.addLayout(fr)
+        self._fq_worker = None
         ar = QHBoxLayout()
         ar.addWidget(QLabel(_t("文件夹名：")))
         self.folder = QLineEdit(_t(ctx.settings.get("similar_folder") or "待确认_相似"))
@@ -96,7 +108,7 @@ class CullingPage(Page):
         self.b_isolate.clicked.connect(self.isolate)
         ar.addWidget(self.b_isolate)
         sp.body.addLayout(ar)
-        sp.body.addWidget(caption(_t("拍摄时间相近、画面指纹相似的照片归为一组，清晰度最高的标“最佳”。"
+        sp.body.addWidget(caption(_t("拍摄时间相近、画面指纹相似的照片归为一组，没人闭眼、表情好又最清晰的标“最佳”。"
                                   "移出时跳过每组最佳、已打星和标记“留用”的照片。"), "faint", 8))
         top.addWidget(sp)
 
@@ -181,6 +193,7 @@ class CullingPage(Page):
 
     def on_show(self):
         self.refresh()
+        QTimer.singleShot(600, self._fq_auto)
 
     # ---- 数据 ----
     def view_mode(self) -> str:
@@ -194,8 +207,11 @@ class CullingPage(Page):
         self._stats(gs)
         mode = self.view_mode()
         key = (lambda g: (g.date is None, g.date or 0, g.name.lower()))
-        if mode == "similar":
+        if mode in ("similar", "faces"):
             show = [g for g in gs if g.feats.get("similar")]
+            if mode == "faces":                  # 有人闭眼 / 表情不佳的照片，连同它们那一组的“最佳”一起看
+                bad = {g.feats["similar"]["cid"] for g in show if any(faceq.issues(g))}
+                show = [g for g in show if g.feats["similar"]["cid"] in bad]
             show.sort(key=lambda g: (g.feats["similar"]["cid"], g.feats["similar"]["rank"]))
         else:
             flt = {"all": lambda g: True, "unrated": lambda g: not is_marked(g),
@@ -222,6 +238,9 @@ class CullingPage(Page):
         self.c_sets.set(str(sets), unit=_t("组"))
         self.c_in.set(str(len(sims)), len(sims) / n, _t("张"))
         self.c_extra.set(str(extra), extra / n, _t("张"))
+        eyes = sum(1 for g in sims if any(faceq.issues(g)))
+        self.c_eyes.set(str(eyes), eyes / max(1, len(sims)), _t("张"))
+        self._fq_status(sims)
         rated = sum(1 for g in gs if int(_rt(g).get("rating") or 0) > 0)
         pick = sum(1 for g in gs if _rt(g).get("flag") == "pick")
         rej = sum(1 for g in gs if _rt(g).get("flag") == "reject")
@@ -261,6 +280,88 @@ class CullingPage(Page):
         n = self.ctx.library.regroup_similar()
         self.ctx.status.emit(_t('相似照片重新分组：{0} 组', n))
         self.refresh()
+        QTimer.singleShot(300, self._fq_auto)
+
+    # ---- 闭眼 / 表情 ----
+    def _fq_status(self, sims=None) -> None:
+        if self._fq_worker is not None:
+            return
+        lib = self.ctx.library
+        sims = [g for g in self._all() if g.feats.get("similar")] if sims is None else sims
+        clip = lib.ai.clip_ready()
+        todo = faceq.pending(sims, clip) if faceq.ready() else []
+        self.b_fq.setVisible(bool(todo) or not faceq.ready() or not clip or not faceq.expr_ready())
+        if not sims:
+            self.fq_lab.setText(_t("有连拍组时，会检查组里谁闭眼了、谁表情不好。"))
+            self.b_fq.hide()
+        elif not faceq.ready():
+            self.fq_lab.setText(_t("下载人脸模型后，可以检查连拍组里谁闭眼了、谁表情不好。"))
+            self.b_fq.setText(_t("去下载…"))
+        elif todo:
+            self.fq_lab.setText(_t("连拍组里还有 {0} 张照片没检查闭眼 / 表情。", len(todo)))
+            self.b_fq.setText(_t("检查"))
+        else:
+            n = sum(1 for g in sims if any(faceq.issues(g)))
+            text = _t("连拍组已检查：{0} 张有人闭眼或表情不佳，每组“最佳”已避开它们。", n)
+            missing = []
+            if not clip:
+                missing.append(_t("中文 CLIP（判断闭眼）"))
+            if not faceq.expr_ready():
+                missing.append(_t("表情识别模型"))
+            if missing:
+                text += _t("下载{0}后判断得更全。", _t("、").join(missing))
+                self.b_fq.setText(_t("去下载…"))
+            self.fq_lab.setText(text)
+
+    def _fq_action(self) -> None:
+        if self._fq_worker is not None:
+            self._fq_worker.cancel()
+            return
+        lib = self.ctx.library
+        sims = [g for g in self._all() if g.feats.get("similar")]
+        if faceq.ready() and faceq.pending(sims, lib.ai.clip_ready()):
+            self._fq_start()
+        else:
+            self.ctx.navigate.emit("ai")
+
+    def _fq_auto(self) -> None:
+        if (self._fq_worker is None and not self.ctx.busy and self.isVisible() and faceq.ready()
+                and self.ctx.settings.get("faceq_auto", True)):
+            sims = [g for g in self._all() if g.feats.get("similar")]
+            if faceq.pending(sims, self.ctx.library.ai.clip_ready()):
+                self._fq_start()
+
+    def _fq_start(self) -> None:
+        lib = self.ctx.library
+        groups = [g for g in self._all() if g.feats.get("similar")]
+        busy = lambda: self.ctx.busy           # noqa: E731  扫描 / 移动开始时让路
+
+        def job(prog, cancel):
+            def p(d, t):
+                if busy():
+                    cancel.set()
+                prog((d, t))
+            return faceq.analyze(groups, lib, p, cancel)
+
+        def on_prog(x):
+            self.fq_lab.setText(_t("正在检查连拍里的闭眼 / 表情… {0} / {1}（可以继续挑片；随时停止，下次接着查）", *x))
+
+        def finish(n):
+            self._fq_worker = None
+            self.b_fq.setText(_t("检查"))
+            lib.regroup_similar()
+            self.refresh()
+            if n:
+                self.ctx.status.emit(_t("闭眼 / 表情检查完成：看了 {0} 张", n))
+
+        def err(tb):
+            self._fq_worker = None
+            self._fq_status()
+            self.ctx.status.emit(_t("闭眼 / 表情检查出错：") + tb.strip().splitlines()[-1])
+        self.b_fq.setText(_t("停止"))
+        self.b_fq.show()
+        self.fq_lab.setText(_t("正在检查连拍里的闭眼 / 表情…"))
+        self._fq_worker = self.ctx.run(job, on_prog, finish, err)
 
     # ---- 操作 ----
     def view(self) -> None:

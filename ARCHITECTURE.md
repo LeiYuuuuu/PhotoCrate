@@ -238,6 +238,18 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 
 测试：`tests/test_autosync.py`（快照与分组和扫描一致、离线根文件夹、从空库同步 = 扫描、增删改后 gid 与对象保留、unsettled、移除数据源、跨文件夹配对、监视线程的增删改 / 刚拷进的文件 / 写完才报 / Windows 变化通知、界面控制器的忙时推迟与开关）、`tests/ui_autosync.py`（真实主窗口走一遍并截图）。
 
+## 9.57 v2.3：闭眼检查、隐藏相簿、批量编辑、隐私体检、手机互传
+
+| 部分 | 实现 |
+|---|---|
+| 闭眼 / 表情 `ai/faceq.py` | 只看连拍组（`feats["similar"]`）里扫描时有脸的照片：1600 px 预览上重新跑 YuNet（要五点关键点），Umeyama 相似变换按 ArcFace 模板对齐成 224（眼睛）/ 112（表情）。闭眼分 = 中文 CLIP 对整张脸的“闭眼”把握（8 条描述 softmax）− 像素睁眼程度（眼睛中心几列里穿过中线的连续暗像素高 ÷ 两眼间距）；在本机约 300 张真实人脸上人工标注：单用像素 AUC 0.78、CLIP 0.94、合起来 0.95，模拟连拍（和自己比）阈值 0.70 / 高出 0.15 时精确率约 92%。表情 = OpenCV Zoo MobileFaceNet（cv2.dnn，输出 7 类 logits，RGB、(x/255−0.5)/0.5）；模型常把严肃 / 低头 / 闭眼判成 sad，所以“表情不佳”要求同一人睁眼的几张里最好的那张 happy ≥ 0.5，这张负面 ≥ 0.5 且好的程度低 0.3 以上。同组里按位置 / 大小把脸连成“同一个人”（`_tracks`；每张只有一张脸、组里也只有一个人时拉近拉远也算同一人），只和自己比，只出现一次不判断。结果按主图指纹借 cache.db 的 `ocr` 表（版本键 `faceq-v1`）存 JSON；CLIP / 表情模型后来才有时重查。`Library.regroup_similar` 之后 `faceq.apply` 载入缓存、判断、重排每组 rank / best（先清晰度够不够，再闭眼人数、表情不佳人数，最后清晰度） |
+| 隐藏 `core/smart.Marks` | annotations.db 新表 `hidden`（按指纹）与 `lock`（`hidden` → 加盐 PBKDF2-SHA256 20 万次）。`smart.shown()` 过滤掉隐藏的，`shelves` / `SearchIndex` / 相册页 `groups()` / 手机互传快照都用它；「已隐藏」= `media:hidden`，锁着时不给 gids 和封面，`Marks.unlocked` 只在「已隐藏」相簿和它的单张页里为真 |
+| 批量编辑 `edit/quick.py` + `ui/photos/batch.py` | `QuickState` 加 `negative`、`match`（参考照片的 Lab 均值 / 标准差 + 强度）、`reauto`；处理顺序 几何 → `pre_color`（`edit/negative.invert` → `edit/colormatch.transfer`）→ 调整。`paste_state` 只留勾选的部分，`for_photo` 按每张重新算自动增强。负片：sRGB 解码 → 每通道密度 −log10 → 中间 90% 区域 0.5% / 99.5% 分位拉伸（片基橙色和偏色一起去掉）→ 轻 S 曲线；也注册成修图窗口的滤镜 `negative`（`whole=True`） |
+| 隐私体检 `ops/privacy.py` + `ui/privacy_dialog.py` | 文字规则（手机 / 座机、身份证含校验位、银行卡 Luhn、车牌、快递面单关键词 / 单号、门牌地址、邮箱）作用在 OCR 行上，命中整行；`cv2.QRCodeDetector.detectMulti` + 条形码检测器；人脸：已命名或出现 ≥ 5 张的人、面积 ≥ 最大脸 40% 的算主要人物（默认不打），其余是路人。`ExportOptions.redact`（gid → 0–1 框）在 `render_one` 里原尺寸打码后再缩小，网页相册同样生效；导出窗口的开关 `export_privacy_check` 默认关 |
+| 手机互传 `lan/` + `core/qr.py` + `ui/photos/phone.py` | `ThreadingHTTPServer`，窗口开着才运行；所有路径在 `/<随机口令>/` 下（`secrets.compare_digest`），否则 404。上传 = 网页 PUT 原始字节（不解析 multipart），只收照片 / 视频扩展名、`sanitize_component` 后的文件名，先写 `.pcupload` 再 `os.replace`，同名同大小跳过、重名加编号，`os.utime` 设成手机上的文件时间；上传文件夹默认是第一个数据源下的「手机上传」，由自动同步接进相册。浏览 = 界面线程整理的只读 `Snapshot`（不含隐藏的），缩略图用缩略图缓存，大图按需生成（LRU），原文件支持 Range，RAW 给 JPEG。二维码：自己写的 QR 编码（字节模式、版本 1–10、RS 纠错、8 种掩模扣分），测试里用 OpenCV 解码核对 |
+
+测试：`tests/test_extras.py`、`tests/ui_extras.py`。
+
 ## 9.6 合并曝光（edit/hdr.py + ui/editor/merge.py）
 
 同一场景、不同曝光的 2–9 张 → 一张。只用 numpy / OpenCV，不新增依赖。目标是**不损失清晰度**，所以每一步都围绕“少重新取样、对得准”来做：
@@ -394,11 +406,13 @@ PhotoCrate/
 │  ├─ app.py  bootstrap.py  config.py  plugins.py  i18n.py  locale_en.py（英文界面文字）
 │  ├─ core/        models formats scanner metadata imaging pixelwork geo dates cache library stats
 │  │               pairing geotime places daybook trips videos smart（相册：时间线 / 智能相簿 / 搜索）watch（自动同步：文件夹快照 / 监视）
-│  ├─ ai/          models clip scenes faces people service visual ocr ocrindex（ocr = 照片里的文字）
+│  │               qr（二维码编码）
+│  ├─ ai/          models clip scenes faces people service visual ocr ocrindex（ocr = 照片里的文字）faceq（连拍里的闭眼 / 表情）
+│  ├─ lan/         server page（手机互传：局域网网页服务）
 │  ├─ analyzers/   base builtin
 │  ├─ partition/   base dimensions engine
 │  ├─ ops/         planner mover journal pathsafe xmpwrite cleanup trashbin renamer
-│  │               importer dedupe exporter
+│  │               importer dedupe exporter privacy（分享前隐私体检）
 │  ├─ edit/        document adjust blend paint filters text io hdr（修图核心；hdr = 合并曝光）
 │  └─ ui/          theme context dialogs timeplace_dialogs culling_dialogs workflow_dialogs xmpflow viewer
 │                  main_window  pages/  widgets/（deco thumbgrid mapview）  editor/（window canvas tools panels icons tutorial merge）

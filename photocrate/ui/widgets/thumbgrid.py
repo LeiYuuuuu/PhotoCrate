@@ -163,7 +163,11 @@ def tooltip_for(g, settings: dict | None = None) -> str:
         lines.append(_t("标记：") + " · ".join(marks) + ("" if rt.get("manual") else _t("（照片 / .xmp 里原有）")))
     sim = g.feats.get("similar")
     if sim:
-        lines.append(_t('相似照片：第 {0}/{1} 张', sim['rank'], sim['size']) + (_t("，这一组里最清晰") if sim.get("best") else ""))
+        lines.append(_t('相似照片：第 {0}/{1} 张', sim['rank'], sim['size']) + (_t("，这一组里最好") if sim.get("best") else ""))
+        from ...ai.faceq import describe
+        fq_text = describe(g)
+        if fq_text:
+            lines.append(_t("和同组其他几张比：{0}", fq_text))
     lines.append(_t("<span style='color:gray'>双击 / 空格看大图 · 1–5 打星 · P 留用 · X 弃用</span>"))
     return "<br>".join(lines)
 
@@ -255,6 +259,11 @@ class ThumbDelegate(QStyledItemDelegate):
             tags.append((_t('相似 {0}/{1}', sim['rank'], sim['size']), p.ink2, p.surface))
             if sim.get("best"):
                 tags.append((_t("最佳"), p.ok, "#FFFFFF"))
+            fq = g.feats.get("faceq") or {}
+            if fq.get("closed"):
+                tags.append((_t("闭眼 {0}", len(fq["closed"])), p.danger, "#FFFFFF"))
+            if fq.get("bad"):
+                tags.append((_t("表情 {0}", len(fq["bad"])), p.warn, "#FFFFFF"))
         rt = g.feats.get("rating") or {}
         if rt.get("flag") == "reject":
             veil = QColor(p.bg)
