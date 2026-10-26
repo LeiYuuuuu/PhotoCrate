@@ -199,8 +199,8 @@ def build_plan(groups, spec: PartitionSpec, ctx: PartitionContext, target_root: 
             sd = os.path.dirname(m.path)
             if sd not in dev_cache:
                 dev_cache[sd] = device_of(sd)
-            if dev_cache[sd] != tgt_dev:
-                cross = True
+            m_cross = dev_cache[sd] != tgt_dev
+            cross = cross or m_cross
             # 统计会新建的每一级文件夹（年 / 月 / 日 都算），而不只是最底层
             q = d
             while q and not os.path.isdir(q) and os.path.normcase(q) not in new_dirs:
@@ -211,7 +211,7 @@ def build_plan(groups, spec: PartitionSpec, ctx: PartitionContext, target_root: 
                 q = parent
             ops.append(PlanOp(m.path, dst, m.size, m.mtime_ns, m.role))
             plan.total_bytes += m.size
-            if cross or operation == "copy":
+            if m_cross or operation == "copy":       # 只有跨盘的文件需要目标盘的空间（同盘是改名）
                 plan.cross_bytes += m.size
         if n > 0:
             plan.renamed += 1

@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from test_culling import _library  # noqa: E402
+from test_culling import ET, _library  # noqa: E402
 from test_timeplace import make_jpeg  # noqa: E402
 
 from photocrate.ops.journal import Journal  # noqa: E402
@@ -63,7 +63,8 @@ def test_partition_again_after_rescan(tmp_path):
         sources = sources_after_move(sources, str(tgt))
         assert sources == [str(src), str(tgt)]
         rep = lib.scan(sources, True)
-        assert rep.groups == 5 and rep.meta_cached >= 9, rep          # 移动不改指纹：元数据全部命中缓存
+        # 移动不改指纹：元数据全部命中缓存（没有 ExifTool 时随机字节的 .ARW / .xmp 读不出元数据，只有 5 张 JPG 有缓存）
+        assert rep.groups == 5 and rep.meta_cached >= (9 if ET else 5), rep
         g0 = next(g for g in lib.groups if g.stem == "IMG_0000")
         assert g0.feats["rating"]["rating"] == 4                      # 标注跟着照片走
         assert any(f.name == "IMG_0000.xmp" for f in g0.files)
@@ -99,7 +100,9 @@ def test_partition_again_after_rescan(tmp_path):
 
 
 def test_sources_after_move():
-    assert sources_after_move(["D:/a"], "D:/a/整理") == ["D:/a"]                 # 目标在数据源里面：不用加
-    assert sources_after_move(["D:/a"], "E:/b") == ["D:/a", "E:/b"]
-    assert sources_after_move(["D:/a/x", "D:/a/y"], "D:/a") == ["D:/a"]           # 目标包含原来的数据源：合并
-    assert sources_after_move([], "E:/b") == ["E:/b"]
+    def n(ps):                                    # Windows 上新加的目标是 E:\b，比较时统一斜杠
+        return [os.path.normpath(p) for p in ps]
+    assert n(sources_after_move(["D:/a"], "D:/a/整理")) == n(["D:/a"])             # 目标在数据源里面：不用加
+    assert n(sources_after_move(["D:/a"], "E:/b")) == n(["D:/a", "E:/b"])
+    assert n(sources_after_move(["D:/a/x", "D:/a/y"], "D:/a")) == n(["D:/a"])       # 目标包含原来的数据源：合并
+    assert n(sources_after_move([], "E:/b")) == n(["E:/b"])

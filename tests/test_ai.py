@@ -164,7 +164,7 @@ def test_model_status_and_download_errors(tmp_path, monkeypatch):
     with pytest.raises(IOError) as ei:
         models.download("face")
     assert "127.0.0.1" in str(ei.value)
-    assert not list(tmp_path.glob("*.part")) or True
+    assert not list(tmp_path.glob("*.part"))
     assert models.file_path("face_detection_yunet_2023mar.onnx") is None
 
 

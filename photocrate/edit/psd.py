@@ -227,6 +227,8 @@ def read(path: str):
     nch, H, W, depth, mode = r.u16(), r.u32(), r.u32(), r.u16(), r.u16()
     if mode not in (1, 3) or depth not in (8, 16):
         raise PSDError(_t("只支持 8 / 16 位的 RGB（或灰度）PSD"))
+    if not (0 < W <= (300000 if big else 30000) and 0 < H <= (300000 if big else 30000)) or nch < 1:
+        raise PSDError(_t("PSD 文件头损坏（尺寸 {0} × {1}）", W, H))        # 规范上限：PSD 3 万、PSB 30 万像素
     r.read(r.u32())                                         # 颜色模式数据
     icc = None
     end = r.u32() + r.p
@@ -375,9 +377,10 @@ def read(path: str):
         else:
             data = zlib.decompress(rest)
         a = np.frombuffer(data, ">u2" if depth == 16 else np.uint8, count=W * H * nch).reshape(nch, H, W).astype(dt)
+        ncolor = 1 if mode == 1 else 3                      # 灰度：1 个颜色通道（第 2 个是透明度）；RGB：3 个
         for c in range(3):
-            planes.append(a[min(c, nch - 1)])
-        planes.append(a[3] if nch >= 4 else np.full((H, W), 65535 if depth == 16 else 255, dt))
+            planes.append(a[min(c, ncolor - 1, nch - 1)])
+        planes.append(a[ncolor] if nch > ncolor else np.full((H, W), 65535 if depth == 16 else 255, dt))
         doc.layers.append(doc._register(Layer("pixel", _t("背景"), np.ascontiguousarray(np.dstack(planes)))))
     doc.active_id = doc.layers[-1].id
     doc.source = SourceInfo(path=path, icc=icc)

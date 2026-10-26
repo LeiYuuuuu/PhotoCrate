@@ -147,15 +147,30 @@ def tags_for(g, write_gps: bool, write_place: bool, write_time: bool,
     return tags, what
 
 
+_CTRL = {c: " " for c in range(32)}
+
+
+def one_line(v) -> str:
+    """ExifTool 常驻进程按“一行一个参数”读命令：值里的换行会变成额外的参数（例如 -if 会执行 Perl 代码）。
+    照片里读出的色标、手动输入的地名 / 人名都可能带换行，写入前把控制字符换成空格。"""
+    return str(v).translate(_CTRL).strip()
+
+
+def has_ctrl(s: str) -> bool:
+    return any(ord(c) < 32 for c in s)
+
+
 def exiftool_args(tags: dict) -> list[str]:
     """单值标签直接赋值；多值（关键词）先删同名再加，重复写入不会出现两个相同的词。"""
     args = []
     for k, v in tags.items():
         if isinstance(v, list):
             for x in v:
-                args += [f"-{k}-={x}", f"-{k}+={x}"]
+                x = one_line(x)
+                if x:
+                    args += [f"-{k}-={x}", f"-{k}+={x}"]
         else:
-            args.append(f"-{k}={v}")
+            args.append(f"-{k}={one_line(v)}")
     return args
 
 
@@ -258,6 +273,8 @@ def write_xmp(plan: XmpPlan, exiftool_path: str, journal, progress: Callable[[in
             try:
                 if not os.path.exists(t.raw):
                     raise FileNotFoundError(_t("照片已不在原位置，请重新扫描"))
+                if has_ctrl(t.xmp):
+                    raise ValueError(_t("文件名里有换行等控制字符，不能交给 ExifTool"))
                 args = exiftool_args(t.tags)
                 if t.mode == "edit":
                     if not os.path.exists(t.xmp):

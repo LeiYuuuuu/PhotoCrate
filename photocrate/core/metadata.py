@@ -258,9 +258,14 @@ class ExifToolBackend(MetadataBackend):
         for i in range(0, len(paths), self.BATCH):
             if cancel is not None and cancel.is_set():
                 break
-            batch = paths[i:i + self.BATCH]
+            # 常驻进程按“一行一个参数”读命令：文件名里的换行会变成额外的 ExifTool 参数（-if 能执行 Perl 代码），
+            # 这类文件（只有 Linux / macOS 上可能出现）不交给 ExifTool
+            chunk = paths[i:i + self.BATCH]
+            batch = [p for p in chunk if not any(ord(c) < 32 for c in p)]
+            if len(batch) < len(chunk):
+                log.warning("跳过文件名含控制字符的文件（不交给 ExifTool）")
             try:
-                results = self._read_batch(batch)
+                results = self._read_batch(batch) if batch else []
             except Exception as e:
                 log.warning("ExifTool 批量读取失败，逐个重试：%s", e)
                 results = []
@@ -279,7 +284,7 @@ class ExifToolBackend(MetadataBackend):
                 if r is not None:
                     out[p] = normalize_exiftool(r)
             if progress:
-                progress(len(batch))
+                progress(len(chunk))
         return out
 
     def close(self) -> None:

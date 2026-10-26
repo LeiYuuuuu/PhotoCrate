@@ -51,6 +51,15 @@ def _hash_full(path: str) -> str:
     return h.hexdigest()
 
 
+def _identity(path: str) -> tuple[int, int] | None:
+    """磁盘上的“哪一个文件”（设备号 + 文件号）；取不到时返回 None。"""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino) if st.st_ino else None
+
+
 @dataclass
 class DupSet:
     keep: int                      # 保留的组 gid
@@ -89,6 +98,15 @@ def find_duplicates(groups, keep_rule: str = "shortest", target_dir: str = "",
     done = 0
     fhash: dict[str, str] = {}             # 文件路径 → 内容哈希
     for lst in cands:
+        # 同一个文件经由两条路径出现（目录联接、符号链接、硬链接、同一文件夹用不同写法添加了两次）：
+        # 删掉其中“一份”其实就是删掉唯一的那份 → 这样的文件不参与比较
+        same_file: dict[tuple[int, int], int] = defaultdict(int)
+        ident: dict[str, tuple[int, int] | None] = {}
+        for _, f in lst:
+            ident[f.path] = _identity(f.path)
+            if ident[f.path] is not None:
+                same_file[ident[f.path]] += 1
+        lst = [(gid, f) for gid, f in lst if ident[f.path] is None or same_file[ident[f.path]] == 1]
         quick: dict[str, list] = defaultdict(list)
         for gid, f in lst:
             if cancel is not None and cancel.is_set():

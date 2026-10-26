@@ -57,6 +57,17 @@ def _sha256(p: str) -> str:
     return h.hexdigest()
 
 
+def _same_content(a: str, b: str) -> bool:
+    """两个文件逐字节相同（且不是同一个文件）。"""
+    import filecmp
+    try:
+        if os.path.samefile(long_path(a), long_path(b)):
+            return False
+        return filecmp.cmp(long_path(a), long_path(b), shallow=False)
+    except OSError:
+        return False
+
+
 def _remove(p: str) -> None:
     lp = long_path(p)
     try:
@@ -481,11 +492,13 @@ class Mover:
             elif dst_ok and src_ok:
                 if copy_only:
                     self.journal.set_op(o["id"], "done")
-                elif os.path.getsize(long_path(o["dst"])) == os.path.getsize(long_path(o["src"])):
-                    # 复制已完成但源文件未删除
+                elif _same_content(o["src"], o["dst"]):
+                    # 复制已完成但源文件未删除（逐字节一致才删源文件：目标位置可能是别的同样大小的文件）
                     _remove(o["src"])
                     self.journal.set_op(o["id"], "done")
                     fixed["src_removed"] += 1
+                else:
+                    fixed["pending"] += 1
             else:
                 fixed["pending"] += 1
         self.journal.commit()

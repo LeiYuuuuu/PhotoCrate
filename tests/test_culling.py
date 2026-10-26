@@ -34,12 +34,23 @@ ET = os.environ.get("PHOTOCRATE_TEST_EXIFTOOL") or shutil.which("exiftool")
 need_et = pytest.mark.skipif(not ET, reason="需要 ExifTool")
 
 
+def run_et(*args: str) -> str:
+    """直接调用 ExifTool（造测试数据 / 检查结果）。参数经 UTF-8 的参数文件传入：
+    Windows 命令行会把中文路径、中文关键词转成本地编码（变成 ???，或找不到文件）。返回标准输出。"""
+    import subprocess
+    out = subprocess.run([ET, "-charset", "filename=utf8", "-@", "-"], input="\n".join(args).encode("utf-8"),
+                         capture_output=True, check=True)
+    return out.stdout.decode("utf-8", "replace")
+
+
 _XDG = tempfile.mkdtemp(prefix="pc_test_xdg_")      # send2trash 在导入时就读取 XDG_DATA_HOME，整个测试会话用同一个
 
 
 @pytest.fixture()
 def trash_home(monkeypatch):
     """把 freedesktop 回收站放到临时目录里（与被删文件同一磁盘），不碰真实回收站。"""
+    if os.name == "nt":
+        pytest.skip("Windows 上 send2trash 只能放进真实的回收站，这些用例在 Linux 上跑")
     monkeypatch.setenv("XDG_DATA_HOME", _XDG)
     import send2trash.plat_other as po
     monkeypatch.setattr(po, "XDG_DATA_HOME", _XDG, raising=False)
@@ -310,7 +321,7 @@ def test_xmp_rating_create_and_update_with_undo(tmp_path, monkeypatch):
     r2 = d / "DSC2.ARW"
     r2.write_bytes(b"\0" * 2048)
     lr = d / "DSC2.xmp"                       # 模拟 Lightroom 已有的修图记录
-    os.system(f'"{ET}" -q -XMP-crs:Exposure2012=+0.50 -XMP-xmp:Rating=1 "{lr}"')
+    run_et("-q", "-XMP-crs:Exposure2012=+0.50", "-XMP-xmp:Rating=1", str(lr))
     original = lr.read_bytes()
     gs = []
     for i, p in enumerate((r1, r2)):
@@ -325,9 +336,7 @@ def test_xmp_rating_create_and_update_with_undo(tmp_path, monkeypatch):
     j = Journal(tmp_path / "j.db")
     res = write_xmp(plan, ET, j)
     assert res.failed == 0 and res.edited == 1
-    import subprocess
-    out = subprocess.run([ET, "-s", "-Rating", "-Label", "-Exposure2012", str(d / "DSC1.xmp"), str(lr)],
-                         capture_output=True, text=True).stdout
+    out = run_et("-s", "-Rating", "-Label", "-Exposure2012", str(d / "DSC1.xmp"), str(lr))
     assert "Rating                          : 4" in out and "Label                           : Red" in out
     assert "Rating                          : -1" in out and "+0.50" in out          # 修图设置保留
     monkeypatch.setattr(mover_mod, "trash", lambda p: os.remove(p))

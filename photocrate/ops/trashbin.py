@@ -58,14 +58,23 @@ def parse_windows_i_file(data: bytes) -> tuple[str, float, int] | None:
     return path, (ft - _EPOCH_DIFF) / 1e7, size
 
 
+def _strip_long(p: str) -> str:
+    """去掉 \\\\?\\ 长路径前缀（回收站记录里可能带着它）。"""
+    if p.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + p[8:]
+    if p.startswith("\\\\?\\"):
+        return p[4:]
+    return p
+
+
 def _windows_candidates(path: str):
-    drive = os.path.splitdrive(os.path.abspath(path))[0]
+    drive = os.path.splitdrive(os.path.abspath(_strip_long(path)))[0]
     root = drive + "\\$Recycle.Bin"
     try:
         sids = os.listdir(root)
     except OSError:
         return
-    want = os.path.normcase(os.path.abspath(path))
+    want = os.path.normcase(os.path.abspath(_strip_long(path)))
     for sid in sids:
         d = os.path.join(root, sid)
         try:
@@ -78,10 +87,10 @@ def _windows_candidates(path: str):
             ip = os.path.join(d, n)
             try:
                 with open(ip, "rb") as fh:
-                    info = parse_windows_i_file(fh.read(2048))
+                    info = parse_windows_i_file(fh.read(28 + 2 * 32768))   # 长路径最多 32767 个字符
             except OSError:
                 continue
-            if not info or os.path.normcase(os.path.abspath(info[0])) != want:
+            if not info or os.path.normcase(os.path.abspath(_strip_long(info[0]))) != want:
                 continue
             rp = os.path.join(d, "$R" + n[2:])
             if os.path.lexists(rp):

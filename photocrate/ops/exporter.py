@@ -15,6 +15,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -336,9 +337,17 @@ def export_album(groups, dst_dir: str, title: str, opts: ExportOptions, subtitle
             "made": datetime.now().strftime("%Y-%m-%d"), "map": bool(show_map and any("lat" in d for d in day_list))}
     index = os.path.join(root, "index.html")
     with open(index, "w", encoding="utf-8") as f:
-        f.write(_album_html().replace("__TITLE__", html.escape(title))
-                .replace("__DATA__", json.dumps(data, ensure_ascii=False).replace("</", "<\\/")))
+        # 一次替换两个占位符：标题、地名里恰好写着 __DATA__ / __TITLE__ 也不会被再替换一次
+        f.write(re.sub(r"__(TITLE|DATA)__", lambda m: html.escape(title) if m.group(1) == "TITLE" else _script_json(data),
+                       _album_html()))
     return index, res
+
+
+def _script_json(data) -> str:
+    """嵌进 <script> 的 JSON：< > & 写成 \\u 转义，标题、地名里的 </script>、<!-- 都不会提前结束或打乱脚本。"""
+    s = json.dumps(data, ensure_ascii=False)
+    return s.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026") \
+        .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
 
 def _album_html() -> str:
@@ -405,6 +414,7 @@ footer{color:var(--dim);font-size:12px;text-align:center;padding:40px 20px}
 <script>
 const D = __DATA__;
 const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";");
 $("#t").textContent = D.title; document.title = D.title;
 const total = D.days.reduce((a, d) => a + d.photos.length, 0);
 $("#st").textContent = (D.subtitle ? D.subtitle + " · " : "") + D.days.length + " 天 · " + total + " 张";
@@ -414,7 +424,7 @@ for (const d of D.days) {
   const a = document.createElement("a"); a.href = "#d" + d.n; a.textContent = "第" + d.n + "天 " + d.date.slice(5);
   $("#nav").appendChild(a);
   const s = document.createElement("section"); s.id = "d" + d.n;
-  s.innerHTML = "<h2><span>DAY " + String(d.n).padStart(2, "0") + "</span>" + d.date + "</h2><div class=meta></div><div class=grid></div>";
+  s.innerHTML = "<h2><span>DAY " + String(d.n).padStart(2, "0") + "</span>" + esc(d.date) + "</h2><div class=meta></div><div class=grid></div>";
   s.querySelector(".meta").textContent = (d.places.join(" · ") || "") + (d.places.length ? " · " : "") + d.photos.length + " 张";
   const grid = s.querySelector(".grid");
   for (const p of d.photos) {
@@ -456,7 +466,7 @@ if (D.map) {
     const ll = pts.map(d => [d.lat, d.lon]);
     if (ll.length > 1) L.polyline(ll, {color: "#e0a800", weight: 3, dashArray: "6 6"}).addTo(m);
     for (const d of pts) L.circleMarker([d.lat, d.lon], {radius: 8, color: "#1d1f22", fillColor: "#f2c230", fillOpacity: 1})
-      .addTo(m).bindTooltip("第" + d.n + "天 " + (d.places.join("·") || d.date)).on("click", () => location.hash = "d" + d.n);
+      .addTo(m).bindTooltip(esc("第" + d.n + "天 " + (d.places.join("·") || d.date))).on("click", () => location.hash = "d" + d.n);
     m.fitBounds(L.latLngBounds(ll).pad(0.3), {maxZoom: 12});
   };
   document.head.appendChild(s);

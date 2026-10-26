@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sqlite3
 import string
 import threading
@@ -17,6 +18,7 @@ from dataclasses import dataclass, field
 
 from ..partition.base import PartitionContext
 from ..partition.engine import PartitionSpec, Rule
+from .pathsafe import existing_ancestor
 from .planner import Plan, PlanOp, _NameBook, build_plan
 from ..i18n import t as _t
 
@@ -182,8 +184,8 @@ def build_import_plan(groups, target_root: str, template: str, ctx: PartitionCon
     """复制计划：文件夹按 template（与分区“高级模板”写法相同），文件名可选按 rename_template 改。
     目标位置已有同名且大小相同的文件 → 视为已导入，跳过；同名不同内容 → 自动编号。"""
     spec = PartitionSpec("template", template=template) if template.strip() else PartitionSpec("rules", [])
-    # 先剔除目标位置已有同名同大小文件的组
-    pre = build_plan(groups, spec, ctx, target_root, "copy", "rename", "none")
+    # 先剔除目标位置已有同名同大小文件的组（空间检查放到最后，只算真正要复制的）
+    pre = build_plan(groups, spec, ctx, target_root, "copy", "rename", "none", verify_free_space=False)
     plan = Plan(spec_text=_t('导入：{0}', template or _t('（不建子文件夹）')) + (_t('；改名 {0}', rename_template) if rename_template else ""),
                 target_root=pre.target_root, operation="copy", errors=list(pre.errors))
     by_gid = {g.gid: g for g in groups}
@@ -236,7 +238,13 @@ def build_import_plan(groups, target_root: str, template: str, ctx: PartitionCon
         plan.total_bytes += sum(op.size for op in it.ops)
     plan.cross_bytes = plan.total_bytes
     plan.new_dirs = pre.new_dirs
-    plan.free_bytes = pre.free_bytes
+    if plan.total_bytes and target_root:
+        try:
+            plan.free_bytes = shutil.disk_usage(existing_ancestor(os.path.abspath(target_root))).free
+            if plan.free_bytes < plan.total_bytes * 1.02 + 50 * 1024 * 1024:
+                plan.errors.append(_t("目标磁盘剩余空间不足。"))
+        except OSError:
+            pass
     if same_existing:
         plan.warnings.append(_t('{0} 张照片在目标文件夹里已有同名、同大小的文件，视为已导入，跳过。', same_existing))
     plan.warnings += [w for w in pre.warnings if w != _t("没有需要移动的照片（可能都已经在目标位置）。")]

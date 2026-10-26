@@ -30,6 +30,16 @@ TEMP_SUFFIXES = (".pctmp",)
 ProgressFn = Callable[[int, str], None]
 
 
+def _is_junction(e: os.DirEntry) -> bool:
+    fn = getattr(e, "is_junction", None)          # Python 3.12+
+    if fn is not None:
+        return fn()
+    try:
+        return getattr(os.lstat(e.path), "st_reparse_tag", 0) == 0xA0000003     # IO_REPARSE_TAG_MOUNT_POINT
+    except OSError:
+        return False
+
+
 def _iter_dir(root: str, recursive: bool, cancel: threading.Event | None) -> Iterable[tuple[str, list[os.DirEntry]]]:
     stack = [root]
     while stack:
@@ -47,6 +57,10 @@ def _iter_dir(root: str, recursive: bool, cancel: threading.Event | None) -> Ite
         for e in entries:
             try:
                 if e.is_dir(follow_symlinks=False):
+                    # Windows 的目录联接（junction）不算符号链接，但跟进去会让同一个文件以两条路径出现
+                    # （“删除重复照片”会把它当成副本），指向上级时还会绕圈 → 和符号链接一样不进入
+                    if _is_junction(e):
+                        continue
                     if recursive and e.name.lower() not in SKIP_DIR_NAMES and not e.name.startswith("."):
                         subdirs.append(e.path)
                 elif e.is_file(follow_symlinks=False):

@@ -33,6 +33,8 @@ def set_language(lang: str | None) -> str:
         table.update(EN_PHOTOS)          # 相册 / 修图工作台 / 文字识别（与 locale_en 同名的条目以 locale_en 为准）
         from .locale_en_sync import EN_SYNC
         table.update(EN_SYNC)            # 自动同步
+        from .locale_en_safety import EN_SAFETY
+        table.update(EN_SAFETY)          # 安全检查新增的提示
         table.update(EN)
         _EN = table
     return LANG

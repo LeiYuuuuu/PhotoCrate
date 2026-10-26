@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +13,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from test_culling import ET, _library, _scene, need_et, trash_home  # noqa: E402,F401
+from test_culling import ET, _library, _scene, need_et, run_et, trash_home  # noqa: E402,F401
 from test_timeplace import make_jpeg  # noqa: E402
 
 TOKYO = (35.6586, 139.7454)
@@ -37,7 +36,7 @@ def make_video(path: Path, utc: str | None = None, creation: str | None = None, 
     if creation:
         args += [f"-Keys:CreationDate={creation}"]
     if args and ET:
-        subprocess.run([ET, "-q", "-overwrite_original", *args, str(path)], check=True)
+        run_et("-q", "-overwrite_original", *args, str(path))
     return path
 
 
@@ -255,8 +254,7 @@ def test_xmp_keywords_create_and_update_without_duplicates(tmp_path):
         xmp = str(d / "DSC0001.xmp")
 
         def subjects():
-            out = subprocess.run([ET, "-j", "-XMP-dc:Subject", "-XMP-lr:HierarchicalSubject", xmp],
-                                 capture_output=True, text=True, encoding="utf-8").stdout
+            out = run_et("-j", "-XMP-dc:Subject", "-XMP-lr:HierarchicalSubject", xmp)
             import json
             r = json.loads(out)[0]
             s = r.get("Subject", [])
@@ -264,7 +262,7 @@ def test_xmp_keywords_create_and_update_without_duplicates(tmp_path):
         s, h = subjects()
         assert s == ["夜景", "小明", "2026-01-05 日本 东京"] and "人物|小明" in h
         # 用户在 Lightroom 里加了一个自己的关键词；再写一次（更新已有 .xmp）：不重复、不删用户的词
-        subprocess.run([ET, "-q", "-overwrite_original", "-XMP-dc:Subject+=我的关键词", xmp], check=True)
+        run_et("-q", "-overwrite_original", "-XMP-dc:Subject+=我的关键词", xmp)
         g.feats["scene"]["scene"] = "夜景"
         plan2 = build_xmp_plan([g], False, False, False, False, True, True)
         assert plan2.tasks[0].mode == "edit"

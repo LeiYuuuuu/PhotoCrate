@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import threading
 import time
@@ -44,6 +45,16 @@ FILES: dict[str, tuple[list[str], int]] = {
         [f"{HF}/{OCR_PATH}/ch_PP-OCRv4_det_infer.onnx", f"{HF_MIRROR}/{OCR_PATH}/ch_PP-OCRv4_det_infer.onnx"], 4_745_517),
     "ch_PP-OCRv4_rec_infer.onnx": (
         [f"{HF}/{OCR_PATH}/ch_PP-OCRv4_rec_infer.onnx", f"{HF_MIRROR}/{OCR_PATH}/ch_PP-OCRv4_rec_infer.onnx"], 10_857_958),
+}
+
+# 下载后核对的 SHA-256（取自 Hugging Face / GitHub LFS 记录的原始文件）：镜像站或网络中途被篡改的文件不会被使用
+SHA256: dict[str, str] = {
+    "chinese_clip_vitb16_q8.onnx": "a2c2849329eafb24100acec5a9421a39f8cb445296444c5c98855b69e5e7a751",
+    "chinese_clip_vocab.txt": "45bbac6b341c319adc98a532532882e91a9cefc0329aa57bac9ae761c27b291c",
+    "face_detection_yunet_2023mar.onnx": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+    "face_recognition_sface_2021dec.onnx": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+    "ch_PP-OCRv4_det_infer.onnx": "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9",
+    "ch_PP-OCRv4_rec_infer.onnx": "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b",
 }
 
 MODELS = {
@@ -120,29 +131,41 @@ def _fetch(url: str, dst: Path, done_before: int, total: int, label: str, progre
            cancel: threading.Event | None) -> None:
     req = urllib.request.Request(url, headers={"User-Agent": "PhotoCrate/1.4"})
     tmp = dst.with_suffix(dst.suffix + ".part")
-    with urllib.request.urlopen(req, timeout=30) as r, open(tmp, "wb") as f:
-        size = int(r.headers.get("Content-Length") or 0)
-        got = 0
-        last = 0.0
-        while True:
-            if cancel is not None and cancel.is_set():
-                raise InterruptedError(_t("已取消"))
-            chunk = r.read(1 << 18)
-            if not chunk:
-                break
-            f.write(chunk)
-            got += len(chunk)
-            now = time.time()
-            if progress and now - last > 0.2:
-                last = now
-                progress(done_before + got, max(total, done_before + size), f"{label}  {got / 1e6:.1f} MB")
-    if size and os.path.getsize(tmp) != size:
-        raise IOError(_t('下载不完整（{0} / {1} 字节）', os.path.getsize(tmp), size))
-    with open(tmp, "rb") as f:
-        head = f.read(64)
-    if head.lstrip().startswith((b"<", b"version https://git-lfs")):
-        raise IOError(_t("下载到的是网页或 LFS 指针，不是模型文件"))
-    os.replace(tmp, dst)
+    h = hashlib.sha256()
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r, open(tmp, "wb") as f:
+            size = int(r.headers.get("Content-Length") or 0)
+            got = 0
+            last = 0.0
+            while True:
+                if cancel is not None and cancel.is_set():
+                    raise InterruptedError(_t("已取消"))
+                chunk = r.read(1 << 18)
+                if not chunk:
+                    break
+                f.write(chunk)
+                h.update(chunk)
+                got += len(chunk)
+                now = time.time()
+                if progress and now - last > 0.2:
+                    last = now
+                    progress(done_before + got, max(total, done_before + size), f"{label}  {got / 1e6:.1f} MB")
+        if size and os.path.getsize(tmp) != size:
+            raise IOError(_t('下载不完整（{0} / {1} 字节）', os.path.getsize(tmp), size))
+        with open(tmp, "rb") as f:
+            head = f.read(64)
+        if head.lstrip().startswith((b"<", b"version https://git-lfs")):
+            raise IOError(_t("下载到的是网页或 LFS 指针，不是模型文件"))
+        want = SHA256.get(dst.name)
+        if want and h.hexdigest() != want:
+            raise IOError(_t("下载的文件校验值不对（可能被镜像站或网络篡改），没有使用"))
+        os.replace(tmp, dst)
+    except BaseException:
+        try:                                    # 取消 / 失败时不留下几百 MB 的半截文件
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def download(model: str, progress: ProgressFn | None = None, cancel: threading.Event | None = None,
