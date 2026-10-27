@@ -115,6 +115,9 @@ FIND = [
     ("psd 怎么打开", "psd"), ("图像大小在哪", "image_size"), ("隐藏照片", "hidden"), ("加地点", "gps"),
     ("天空替换在哪", "sky"), ("滤镜预设在哪里", "presets"), ("色彩范围", "color_range"), ("怎么改分辨率", "image_size"),
     ("混合模式", "blend_mode"), ("导入存储卡", "import_card"), ("合并曝光", "merge_hdr"),
+    # v2.4.0 AI 抠图
+    ("怎么去除背景", "remove_background"), ("白底证件照怎么弄", "remove_background"), ("抠头发丝", "select_portrait"),
+    ("人像虚化在哪", "portrait_blur"), ("人像模式背景虚化", "portrait_blur"), ("点一下选中物体", "object_tool"),
 ]
 
 
