@@ -256,8 +256,15 @@ class SkyDialog(_Base):
         self.bright = ParamSlider(_t("天空亮度"), -50, 50, 0, 0, "%")
         side.addWidget(self.harm)
         side.addWidget(self.bright)
-        side.addWidget(caption(_t("自动找出天空（亮、平滑、和画面上边相连的区域），边缘按树梢、楼顶精修。"
-                                  "结果放在一个组里：新天空带蒙版，可以用画笔修蒙版、用移动工具挪天空。"), "faint", 8.5))
+        from ...ai import matting
+        if matting.ready("sky"):
+            how = _t("用 AI 天空分割模型自动找出天空（云、灰天、逆光都认得），边缘按树梢、楼顶精修。")
+        else:
+            how = _t("自动找出天空（亮、平滑、和画面上边相连的区域），边缘按树梢、楼顶精修。")
+            self.b_ai = TacButton(_t("用 AI 模型找天空（更准）"), "secondary", height=28)
+            self.b_ai.clicked.connect(self._use_model)
+            side.addWidget(self.b_ai)
+        side.addWidget(caption(how + _t("结果放在一个组里：新天空带蒙版，可以用画笔修蒙版、用移动工具挪天空。"), "faint", 8.5))
         side.addStretch(1)
         row.addLayout(side)
         self.body.addLayout(row)
@@ -267,6 +274,19 @@ class SkyDialog(_Base):
         self.kind.currentIndexChanged.connect(lambda _=0: self._update())
         self.resize(980, 560)
         QTimer.singleShot(0, self._update)
+
+    def _use_model(self):
+        from ...edit import sky
+        from .ai_dl import ensure
+        if not ensure(self, "sky", _t("「天空替换」用 AI 模型找天空：")):
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.mask_small = sky.detect(self.small)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.b_ai.hide()
+        self._update()
 
     def _pick(self, i):
         if self.kind.itemData(i) != "__file__":

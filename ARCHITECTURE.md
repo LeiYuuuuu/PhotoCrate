@@ -250,6 +250,20 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 
 测试：`tests/test_extras.py`、`tests/ui_extras.py`。
 
+## 9.58 v2.4：修图 AI 抠图（ai/matting.py）与小匣助手（assist/）
+
+| 部分 | 实现 |
+|---|---|
+| 模型与下载 `ai/models.py` | 新登记 `sam`（SAM 2.1 hiera-tiny：int8 图像编码器 + 提示解码器；ONNX 带外部权重 `.onnx_data`，按原文件名放在 `models\sam21_tiny\`）、`subject`（BiRefNet lite fp16）、`portrait`（MODNet）、`sky`（U²-Net 天空分割），都从 Hugging Face 下载，hf-mirror 镜像兜底。`FILES` / `SHA256` 按相对路径登记，`_fetch` 自动建子文件夹、按相对路径核对 SHA-256。修图里第一次用到时由 `ui/editor/ai_dl.ensure` 询问（大小、来源、许可）并带进度下载；拒绝时由调用方退回旧方法 |
+| 推理 `ai/matting.py` | 不依赖 Qt；每个模型一个懒加载的 CPU `InferenceSession`。SAM：整张图直接缩放成 1024²（不保持比例）、ImageNet 归一化后编码；编码结果按画面内容（缩小合成图的 blake2b）缓存，同一张图连续点选只跑解码器。点 / 框坐标换算到 1024 空间；三个候选取模型自评 IoU 最高的；256² 的 logit 放大后按 0 二值化（直接当透明度会是半透明的一片）。BiRefNet 1024² → sigmoid；MODNet 短边 512、两边取 32 的倍数、归一化到 −1…1；天空 320² 取第一个输出 |
+| 修图里的用法 `edit/paint.py` | `ai_object_select_doc`：在 `flat_level(1600)` 上算，SAM 的硬边用 `select.refine`（导向滤波，半径 = 长边 / 250）贴着照片边缘精修，再放大回画布。`ai_matte_doc`（主体 / 人像）：软 alpha，同样精修后放大。`matte_found`：最大连通块 ≥ 画面 2%（MODNet 在没有人的照片上只给零星小块，有人的照片最大块 ≥ 4%，在 18 张照片上量过）。`portrait_blur`：背景权重 = (1 − alpha)²，按权重归一化的圆盘卷积（人的颜色不晕到背景），在缩小到半径 ≤ 12 px 的图上算，再分条 `remap` 放大合成（不把整张大图转成浮点）；支持 16 位 |
+| 天空 `edit/sky.py` | `detect` 有模型就走 `detect_model`：概率图去掉小于画面 0.2% 的小块，再用原来的导向滤波按树梢、楼顶精修；没有模型仍是颜色 / 梯度规则 |
+| 界面 `ui/editor/` | 对象选择工具：两个方向都小于 6 屏幕像素算单击（点提示），否则算框，细长一条忽略；没模型时单击只提示，选项栏有下载按钮。「选择主体（自动）」有模型用 BiRefNet，否则问一次（选「先用旧方法」后本窗口不再问）。新菜单：选择 → 选择人像（发丝）；图层 → 去除背景（给当前图层加蒙版，一步 `Document.edit`、可撤销）；滤镜 → 人像 → 人像虚化…（先确认有人再问半径，走 `replace_pixels`）。天空替换对话框没模型时有「用 AI 模型找天空」按钮 |
+| 选型 | 在本机照片上比：SAM int8 / fp32 框选结果与 BiRefNet 主体的 IoU 0.885 / 0.881、编码 0.45–1 s，用 int8；BiRefNet fp16 与 fp32 输出最大差 0.02、CPU 上同样 3–6 s，用 fp16（115 MB）。不用 RMBG（CC BY-NC）和 SAM 3（SAM License、8.48 亿参数） |
+| 小匣助手 `assist/` + `ui/assistant.py` | 确定性的本地问答（不用大模型）：`features.py` 约 120 个功能条目（界面路径、用法、同义词、“带我去”动作），`effects.py` 调色词典（方向 + 强度，叠加成调整图层参数），`photo.py` 按直方图 / 灰世界偏色收放幅度，`engine.Assistant.ask()` 是唯一入口。可选大模型后端 `assist/llm.py`（urllib 直连；输出用 JSON schema 限定功能 id / 滑块键，`ground()` 再校验、越界截断，失败退回本地），Key 存在 `assist/secrets.py`（Windows 上 DPAPI）。顶栏「助手」/ Ctrl+K；测试核对知识库里的每个界面文字都真实存在 |
+
+测试：`tests/test_matting.py`（设 `PHOTOCRATE_MODELS` 才跑用到模型的几项）、`tests/ui_matting.py`（可以传一张真实照片）；小匣助手 `tests/test_assist.py`、`tests/test_assist_llm.py`、`tests/ui_assist.py`。
+
 ## 9.6 合并曝光（edit/hdr.py + ui/editor/merge.py）
 
 同一场景、不同曝光的 2–9 张 → 一张。只用 numpy / OpenCV，不新增依赖。目标是**不损失清晰度**，所以每一步都围绕“少重新取样、对得准”来做：
@@ -408,24 +422,26 @@ PhotoCrate/
 │  │               pairing geotime places daybook trips videos smart（相册：时间线 / 智能相簿 / 搜索）watch（自动同步：文件夹快照 / 监视）
 │  │               qr（二维码编码）
 │  ├─ ai/          models clip scenes faces people service visual ocr ocrindex（ocr = 照片里的文字）faceq（连拍里的闭眼 / 表情）
+│  │               matting（修图抠图：SAM / BiRefNet / MODNet / 天空）
 │  ├─ lan/         server page（手机互传：局域网网页服务）
+│  ├─ assist/      engine features effects photo text llm secrets（小匣助手）
 │  ├─ analyzers/   base builtin
 │  ├─ partition/   base dimensions engine
 │  ├─ ops/         planner mover journal pathsafe xmpwrite cleanup trashbin renamer
 │  │               importer dedupe exporter privacy（分享前隐私体检）
 │  ├─ edit/        document adjust blend paint filters text io hdr（修图核心；hdr = 合并曝光）
 │  └─ ui/          theme context dialogs timeplace_dialogs culling_dialogs workflow_dialogs xmpflow viewer
-│                  main_window  pages/  widgets/（deco thumbgrid mapview）  editor/（window canvas tools panels icons tutorial merge）
-│                  photos/（相册：page grid detail canvas）  studio（修图模式：标签页）  autosync（自动同步）
+│                  main_window  pages/  widgets/（deco thumbgrid mapview）  editor/（window canvas tools panels icons tutorial merge ai_dl）
+│                  photos/（相册：page grid detail canvas）  studio（修图模式：标签页）  autosync（自动同步）  assistant（小匣助手）
 ├─ data/           geonames_cities1000.csv.gz  place_names_zh.json  clip_vocab_zh.txt
 ├─ assets/         app.ico app.png
 ├─ plugins/        用户插件放这里        plugins_examples/  示例插件
 ├─ tools/          get_exiftool.ps1  make_icon.py  （exiftool/ 运行后自动下载到这里）
 └─ tests/          test_core.py  test_timeplace.py  test_culling.py  test_trips.py  test_ai.py
                    test_workflow.py  test_repartition.py  test_search_rank.py  test_faces_screen.py  test_i18n.py
-                   test_editor.py  test_editor_pro.py  test_editor_pro2.py  test_editor_pro3.py  test_hdr.py
+                   test_editor.py  test_editor_pro.py  test_editor_pro2.py  test_editor_pro3.py  test_hdr.py  test_matting.py
                    make_samples.py  ui_smoke.py  ui_timeplace.py
-                   ui_culling.py  ui_tier3.py  ui_workflow.py  ui_repartition.py  ui_editor.py  ui_merge.py
+                   ui_culling.py  ui_tier3.py  ui_workflow.py  ui_repartition.py  ui_editor.py  ui_merge.py  ui_matting.py
 ```
 
 ## 14. 界面细节与调试辅助

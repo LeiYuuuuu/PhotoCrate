@@ -1,8 +1,8 @@
 """天空替换：自动找出天空，换成另一片天空（内置几种，或用自己的照片），并让前景的色调和新天空协调。
 
-找天空（离线、不用模型）：缩小后按“亮、平滑（没有纹理）、偏蓝或偏白”找候选像素，只保留和画面上边相连的大块，
-清理后放大，再用「选择并遮住」的导向滤波沿树梢、楼顶的真实边缘精修。结果放进一个图层组：新天空（带蒙版）+
-一个只作用在前景上的照片滤镜（颜色取新天空靠近地平线的颜色），都可以再改。
+找天空：下载了天空分割模型（ai/matting.py）就用模型；没有就按规则——缩小后按“亮、平滑（没有纹理）、偏蓝或偏白”
+找候选像素，只保留和画面上边相连的大块，清理后放大。两种都再用「选择并遮住」的导向滤波沿树梢、楼顶的真实边缘精修。
+结果放进一个图层组：新天空（带蒙版）+ 一个只作用在前景上的照片滤镜（颜色取新天空靠近地平线的颜色），都可以再改。
 """
 from __future__ import annotations
 
@@ -59,8 +59,12 @@ def make_sky(kind: str, w: int, h: int, seed: int = 7) -> np.ndarray:
     return np.clip(img * 255 + 0.5, 0, 255).astype(np.uint8)
 
 
-def detect(rgb8: np.ndarray) -> np.ndarray:
-    """找天空：返回 uint8 选区（255 = 天空）。"""
+def detect(rgb8: np.ndarray, model: bool = True) -> np.ndarray:
+    """找天空：返回 uint8 选区（255 = 天空）。下载了天空分割模型就用模型（云、逆光、灰天都认得），否则用下面的规则。"""
+    if model:
+        from ..ai import matting
+        if matting.ready("sky"):
+            return detect_model(rgb8)
     import cv2
     from .select import refine
     H, W = rgb8.shape[:2]
@@ -90,6 +94,23 @@ def detect(rgb8: np.ndarray) -> np.ndarray:
     m = cv2.resize(keep * 255, (W, H), interpolation=cv2.INTER_LINEAR).astype(np.uint8)
     if not m.any():
         return m
+    return refine(rgb8, m, radius=max(6, max(H, W) / 150), smooth=10)
+
+
+def detect_model(rgb8: np.ndarray) -> np.ndarray:
+    """用天空分割模型（U²-Net，320 × 320 上算）找天空，去掉零碎的小块，再同样按树梢、楼顶的真实边缘精修。"""
+    import cv2
+    from ..ai import matting
+    from .select import refine
+    H, W = rgb8.shape[:2]
+    p = matting.sky(rgb8)
+    n, lab, stats, _ = cv2.connectedComponentsWithStats((p > 0.5).astype(np.uint8), 4)
+    tiny = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] < p.size * 0.002]   # 水面反光、白墙上的小斑
+    m = np.clip(p * 255 + 0.5, 0, 255).astype(np.uint8)
+    if tiny:
+        m[np.isin(lab, tiny)] = 0
+    if not (m > 127).any():
+        return np.zeros((H, W), np.uint8)
     return refine(rgb8, m, radius=max(6, max(H, W) / 150), smooth=10)
 
 

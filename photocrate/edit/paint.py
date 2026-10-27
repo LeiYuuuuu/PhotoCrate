@@ -533,14 +533,94 @@ def object_select(rgba: np.ndarray, rect, iterations: int = 5) -> np.ndarray:
 
 def object_select_doc(doc: Document, rect) -> np.ndarray:
     """在文档上做对象选择：用缩小的合成图算，结果放大回画布尺寸。"""
-    import cv2
     small, f = doc.flat_level(1600)
     x0, y0, x1, y1 = rect
     m = object_select(small, (x0 / f, y0 / f, x1 / f, y1 / f))
+    return _to_canvas(doc, m, f)
+
+
+def _to_canvas(doc: Document, m: np.ndarray, f: int) -> np.ndarray:
+    """在缩小 f 倍的图上算出的选区放大回画布尺寸。"""
+    import cv2
     if f > 1:
-        m = cv2.resize(m, (small.shape[1] * f, small.shape[0] * f), interpolation=cv2.INTER_LINEAR)
+        m = cv2.resize(m, (m.shape[1] * f, m.shape[0] * f), interpolation=cv2.INTER_LINEAR)
         m = np.ascontiguousarray(m[:doc.height, :doc.width])
     return m
+
+
+# ---- 用 AI 模型（ai/matting.py；没下载时调用方退回上面的 GrabCut / 不提供） ----
+
+def ai_object_select_doc(doc: Document, points=(), labels=(), box=None) -> np.ndarray:
+    """对象选择（SAM 2.1）：points / box 用画布坐标，labels 1 = 要、0 = 不要。
+    在缩小的合成图上算（编码结果按画面内容缓存，同一张图接着点很快），边缘按照片本身精修，再放大回画布尺寸。"""
+    import hashlib
+    from ..ai import matting
+    from .select import refine
+    small, f = doc.flat_level(1600)
+    h, w = small.shape[:2]
+    key = (id(doc), small.shape, hashlib.blake2b(small.tobytes(), digest_size=16).digest())
+    emb = matting.sam_encode(small, key)
+    m = matting.sam_predict(emb, w, h, [(x / f, y / f) for x, y in points], labels,
+                            None if box is None else tuple(v / f for v in box))
+    if not m.any():
+        return np.zeros((doc.height, doc.width), np.uint8)
+    m = refine(small, (m * 255).astype(np.uint8), radius=max(2, max(w, h) / 250))
+    return _to_canvas(doc, m, f)
+
+
+def ai_matte_doc(doc: Document, kind: str = "subject") -> np.ndarray:
+    """选择主体（BiRefNet）/ 选择人像（MODNet，kind="portrait"）：画布尺寸的 uint8 软选区，头发丝是半透明的。"""
+    from ..ai import matting
+    from .select import refine
+    small, f = doc.flat_level(1600)
+    a = (matting.portrait if kind == "portrait" else matting.subject)(small)
+    m = np.clip(a * 255 + 0.5, 0, 255).astype(np.uint8)
+    if f > 1 or max(small.shape[:2]) > 1024:          # 模型在 512 / 1024 上算的，放大后边缘按照片精修一下
+        m = refine(small, m, radius=max(2, max(small.shape[:2]) / 400))
+    return _to_canvas(doc, m, f)
+
+
+def matte_found(m: np.ndarray, min_frac: float = 0.02) -> bool:
+    """抠图结果里有没有像样的一块（最大的连通块至少占画面 min_frac）。MODNet 在没有人的照片上
+    也会给出零星几块（船上的绳子、远处的花），有人的照片最大块在 4% 以上（在 18 张照片上量的）。"""
+    import cv2
+    hard = (m > 127).astype(np.uint8)
+    s = max(1, max(hard.shape) // 800)
+    if s > 1:
+        hard = np.ascontiguousarray(hard[::s, ::s])
+    n, _, st, _ = cv2.connectedComponentsWithStats(hard, 8)
+    return n > 1 and st[1:, cv2.CC_STAT_AREA].max() >= hard.size * min_frac
+
+
+def portrait_blur(px: np.ndarray, alpha: np.ndarray, radius: float) -> np.ndarray:
+    """人像虚化：alpha（uint8，255 = 人，和 px 同尺寸）以外做圆形光圈模糊，返回新的像素（原数组不动）。
+    模糊前先把人从背景里挖掉、按剩下的权重归一化，人的颜色不会晕到背景上；背景本来就糊，所以在缩小的图上模糊再放大。"""
+    import cv2
+    h, w = px.shape[:2]
+    top = 65535.0 if px.dtype == np.uint16 else 255.0
+    s = min(1.0, 12.0 / max(1.0, float(radius)))
+    sw, sh = max(1, int(round(w * s))), max(1, int(round(h * s)))
+    img = cv2.resize(np.ascontiguousarray(px[..., :3]), (sw, sh), interpolation=cv2.INTER_AREA).astype(np.float32) / top
+    bg = 1 - cv2.resize(alpha, (sw, sh), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
+    bg = bg * bg                                       # 半透明的头发边也少算一点，免得发色晕开
+    r = max(1, int(round(radius * s)))
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)).astype(np.float32)
+    k /= k.sum()
+    num = cv2.filter2D(img * bg[..., None], -1, k, borderType=cv2.BORDER_REFLECT)
+    den = cv2.filter2D(bg, -1, k, borderType=cv2.BORDER_REFLECT)
+    plain = cv2.filter2D(img, -1, k, borderType=cv2.BORDER_REFLECT)
+    wgt = np.clip(den / 0.05, 0, 1)[..., None]         # 人身体正中（周围全是人）没有背景可取：退回普通模糊
+    blur = num / np.maximum(den, 1e-4)[..., None] * wgt + plain * (1 - wgt)
+    out = px.copy()
+    mx = (np.arange(w, dtype=np.float32) + 0.5) * (sw / w) - 0.5
+    for y0 in range(0, h, 1024):                       # 分条放大、合成：整张大图转浮点太占内存
+        y1 = min(h, y0 + 1024)
+        gx, gy = np.meshgrid(mx, (np.arange(y0, y1, dtype=np.float32) + 0.5) * (sh / h) - 0.5)
+        b = cv2.remap(blur, gx, gy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        a = (alpha[y0:y1].astype(np.float32) / 255)[..., None]
+        rgb = px[y0:y1, :, :3].astype(np.float32) / top
+        out[y0:y1, :, :3] = np.clip((rgb * a + b * (1 - a)) * top + 0.5, 0, top).astype(px.dtype)
+    return out
 
 
 # ---------------------------------------------------------------------------

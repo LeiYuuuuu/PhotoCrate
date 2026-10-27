@@ -409,7 +409,8 @@ class WandTool(Tool):
 
 class ObjectTool(Tool):
     id, name, shortcut, icon = "object", _t("对象选择"), "W", "object"
-    tip = _t("对象选择工具（W，Shift+W 和魔棒轮换）：框住一个物体 / 人，自动沿边缘选出来（GrabCut，几秒钟）。之后可以用 Shift / Alt 补选或减选")
+    tip = _t("对象选择工具（W，Shift+W 和魔棒轮换）：点一下选中点到的东西，拖一个框选出框里的整个物体"
+             "（AI 模型 SAM，第一次用时下载；不下载就用 GrabCut 框选）。Shift 加选、Alt 减选")
 
     def __init__(self, win):
         super().__init__(win)
@@ -417,8 +418,22 @@ class ObjectTool(Tool):
         self.mode = "new"
 
     def options(self, bar):
+        from ...ai import matting
         bar.seg("sel_mode", SEL_MODES, "new")
-        bar.label(_t("框选时留一点余量，主体边缘不要被框线切到"))
+        if matting.ready("sam"):
+            bar.label(_t("点一下选中点到的东西（衣服、头发这类局部也行）；拖框选出整个物体"))
+        else:
+            bar.label(_t("框住一个物体，自动沿边缘选出来"))
+            from ..widgets.deco import TacButton
+            b = TacButton(_t("下载 AI 模型（点一下就能选）"), "secondary", height=26)
+            b.clicked.connect(self._download)
+            bar.lay.addWidget(b)
+
+    def _download(self):
+        from .ai_dl import ensure
+        if ensure(self.win, "sam", _t("对象选择「点一下就选中」")):
+            self.win.options.set_tool(self)
+            self.win.status_msg(_t("模型已就绪：点一下物体试试"))
 
     def busy(self):
         return self.a is not None
@@ -432,14 +447,30 @@ class ObjectTool(Tool):
             self.b = (x, y)
 
     def release(self, x, y, e):
+        from ...ai import matting
         if self.a is None:
             return
         a, b = self.a, self.b
         self.a = self.b = None
-        if abs(b[0] - a[0]) * self.cv.zoom < 6 or abs(b[1] - a[1]) * self.cv.zoom < 6:
+        narrow = (abs(b[0] - a[0]) * self.cv.zoom < 6, abs(b[1] - a[1]) * self.cv.zoom < 6)
+        click = all(narrow)
+        if any(narrow) and not click:                  # 拖成一条细线：不算框，也不算单击
             return
-        with _Busy(self.win, _t("正在识别主体…")):
-            m = P.object_select_doc(self.doc, (a[0], a[1], b[0], b[1]))
+        d = self.doc
+        if matting.ready("sam"):
+            if click and not (0 <= a[0] < d.width and 0 <= a[1] < d.height):
+                return
+            with _Busy(self.win, _t("正在识别…")):
+                if click:
+                    m = P.ai_object_select_doc(d, [a], [1])
+                else:
+                    m = P.ai_object_select_doc(d, box=(a[0], a[1], b[0], b[1]))
+        elif click:
+            self.win.status_msg(_t("拖一个框住物体；下载 AI 模型后点一下就能选（工具选项栏里的按钮）"))
+            return
+        else:
+            with _Busy(self.win, _t("正在识别主体…")):
+                m = P.object_select_doc(d, (a[0], a[1], b[0], b[1]))
         if not m.any():
             self.win.status_msg(_t("没有识别出主体：框得再贴近一些试试"))
             return

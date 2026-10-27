@@ -7,6 +7,12 @@
 - ocr：PaddleOCR PP-OCRv4 移动版的文字检测（4.7 MB）+ 识别（10.9 MB），RapidOCR 转成 ONNX
        —— 识别照片里的文字，「相册」里搜文字就能找到照片。来源 Hugging Face（可用镜像）。
 - expr：OpenCV Zoo 的 MobileFaceNet 表情识别（4.8 MB）—— 挑片时连拍组里找出表情不佳的。来源 GitHub。
+修图用的抠图模型（第一次用到相应功能时才提示下载，来源 Hugging Face，可用镜像）：
+- sam：Meta SAM 2.1 tiny（图像编码器 int8 量化 53 MB + 提示解码器 21 MB）—— 对象选择：点一下 / 框一下选出物体。
+       ONNX 带外部权重文件（.onnx_data），按原文件名放在 models\\sam21_tiny\\ 里。
+- subject：BiRefNet lite（fp16 版 115 MB，CPU 上和 fp32 版结果一样、速度一样）—— 选择主体、去背景。
+- portrait：MODNet（26 MB）—— 人像抠图，头发丝是半透明的。
+- sky：U²-Net 天空分割（176 MB）—— 天空替换里找天空。
 也可以手动把文件放进 models\\ 文件夹（或程序目录下的 models\\），文件名与下表一致即可。
 """
 from __future__ import annotations
@@ -27,6 +33,12 @@ HF_MIRROR = "https://hf-mirror.com"
 GH_LFS = "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models"
 GH_RAW = "https://github.com/opencv/opencv_zoo/raw/main/models"
 OCR_PATH = "SWHL/RapidOCR/resolve/main/PP-OCRv4"
+SAM_PATH = "onnx-community/sam2.1-hiera-tiny-ONNX/resolve/main/onnx"
+
+
+def _hf(path: str) -> list[str]:
+    return [f"{HF}/{path}", f"{HF_MIRROR}/{path}"]
+
 
 # 文件名 → (下载地址列表, 大概大小（字节，用于进度与校验）)
 FILES: dict[str, tuple[list[str], int]] = {
@@ -49,6 +61,15 @@ FILES: dict[str, tuple[list[str], int]] = {
         [f"{HF}/{OCR_PATH}/ch_PP-OCRv4_det_infer.onnx", f"{HF_MIRROR}/{OCR_PATH}/ch_PP-OCRv4_det_infer.onnx"], 4_745_517),
     "ch_PP-OCRv4_rec_infer.onnx": (
         [f"{HF}/{OCR_PATH}/ch_PP-OCRv4_rec_infer.onnx", f"{HF_MIRROR}/{OCR_PATH}/ch_PP-OCRv4_rec_infer.onnx"], 10_857_958),
+    "sam21_tiny/vision_encoder_quantized.onnx": (_hf(f"{SAM_PATH}/vision_encoder_quantized.onnx"), 441_167),
+    "sam21_tiny/vision_encoder_quantized.onnx_data": (_hf(f"{SAM_PATH}/vision_encoder_quantized.onnx_data"), 52_573_088),
+    "sam21_tiny/prompt_encoder_mask_decoder.onnx": (_hf(f"{SAM_PATH}/prompt_encoder_mask_decoder.onnx"), 213_114),
+    "sam21_tiny/prompt_encoder_mask_decoder.onnx_data": (_hf(f"{SAM_PATH}/prompt_encoder_mask_decoder.onnx_data"),
+                                                         20_958_208),
+    "birefnet_lite_fp16.onnx": (_hf("onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model_fp16.onnx"),
+                                114_538_221),
+    "modnet.onnx": (_hf("Xenova/modnet/resolve/main/onnx/model.onnx"), 25_888_640),
+    "skyseg.onnx": (_hf("JianyuanWang/skyseg/resolve/main/skyseg.onnx"), 175_997_079),
 }
 
 # 下载后核对的 SHA-256（取自 Hugging Face / GitHub LFS 记录的原始文件）：镜像站或网络中途被篡改的文件不会被使用
@@ -61,6 +82,15 @@ SHA256: dict[str, str] = {
         "4f61307602fc089ce20488a31d4e4614e3c9753a7d6c41578c854858b183e1a9",
     "ch_PP-OCRv4_det_infer.onnx": "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9",
     "ch_PP-OCRv4_rec_infer.onnx": "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b",
+    "sam21_tiny/vision_encoder_quantized.onnx": "8800fdd04b9045cb6060ba8962b83c78ce9bb0976da8f030afa073467a888524",
+    "sam21_tiny/vision_encoder_quantized.onnx_data":
+        "ea1f677596dc82cef0dc317d78135d892f4b26e20a4439f899aa58d84965b324",
+    "sam21_tiny/prompt_encoder_mask_decoder.onnx": "874414704c5d686db7d206a35f6e15d26563d50c8c4468fccc6739bd7e491dcf",
+    "sam21_tiny/prompt_encoder_mask_decoder.onnx_data":
+        "e9874d900dd4134ed60eab1e97910327c2419e0b2954485d8fd6e7f1a1470f47",
+    "birefnet_lite_fp16.onnx": "d39b897ceb16ae654c1731f3dba0cf9b368d9cae74b5a57459b455cc8bfec402",
+    "modnet.onnx": "07c308cf0fc7e6e8b2065a12ed7fc07e1de8febb7dc7839d7b7f15dd66584df9",
+    "skyseg.onnx": "ab9c34c64c3d821220a2886a4a06da4642ffa14d5b30e8d5339056a089aa1d39",
 }
 
 MODELS = {
@@ -75,6 +105,17 @@ MODELS = {
     "ocr": {"label": _t("文字识别（PP-OCRv4 · 照片里的文字可搜索）"),
             "files": ["ch_PP-OCRv4_det_infer.onnx", "ch_PP-OCRv4_rec_infer.onnx"],
             "optional": [], "license": _t("PaddleOCR：Apache 2.0；ONNX 转换：RapidOCR")},
+    "sam": {"label": _t("SAM 2.1 tiny（对象选择 · 点一下选出物体）"),
+            "files": ["sam21_tiny/vision_encoder_quantized.onnx", "sam21_tiny/vision_encoder_quantized.onnx_data",
+                      "sam21_tiny/prompt_encoder_mask_decoder.onnx",
+                      "sam21_tiny/prompt_encoder_mask_decoder.onnx_data"],
+            "optional": [], "license": _t("Meta SAM 2.1：Apache 2.0；ONNX 转换：onnx-community")},
+    "subject": {"label": _t("BiRefNet lite（选择主体 · 去背景）"), "files": ["birefnet_lite_fp16.onnx"],
+                "optional": [], "license": _t("BiRefNet：MIT；ONNX 转换：onnx-community")},
+    "portrait": {"label": _t("MODNet（人像抠图 · 发丝）"), "files": ["modnet.onnx"],
+                 "optional": [], "license": _t("MODNet：Apache 2.0；ONNX 转换：Xenova")},
+    "sky": {"label": _t("天空分割（U²-Net · 天空替换）"), "files": ["skyseg.onnx"],
+            "optional": [], "license": _t("Sky-Segmentation（xiongzhu666）：MIT")},
 }
 
 
@@ -137,8 +178,9 @@ def _urls(name: str, mirror: str) -> list[str]:
 
 
 def _fetch(url: str, dst: Path, done_before: int, total: int, label: str, progress: ProgressFn | None,
-           cancel: threading.Event | None) -> None:
+           cancel: threading.Event | None, key: str | None = None) -> None:
     req = urllib.request.Request(url, headers={"User-Agent": "PhotoCrate/1.4"})
+    dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_suffix(dst.suffix + ".part")
     h = hashlib.sha256()
     try:
@@ -165,7 +207,7 @@ def _fetch(url: str, dst: Path, done_before: int, total: int, label: str, progre
             head = f.read(64)
         if head.lstrip().startswith((b"<", b"version https://git-lfs")):
             raise IOError(_t("下载到的是网页或 LFS 指针，不是模型文件"))
-        want = SHA256.get(dst.name)
+        want = SHA256.get(key or dst.name)
         if want and h.hexdigest() != want:
             raise IOError(_t("下载的文件校验值不对（可能被镜像站或网络篡改），没有使用"))
         os.replace(tmp, dst)
@@ -189,7 +231,7 @@ def download(model: str, progress: ProgressFn | None = None, cancel: threading.E
         errors = []
         for url in _urls(name, mirror):
             try:
-                _fetch(url, dst, done, total, name, progress, cancel)
+                _fetch(url, dst, done, total, name, progress, cancel, name)
                 errors = []
                 break
             except InterruptedError:

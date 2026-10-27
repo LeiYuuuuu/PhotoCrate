@@ -871,6 +871,7 @@ QStatusBar QPushButton:pressed {{ background: {p.sel}; color: {p.ink}; }}
         self._act(m, _t("清除图层样式"), self.clear_style)
         m.addSeparator()
         self._act(m, _t("添加图层蒙版"), self.add_mask)
+        self._act(m, _t("去除背景"), self.remove_background)
         self._act(m, _t("删除图层蒙版"), lambda: d().delete_mask(d().active_id))
         self._act(m, _t("应用图层蒙版"), lambda: d().apply_mask(d().active_id))
         self._act(m, _t("反相蒙版"), lambda: d().invert_mask(d().active_id))
@@ -894,6 +895,7 @@ QStatusBar QPushButton:pressed {{ background: {p.sel}; color: {p.ink}; }}
         self._act(m, _t("反选"), lambda: d().invert_selection(), "Ctrl+Shift+I")
         m.addSeparator()
         self._act(m, _t("选择主体（自动）"), self.select_subject)
+        self._act(m, _t("选择人像（发丝）"), self.select_portrait)
         self._act(m, _t("色彩范围…"), self.color_range)
         self._act(m, _t("选择并遮住…"), self.select_and_mask, "Ctrl+Alt+R")
         m.addSeparator()
@@ -920,6 +922,8 @@ QStatusBar QPushButton:pressed {{ background: {p.sel}; color: {p.ink}; }}
             sub = m.addMenu(title)
             for fid in fids:
                 self._act(sub, FILTERS[fid].name + "…", lambda f=fid: self.run_filter(f))
+            if fids == ("skin",):
+                self._act(sub, _t("人像虚化…"), self.portrait_blur)
 
         m = mb.addMenu(_t("视图"))
         self._act(m, _t("放大"), lambda: self.canvas.zoom_step(True), ["Ctrl+=", "Ctrl++"])
@@ -1714,16 +1718,89 @@ QStatusBar QPushButton:pressed {{ background: {p.sel}; color: {p.ink}; }}
         self.doc.crop(*bb)
 
     def select_subject(self) -> None:
-        from ...edit.paint import object_select_doc
+        from ...ai import matting
+        from ...edit.paint import ai_matte_doc, matte_found, object_select_doc
+        from .ai_dl import ensure
         d = self.doc
-        mx, my = d.width * 0.02, d.height * 0.02
-        with _Busy(self, _t("正在识别主体…")):
-            m = object_select_doc(d, (mx, my, d.width - mx, d.height - my))
-        if not m.any():
+        if matting.ready("subject") or (not getattr(self, "_subject_old", False) and ensure(
+                self, "subject", _t("「选择主体」用 AI 模型更准（头发、毛边都能选到）："), alt=_t("先用旧方法"))):
+            with _Busy(self, _t("正在识别主体（AI，几秒钟）…")):
+                m = ai_matte_doc(d, "subject")
+        else:
+            self._subject_old = True                  # 这次不下载：本窗口里不再每次都问
+            mx, my = d.width * 0.02, d.height * 0.02
+            with _Busy(self, _t("正在识别主体…")):
+                m = object_select_doc(d, (mx, my, d.width - mx, d.height - my))
+        if not matte_found(m, 0.002):
             self.status_msg(_t("没有识别出主体：用「对象选择」工具框住它试试"))
             return
         d.set_selection(m, _t("选择主体"))
         self.status_msg(_t("已选出主体；边缘不准可以用「对象选择」工具 Shift / Alt 补选、减选"))
+
+    def select_portrait(self) -> None:
+        from ...edit.paint import ai_matte_doc, matte_found
+        from .ai_dl import ensure
+        if not ensure(self, "portrait", _t("「选择人像」")):
+            return
+        d = self.doc
+        with _Busy(self, _t("正在识别人像…")):
+            m = ai_matte_doc(d, "portrait")
+        if not matte_found(m):
+            self.status_msg(_t("没有找到人：这张照片里没有明显的人像，可以试试「选择主体」"))
+            return
+        d.set_selection(m, _t("选择人像"))
+        self.status_msg(_t("已选出人像（头发丝是半透明的）；只想虚化背景可以直接用「滤镜 → 人像 → 人像虚化」"))
+
+    def portrait_blur(self) -> None:
+        """自动认出人像，把背景做成光圈虚化（像手机的人像模式）。改的是当前图层的像素，可以撤销。"""
+        from ...edit.document import crop_canvas
+        from ...edit.paint import ai_matte_doc, matte_found, portrait_blur
+        from .ai_dl import ensure
+        d = self.doc
+        l = self._need_pixels(_t("人像虚化"))
+        if l is None or not ensure(self, "portrait", _t("「人像虚化」")):
+            return
+        with _Busy(self, _t("正在识别人像…")):
+            m = ai_matte_doc(d, "portrait")
+        if not matte_found(m):
+            self.status_msg(_t("没有找到人：这张照片里没有明显的人像，照片没有改动"))
+            return
+        v = NumberDialog.ask(self, _t("人像虚化"), _t("背景模糊半径"), max(8, round(max(d.width, d.height) / 120)), 2, 300,
+                             note=_t("人保持清晰，背景按这个半径虚化。不满意可以撤销换个半径。"))
+        if not v:
+            return
+        with _Busy(self, _t("正在虚化背景…")):
+            x, y, w, h = l.bounds(d)
+            a = crop_canvas(m, x, y, w, h, 0)
+            d.replace_pixels(l.id, portrait_blur(l.pixels, a, float(v)), _t("人像虚化"))
+        self.status_msg(_t("已虚化背景：可以撤销换个半径；想只调人或只调背景，用「选择 → 选择人像（发丝）」"))
+
+    def remove_background(self) -> None:
+        """给当前图层加一个蒙版，只露出主体（和 PS 的「移除背景」一样，蒙版可以再用画笔修）。"""
+        from ...edit.document import crop_canvas
+        from ...edit.paint import ai_matte_doc, matte_found
+        from .ai_dl import ensure
+        d = self.doc
+        l = d.active
+        if l is None or not l.has_pixels or l.kind == "text":
+            self.status_msg(_t("先在图层面板里选中照片所在的图层"))
+            return
+        if l.mask is not None:
+            self.status_msg(_t("这个图层已经有蒙版了：先删除或应用蒙版，再去除背景"))
+            return
+        if not ensure(self, "subject", _t("「去除背景」")):
+            return
+        with _Busy(self, _t("正在识别主体（AI，几秒钟）…")):
+            m = ai_matte_doc(d, "subject")
+        if not matte_found(m, 0.002):
+            self.status_msg(_t("没有识别出主体，背景没有去掉"))
+            return
+        with d.edit(_t("去除背景")):
+            x, y, w, h = l.bounds(d)
+            l.mask = crop_canvas(m, x, y, w, h, 0)
+            l.mask_enabled = True
+            l.touch_mask()
+        self.status_msg(_t("已去除背景（加了图层蒙版，原图像素没动）：用黑 / 白画笔在蒙版上修边，或「应用图层蒙版」"))
 
     def _sel_number(self, title: str, label: str, default: int, fn) -> None:
         if self.doc.selection is None:

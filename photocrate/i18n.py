@@ -39,6 +39,8 @@ def set_language(lang: str | None) -> str:
         table.update(EN_EXTRAS)          # 闭眼 / 表情、隐藏、批量编辑、隐私体检、手机互传
         from .locale_en_ui import EN_UI
         table.update(EN_UI)              # 界面简化：顶栏、导航、修图右侧面板
+        from .locale_en_matting import EN_MATTING
+        table.update(EN_MATTING)         # 修图 AI 抠图：对象选择、选择主体 / 人像、去除背景、人像虚化、天空
         table.update(EN)
         _EN = table
     return LANG
