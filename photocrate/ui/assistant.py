@@ -10,16 +10,16 @@ from __future__ import annotations
 import html
 from urllib.parse import quote, unquote
 
-from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                               QTextBrowser, QVBoxLayout)
+                               QTextBrowser, QVBoxLayout, QWidget)
 
-from ..assist import llm, secrets
+from ..assist import chatgpt, llm, secrets
 from ..assist.engine import Answer, Assistant, Plan
 from ..assist.features import BY_ID, DESCRIPTIVE, PHOTOS, STUDIO, Feature
 from . import theme
-from .assistant_llm import Job, LLMDialog, label as llm_label, thumbnail_jpeg
+from .assistant_llm import Job, LLMDialog, chatgpt_logo, label as llm_label, open_usage, thumbnail_jpeg
 from .theme import font
 from .widgets.deco import TacButton
 from ..i18n import t as _t
@@ -61,6 +61,8 @@ class AssistantPanel(QFrame):
 #AssistantPanel QPushButton#model {{ background: {p.bg}; color: {p.ink2}; border: 1px solid {p.line}; border-radius: 10px;
     padding: 1px 8px; font-size: 8.5pt; }}
 #AssistantPanel QPushButton#model:hover {{ color: {p.ink}; border-color: {p.accent}; }}
+#AssistantPanel QPushButton#usage {{ background: transparent; color: {p.ink}; border: none; font-size: 8.5pt;
+    text-decoration: underline; }}
 """)
         sh = QGraphicsDropShadowEffect(self)
         sh.setBlurRadius(28)
@@ -101,6 +103,25 @@ class AssistantPanel(QFrame):
         self.view.setFont(font("cn", 9.5))
         lay.addWidget(self.view, 1)
 
+        self.plan_row = QWidget()                       # 请求走 ChatGPT 计划时显示（OpenAI 的界面要求）
+        pr = QHBoxLayout(self.plan_row)
+        pr.setContentsMargins(0, 0, 0, 0)
+        pr.setSpacing(6)
+        logo = QLabel()
+        logo.setPixmap(chatgpt_logo(p.ink).pixmap(QSize(14, 14)))
+        pr.addWidget(logo)
+        plan_text = QLabel("Using ChatGPT plan")
+        plan_text.setFont(font("cn", 8.5))
+        pr.addWidget(plan_text)
+        self.b_usage = QPushButton("Manage usage")
+        self.b_usage.setObjectName("usage")
+        self.b_usage.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.b_usage.setToolTip(chatgpt.USAGE_URL)
+        self.b_usage.clicked.connect(lambda: open_usage())
+        pr.addWidget(self.b_usage)
+        pr.addStretch(1)
+        lay.addWidget(self.plan_row)
+
         row = QHBoxLayout()
         row.setSpacing(6)
         self.input = QLineEdit()
@@ -114,6 +135,7 @@ class AssistantPanel(QFrame):
         lay.addLayout(row)
         self.cfg = llm.load_config(main.ctx.settings)
         self.b_model.setText(llm_label(self.cfg))
+        self.update_plan_row()
         self.clear()
         self.hide()
         main.installEventFilter(self)
@@ -169,7 +191,13 @@ class AssistantPanel(QFrame):
         if d.exec():
             self.cfg = llm.load_config(self.main.ctx.settings)
             self.b_model.setText(llm_label(self.cfg))
+            self.update_plan_row()
             self._say(_t("之后的问题由 {0} 回答。", llm_label(self.cfg)))
+
+    def update_plan_row(self) -> None:
+        on = llm.uses_chatgpt(self.cfg, self.cfg.get("provider"))
+        acc = chatgpt.current() if on else None
+        self.plan_row.setVisible(bool(acc and acc.sharing))
 
     def clear(self) -> None:
         self.plans.clear()
@@ -219,9 +247,16 @@ class AssistantPanel(QFrame):
         def finish(ans, err=None):
             self._job = None
             self.input.setEnabled(True)
+            self.update_plan_row()
             if err is not None:
-                fail = (f"<p style='margin:4px 0; color:{p.danger}'>{html.escape(_t('{0} 没有回答成功：', name) + err)}"
-                        f"</p><p style='margin:2px 0; color:{p.ink3}'>{_t('先看本地助手的回答：')}</p>")
+                if getattr(job.error, "action", "") == "manage_usage":     # 主操作是 Manage usage，不猜恢复时间
+                    fail = (f"<p style='margin:4px 0'><b>ChatGPT · Usage limit reached</b><br>"
+                            f"{html.escape(_t('你的 ChatGPT 计划或影匣这个应用的用量上限到了，请到 ChatGPT 设置里查看。'))} "
+                            f"<a href='usage:'>Manage usage</a></p>"
+                            f"<p style='margin:2px 0; color:{p.ink3}'>{_t('先看本地助手的回答：')}</p>")
+                else:
+                    fail = (f"<p style='margin:4px 0; color:{p.danger}'>{html.escape(_t('{0} 没有回答成功：', name) + err)}"
+                            f"</p><p style='margin:2px 0; color:{p.ink3}'>{_t('先看本地助手的回答：')}</p>")
                 self._html[slot] = fail + self._render(local)
                 self._remember(q, local)
             else:
@@ -343,6 +378,8 @@ class AssistantPanel(QFrame):
         kind, _, arg = s.partition(":")
         if kind == "ask":
             self.ask(unquote(arg))
+        elif kind == "usage":
+            open_usage()
         elif kind == "go" and arg in BY_ID:
             self._go(BY_ID[arg])
         elif kind == "apply":

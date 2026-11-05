@@ -1,6 +1,7 @@
-"""大模型 API Key 的本地保存：单独一个文件（不进 settings.json），Windows 上用 DPAPI 加密（只有当前 Windows 用户能解开）。
+"""大模型 API Key 和登录令牌的本地保存：单独的文件（不进 settings.json），Windows 上用 DPAPI 加密（只有当前 Windows 用户能解开）。
 
 其他系统没有 DPAPI，退回 base64（只是不明文显示，不算加密），界面上会说明。也可以不保存，改用环境变量。
+文件都是原子写入，非 Windows 上权限是 0600。
 """
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ import base64
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 ENV = {"claude": "ANTHROPIC_API_KEY", "deepseek": "DEEPSEEK_API_KEY", "openai": "OPENAI_API_KEY",
@@ -88,7 +90,39 @@ def set_key(provider: str, key: str) -> None:
         data[provider] = _protect(key.encode("utf-8"))
     else:
         data.pop(provider, None)
-    p = _path()
+    _write_private(_path(), json.dumps(data, indent=1))
+
+
+def _write_private(p: Path, text: str) -> None:
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=1), "utf-8")
-    os.replace(tmp, p)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+        f.write(text)
+    for attempt in range(20):                # Windows 上别的线程正在读时替换会失败，等一下就好
+        try:
+            os.replace(tmp, p)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.05)
+
+
+def _blob_path(name: str) -> Path:
+    from ..config import user_data_dir
+    return user_data_dir() / f"assistant_{name}.dat"
+
+
+def get_blob(name: str) -> str:
+    """单独一个文件保存的敏感文本（比如登录令牌）。没有或解不开（换了 Windows 用户）都返回空字符串。"""
+    try:
+        return _unprotect(_blob_path(name).read_text("utf-8").strip()).decode("utf-8")
+    except Exception:
+        return ""
+
+
+def set_blob(name: str, text: str) -> None:
+    if text:
+        _write_private(_blob_path(name), _protect(text.encode("utf-8")))
+    else:
+        _blob_path(name).unlink(missing_ok=True)

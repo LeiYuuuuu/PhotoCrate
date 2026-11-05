@@ -277,6 +277,152 @@ def main(out: str, theme_name: str = "light") -> int:
                 log("订阅：四种客户端状态的提示、保存设置、提问走客户端")
             finally:
                 clients.status, clients.complete = real
+
+            # ---- ChatGPT 账号：假的 OpenAI 登录服务，浏览器也是假的（真实登录由用户本人在浏览器里做）----
+            from types import SimpleNamespace
+
+            from fake_llm import ChatGPTServer
+            from photocrate.assist import chatgpt
+            from photocrate.ui import assistant_llm
+            cg = ChatGPTServer()
+            opened = []
+            real_cg = (chatgpt.ENDPOINTS, chatgpt._open_browser, chatgpt.CALLBACK_PORT, assistant_llm.QDesktopServices)
+            chatgpt.ENDPOINTS, chatgpt._open_browser, chatgpt.CALLBACK_PORT = cg.endpoints(), cg.browser, 0
+            assistant_llm.QDesktopServices = SimpleNamespace(openUrl=lambda u: opened.append(u.toString()))
+
+            def wait(cond):
+                for _ in range(300):
+                    if cond():
+                        return True
+                    yield 20
+                return False
+
+            try:
+                s.set("assistant_llm", {"provider": "openai", "auth": {"openai": "chatgpt"}, "send_image": False})
+                dlg = LLMDialog(win, s)
+                dlg.show()
+                dlg.resize(560, 680)                     # 无界面模式的“屏幕”只有 800 高，窗口被限制在 533
+                yield 150
+                assert dlg.auth.count() == 3 and dlg.auth.currentData() == "chatgpt" and dlg.cg_box.isVisible()
+                assert dlg.b_cg_login.isVisible() and dlg.b_cg_login.text() == "Continue with ChatGPT"
+                assert not dlg.b_cg_login.icon().isNull()
+                assert not dlg.key.isVisible() and not dlg.base.isVisible() and not dlg.cg_plan.isVisible()
+                assert "Use your ChatGPT plan" in dlg.cg_state.text()
+                assert dlg.b_cg_login.height() == 45 and dlg.cg_box.height() >= dlg.cg_state.height() + 45    # 没有被挤扁
+                assert not dlg.key_label.isVisible()
+                shot("assist_12_chatgpt_signed_out", dlg)
+                dlg.provider.setCurrentIndex(dlg.provider.findData("claude"))     # Claude 没有内置登录
+                yield 50
+                assert dlg.auth.findData("chatgpt") < 0 and not dlg.cg_box.isVisible()
+                dlg.provider.setCurrentIndex(dlg.provider.findData("openai"))
+                yield 50
+                assert dlg.auth.currentData() == "chatgpt"
+
+                cg.browser_opened = False                                       # 浏览器打不开时给出原因
+                dlg.b_cg_login.click()
+                yield from wait(lambda: dlg._login_job is None)
+                assert "浏览器" in dlg.status.text() and dlg.b_cg_login.isVisible(), dlg.status.text()
+                cg.browser_opened = True
+
+                dlg.b_cg_login.click()
+                assert dlg.b_cg_cancel.isVisible() or dlg._login_job is None
+                yield from wait(lambda: dlg._login_job is None and dlg.cg_plan.isVisible())
+                assert "已连接" in dlg.cg_state.text() and "alice@example.com" in dlg.cg_state.text(), dlg.cg_state.text()
+                assert dlg.cg_plan.isVisible() and not dlg.b_cg_login.isVisible() and dlg.b_cg_out.isVisible()
+                assert dlg.b_cg_usage.text() == "Manage usage"
+                dlg.resize(560, 680)
+                yield 50
+                assert dlg.cg_box.height() >= dlg.cg_plan.height() + dlg.b_cg_out.height()
+                assert dlg._welcome is not None and dlg._welcome.isVisible()    # 第一次登录说明一次
+                assert dlg._welcome.windowTitle() == "You're using your ChatGPT plan"
+                shot("assist_13_chatgpt_welcome", dlg._welcome)
+                dlg._welcome.accept()
+                yield from wait(lambda: dlg.model.findData("gpt-fake") >= 0)
+                assert dlg.model.itemText(dlg.model.findData("gpt-fake")) == "GPT Fake"        # 显示名称，实际用 slug
+                assert dlg.model.findData("gpt-hidden") < 0 and dlg.model.currentData() == "gpt-fake"
+                dlg.model.setCurrentIndex(dlg.model.findData("gpt-fake"))
+                shot("assist_14_chatgpt_connected", dlg)
+                dlg.b_cg_usage.click()
+                assert opened == ["https://chatgpt.com/settings/usage"], opened
+
+                dlg.b_test.click()
+                yield from wait(lambda: dlg._job is None and "连接正常" in dlg.status.text())
+                assert "连接正常" in dlg.status.text(), dlg.status.text()
+                req = [r for r in cg.requests if r["path"] == "/v1/responses"][-1]["body"]
+                assert req["store"] is False and req["stream"] is True and req["model"] == "gpt-fake"
+                dlg._save()
+                yield 100
+                saved = s.get("assistant_llm")
+                assert saved["auth"]["openai"] == "chatgpt" and saved["chatgpt_model"] == "gpt-fake"
+                assert "access-" not in str(saved) and "refresh-" not in str(saved)
+
+                panel.cfg = llm.load_config(s)
+                panel.update_plan_row()
+                panel.b_model.setText(llm_label(panel.cfg))
+                assert llm_label(panel.cfg) == "ChatGPT plan · gpt-fake" and panel.plan_row.isVisibleTo(panel)
+                panel.ask("曲线在哪")
+                yield from wait(lambda: panel._job is None)
+                text = panel.view.toPlainText()
+                assert "gpt-fake" in text and "ChatGPT plan" in text and "魔术橡皮" in text, text[-400:]
+                shot("assist_15_chatgpt_answer", panel)
+
+                panel.cfg["chatgpt_model"] = "usage-limit"
+                panel.ask("色阶在哪")
+                yield from wait(lambda: panel._job is None)
+                text = panel.view.toPlainText()
+                assert "Usage limit reached" in text and "Manage usage" in text and "先看本地助手的回答" in text, text[-400:]
+                shot("assist_16_chatgpt_limit", panel)
+                opened.clear()
+                panel._link(QUrl("usage:"))
+                panel.b_usage.click()
+                assert opened == ["https://chatgpt.com/settings/usage"] * 2
+                log("ChatGPT 账号：登录、已连接、Using ChatGPT plan、Manage usage、提问、额度用完")
+
+                # 登录过期（refresh token 不能用了）：设置里回到 Continue with ChatGPT，client ID 留着
+                st = chatgpt._load()
+                st["accounts"][st["active"]]["expires_at"] = 0
+                chatgpt._save(st)
+                cg.refresh_error = (400, "refresh_token_expired")
+                panel.cfg["chatgpt_model"] = "gpt-fake"
+                panel.ask("色阶在哪")
+                yield from wait(lambda: panel._job is None)
+                assert "没有回答成功" in panel.view.toPlainText() and not panel.plan_row.isVisibleTo(panel)
+                cg.refresh_error = None
+                dlg = LLMDialog(win, s)
+                dlg.show()
+                yield 100
+                assert dlg.b_cg_login.isVisible() and not dlg.cg_plan.isVisible() and dlg.b_cg_other.isVisible()
+                dlg.b_cg_login.click()
+                yield from wait(lambda: dlg._login_job is None and dlg.cg_plan.isVisible())
+                assert dlg.cg_plan.isVisible() and dlg._welcome is None         # 第二次不再说明
+                assert cg.authorize_queries[-1]["client_id"] == "oaiapp_fakeclient1"
+                dlg._cg_cancel()
+
+                # 没授权计划：不发送，按钮用来授权
+                cg.grant_scope = "openid profile email offline_access"
+                dlg.b_cg_other.click()
+                yield from wait(lambda: dlg._login_job is None and "没有授权" in dlg.cg_state.text())
+                assert "没有授权" in dlg.cg_state.text() and dlg.b_cg_login.isVisible() and not dlg.cg_plan.isVisible()
+                assert dlg.cg_accounts.count() == 1 or dlg.cg_accounts.isVisible()
+                cg.grant_scope = "chatgpt.tokens.use.direct email offline_access openid profile resource.invoke"
+                dlg.b_cg_login.click()
+                yield from wait(lambda: dlg._login_job is None and dlg.cg_plan.isVisible())
+                assert cg.authorize_queries[-1].get("prompt") == "consent"
+
+                # 退出：本地令牌清掉，client ID 留着
+                dlg.b_cg_out.click()
+                yield from wait(lambda: dlg._out_job is None and dlg.b_cg_login.isVisible())
+                assert dlg.b_cg_login.isVisible() and "已退出" in dlg.status.text(), dlg.status.text()
+                dlg.resize(560, 680)
+                yield 50
+                shot("assist_17_chatgpt_signed_out_again", dlg)
+                dlg.reject()
+                panel.update_plan_row()
+                assert not panel.plan_row.isVisibleTo(panel)
+                log("ChatGPT 账号：过期重登、没授权计划、重新授权、退出登录")
+            finally:
+                chatgpt.ENDPOINTS, chatgpt._open_browser, chatgpt.CALLBACK_PORT, assistant_llm.QDesktopServices = real_cg
+                cg.close()
         finally:
             srv.close()
             secrets.set_key("claude", "")

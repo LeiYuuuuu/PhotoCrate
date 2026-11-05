@@ -57,6 +57,7 @@ BY_PID = {p.id: p for p in PROVIDERS}
 DEFAULT_CONFIG = {"provider": "local", "models": {}, "base_urls": {}, "send_image": False,
                   "auth": {}, "client_models": {}, "client_paths": {}}
 SUBSCRIPTION_PIDS = ("claude", "openai")     # 能用订阅（通过官方客户端，见 clients.py）的服务商
+CHATGPT_PIDS = ("openai",)                   # 能在影匣里用 ChatGPT 账号登录（见 chatgpt.py）的服务商；Claude 不允许这样做
 
 
 def load_config(settings) -> dict:
@@ -67,6 +68,10 @@ def load_config(settings) -> dict:
 
 def uses_subscription(cfg: dict, pid: str) -> bool:
     return pid in SUBSCRIPTION_PIDS and (cfg.get("auth") or {}).get(pid) == "subscription"
+
+
+def uses_chatgpt(cfg: dict, pid: str) -> bool:
+    return pid in CHATGPT_PIDS and (cfg.get("auth") or {}).get(pid) == "chatgpt"
 
 
 def model_of(cfg: dict, pid: str) -> str:
@@ -465,6 +470,11 @@ def ask(cfg: dict, key: str, question: str, local: Answer | None, stats: PhotoSt
         history=(), image: bytes | None = None) -> Answer:
     pid = cfg["provider"]
     user = user_prompt(question, local, stats, mode, history, image is not None)
+    if uses_chatgpt(cfg, pid):
+        from . import chatgpt                                       # 只用 ChatGPT 计划，失败也不会改走 API Key
+        model = chatgpt.model_of(cfg)
+        text, notes = chatgpt.complete(model, system_prompt(), user, image)
+        return ground(parse_json(text), f"{BY_PID[pid].name} · {model} · ChatGPT plan", notes)
     if uses_subscription(cfg, pid):
         from . import clients                                       # clients 依赖本模块，放这里避免循环导入
         model = clients.model_of(cfg, pid)

@@ -260,9 +260,9 @@ AI 全部在本机离线运行；模型首次使用时下载到用户数据目�
 | 天空 `edit/sky.py` | `detect` 有模型就走 `detect_model`：概率图去掉小于画面 0.2% 的小块，再用原来的导向滤波按树梢、楼顶精修；没有模型仍是颜色 / 梯度规则 |
 | 界面 `ui/editor/` | 对象选择工具：两个方向都小于 6 屏幕像素算单击（点提示），否则算框，细长一条忽略；没模型时单击只提示，选项栏有下载按钮。「选择主体（自动）」有模型用 BiRefNet，否则问一次（选「先用旧方法」后本窗口不再问）。新菜单：选择 → 选择人像（发丝）；图层 → 去除背景（给当前图层加蒙版，一步 `Document.edit`、可撤销）；滤镜 → 人像 → 人像虚化…（先确认有人再问半径，走 `replace_pixels`）。天空替换对话框没模型时有「用 AI 模型找天空」按钮 |
 | 选型 | 在本机照片上比：SAM int8 / fp32 框选结果与 BiRefNet 主体的 IoU 0.885 / 0.881、编码 0.45–1 s，用 int8；BiRefNet fp16 与 fp32 输出最大差 0.02、CPU 上同样 3–6 s，用 fp16（115 MB）。不用 RMBG（CC BY-NC）和 SAM 3（SAM License、8.48 亿参数） |
-| 小匣助手 `assist/` + `ui/assistant.py` | 确定性的本地问答（不用大模型）：`features.py` 约 120 个功能条目（界面路径、用法、同义词、“带我去”动作），`effects.py` 调色词典（方向 + 强度，叠加成调整图层参数），`photo.py` 按直方图 / 灰世界偏色收放幅度，`engine.Assistant.ask()` 是唯一入口。可选大模型后端 `assist/llm.py`（urllib 直连；输出用 JSON schema 限定功能 id / 滑块键，`ground()` 再校验、越界截断，失败退回本地），Key 存在 `assist/secrets.py`（Windows 上 DPAPI）。Claude / GPT 也可以走订阅：`assist/clients.py` 启动用户自己安装并登录的 Claude Code / Codex（关掉工具和用户配置，问题走 stdin，发送前确认是订阅登录），影匣不读取、不保存任何登录凭据；Anthropic 不允许第三方应用自己接 Claude 账号登录，所以不做内置登录。顶栏「助手」/ Ctrl+K；测试核对知识库里的每个界面文字都真实存在 |
+| 小匣助手 `assist/` + `ui/assistant.py` | 确定性的本地问答（不用大模型）：`features.py` 约 120 个功能条目（界面路径、用法、同义词、“带我去”动作），`effects.py` 调色词典（方向 + 强度，叠加成调整图层参数），`photo.py` 按直方图 / 灰世界偏色收放幅度，`engine.Assistant.ask()` 是唯一入口。可选大模型后端 `assist/llm.py`（urllib 直连；输出用 JSON schema 限定功能 id / 滑块键，`ground()` 再校验、越界截断，失败退回本地），Key 存在 `assist/secrets.py`（Windows 上 DPAPI）。GPT 还可以直接用 ChatGPT 账号登录：`assist/chatgpt.py` 按 OpenAI 的 Sign in with ChatGPT（ChatGPT plan usage）走 loopback + PKCE，动态注册影匣自己的 client ID，标准库自验 ID token（RS256），令牌用 DPAPI 单独保存，请求是 `store: false`、`stream: true` 的 Responses API，读到 `response.completed` 才算成功，输出同样走 `ground()`，失败不改走 API Key。Claude / GPT 也可以走订阅：`assist/clients.py` 启动用户自己安装并登录的 Claude Code / Codex（关掉工具和用户配置，问题走 stdin，发送前确认是订阅登录），影匣不读取、不保存任何登录凭据；Anthropic 不允许第三方应用自己接 Claude 账号登录，所以不做内置登录。顶栏「助手」/ Ctrl+K；测试核对知识库里的每个界面文字都真实存在 |
 
-测试：`tests/test_matting.py`（设 `PHOTOCRATE_MODELS` 才跑用到模型的几项）、`tests/ui_matting.py`（可以传一张真实照片）；小匣助手 `tests/test_assist.py`、`tests/test_assist_llm.py`、`tests/test_assist_clients.py`、`tests/ui_assist.py`。
+测试：`tests/test_matting.py`（设 `PHOTOCRATE_MODELS` 才跑用到模型的几项）、`tests/ui_matting.py`（可以传一张真实照片）；小匣助手 `tests/test_assist.py`、`tests/test_assist_llm.py`、`tests/test_assist_clients.py`、`tests/test_assist_chatgpt.py`、`tests/ui_assist.py`。
 
 ## 9.6 合并曝光（edit/hdr.py + ui/editor/merge.py）
 
@@ -424,7 +424,7 @@ PhotoCrate/
 │  ├─ ai/          models clip scenes faces people service visual ocr ocrindex（ocr = 照片里的文字）faceq（连拍里的闭眼 / 表情）
 │  │               matting（修图抠图：SAM / BiRefNet / MODNet / 天空）
 │  ├─ lan/         server page（手机互传：局域网网页服务）
-│  ├─ assist/      engine features effects photo text llm clients secrets（小匣助手）
+│  ├─ assist/      engine features effects photo text llm clients chatgpt secrets（小匣助手）
 │  ├─ analyzers/   base builtin
 │  ├─ partition/   base dimensions engine
 │  ├─ ops/         planner mover journal pathsafe xmpwrite cleanup trashbin renamer
