@@ -195,6 +195,7 @@
 
 ## 七、数据与许可
 
+- 影匣自己的代码以 [MIT 许可证](LICENSE) 开源。下面列出的第三方数据、模型和程序不在 MIT 范围内，按各自的许可使用。`assets/chatgpt-logo-white.svg` 是 OpenAI 的标志，商标归 OpenAI，只用来标示「用 ChatGPT 登录」。
 - ExifTool © Phil Harvey（Perl Artistic / GPL），运行时下载，不随源码分发。
 - 国内行政区划来自 GeoToolCN（代码 MIT），其边界数据源自 DataV.GeoAtlas / 高德开放平台，声明“仅供学习交流使用”——个人使用没问题，**如需商业分发请先取得授权**。
 - 海外城市数据：GeoNames（CC BY 4.0），见 `data\geonames_cities1000.csv.gz`（人口字段来自 geonamescache，MIT）。

@@ -226,6 +226,7 @@ Exports only write new files; originals are never touched.
 
 ## 7. Data & third-party licenses
 
+- PhotoCrate's own code is open source under the [MIT License](LICENSE). The third-party data, models and programs listed below are not covered by it and keep their own terms. `assets/chatgpt-logo-white.svg` is an OpenAI mark, owned by OpenAI and used only to identify signing in with ChatGPT.
 - ExifTool © Phil Harvey (Perl Artistic / GPL), downloaded at run time and not distributed with the source.
 - Chinese administrative divisions come from GeoToolCN (code: MIT). Its boundary data is derived from DataV.GeoAtlas / AMap Open Platform and is marked "for learning and exchange only": fine for personal use, but **obtain permission before any commercial distribution**.
 - Cities outside China: GeoNames (CC BY 4.0), in `data\geonames_cities1000.csv.gz`; the population field comes from geonamescache (MIT). English country names come from Qt's locale data.
