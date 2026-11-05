@@ -54,13 +54,19 @@ PROVIDERS: list[Provider] = [
 ]
 BY_PID = {p.id: p for p in PROVIDERS}
 
-DEFAULT_CONFIG = {"provider": "local", "models": {}, "base_urls": {}, "send_image": False}
+DEFAULT_CONFIG = {"provider": "local", "models": {}, "base_urls": {}, "send_image": False,
+                  "auth": {}, "client_models": {}, "client_paths": {}}
+SUBSCRIPTION_PIDS = ("claude", "openai")     # 能用订阅（通过官方客户端，见 clients.py）的服务商
 
 
 def load_config(settings) -> dict:
     cfg = dict(DEFAULT_CONFIG)
     cfg.update(settings.get("assistant_llm", {}) or {})
     return cfg
+
+
+def uses_subscription(cfg: dict, pid: str) -> bool:
+    return pid in SUBSCRIPTION_PIDS and (cfg.get("auth") or {}).get(pid) == "subscription"
 
 
 def model_of(cfg: dict, pid: str) -> str:
@@ -458,8 +464,12 @@ def ground(d: dict, source: str, extra_notes=()) -> Answer:
 def ask(cfg: dict, key: str, question: str, local: Answer | None, stats: PhotoStats | None, mode: int,
         history=(), image: bytes | None = None) -> Answer:
     pid = cfg["provider"]
+    user = user_prompt(question, local, stats, mode, history, image is not None)
+    if uses_subscription(cfg, pid):
+        from . import clients                                       # clients 依赖本模块，放这里避免循环导入
+        model = clients.model_of(cfg, pid)
+        text, notes = clients.complete(pid, model, clients.path_of(cfg, pid), system_prompt(), user, image)
+        return ground(parse_json(text), f"{BY_PID[pid].name} · {model}（订阅）", notes)
     model = model_of(cfg, pid)
-    text, notes = complete(pid, model, key, system_prompt(), user_prompt(question, local, stats, mode, history,
-                                                                         image is not None),
-                           image, base_of(cfg, pid))
+    text, notes = complete(pid, model, key, system_prompt(), user, image, base_of(cfg, pid))
     return ground(parse_json(text), f"{BY_PID[pid].name} · {model}", notes)

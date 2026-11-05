@@ -225,6 +225,58 @@ def main(out: str, theme_name: str = "light") -> int:
             assert "没有回答成功" in text and "API Key 无效" in text and "先看本地助手的回答" in text, text[-400:]
             shot("assist_09_llm_fallback", panel)
             log("大模型失败（Key 无效）时显示原因，并退回本地回答")
+
+            # ---- 订阅：用假的客户端状态走一遍设置界面和提问 ----
+            from photocrate.assist import clients
+            from photocrate.ui.assistant_llm import label as llm_label
+            real = clients.status, clients.complete
+            states = [(clients.Status(), "没找到 Claude Code"),
+                      (clients.Status("claude.exe"), "还没登录"),
+                      (clients.Status("claude.exe", True, False, "console"), "不是 Claude 订阅"),
+                      (clients.Status("claude.exe", True, True, "max"), "已登录 Claude 订阅（max）")]
+            try:
+                dlg = LLMDialog(win, s)
+                dlg.show()
+                yield 100
+                assert dlg.auth.isVisible() and dlg.auth.count() == 2 and not dlg.client_state.isVisible()
+                dlg.provider.setCurrentIndex(dlg.provider.findData("deepseek"))
+                yield 50
+                assert not dlg.auth.isVisible() and dlg.key.isVisible()         # 其他服务商没有订阅连接
+                dlg.provider.setCurrentIndex(dlg.provider.findData("claude"))
+                yield 50
+                for st, word in states:
+                    clients.status = lambda *_a, st=st: st
+                    dlg.auth.setCurrentIndex(0)
+                    dlg.auth.setCurrentIndex(1)
+                    for _ in range(50):
+                        if word in dlg.client_state.text():
+                            break
+                        yield 20
+                    assert word in dlg.client_state.text(), dlg.client_state.text()
+                    assert not dlg.key.isVisible() and dlg.b_login.isVisible()
+                    assert dlg.b_login.isEnabled() == (st.exe is not None)
+                assert dlg.model.currentText() == "sonnet" and dlg.base_label.text() == "客户端路径"
+                shot("assist_10_subscription", dlg)
+                dlg._save()
+                yield 100
+                saved = s.get("assistant_llm")
+                assert saved["auth"]["claude"] == "subscription" and saved["client_models"]["claude"] == "sonnet"
+                assert saved["models"]["claude"]                               # API 那套设置还在
+                panel.cfg = llm.load_config(s)
+                assert llm_label(panel.cfg) == "Claude 订阅 · sonnet"
+                clients.complete = lambda *_a, **_k: (
+                    '{"reply": "曲线在调整图层里", "features": ["curves"], "params": [], "steps": []}', [])
+                panel.ask("曲线在哪")
+                for _ in range(100):
+                    if panel._job is None:
+                        break
+                    yield 100
+                text = panel.view.toPlainText()
+                assert "曲线在调整图层里" in text and "订阅" in text, text[-400:]
+                shot("assist_11_subscription_answer", panel)
+                log("订阅：四种客户端状态的提示、保存设置、提问走客户端")
+            finally:
+                clients.status, clients.complete = real
         finally:
             srv.close()
             secrets.set_key("claude", "")
